@@ -22,6 +22,7 @@ just call npm directly:
 npm run build              # both passes + dist validation → dist/
 npm run check              # validate dist/ alone
 npm run check:schedule     # the schedule date maths
+npm run check:matching     # AniList title matching rules (offline)
 npm run typecheck          # vue-tsc, must stay clean
 npm run probe -- lmanime   # run a source against the live site
 PROBE_SERVER=3 npm run probe -- lmanime   # exercise one video host
@@ -153,6 +154,35 @@ routine to decode its `window.__cfg` blob — decoding that to valid JSON is how
 confirm the scheme on a sibling site rather than guess. Every `ajax/*` endpoint
 answers with a `{status, result}` envelope; parsing the envelope as markup finds
 nothing and looks exactly like a selector that broke, so unwrap first.
+
+## Domains and trackers
+
+**Domain resolution** (`background/domains.ts`) reads a source's `domainSource`
+announcement page, keeps hosts whose registrable name shares a brand token with a
+known domain, health-checks them (2xx *and* the body mentions the brand — a
+parked domain returns 200 too), and promotes the first that answers. A user's
+pinned domain always wins.
+
+This is cheap only because identity never comes from a URL: a move rewrites
+navigation links and touches nothing about what was watched. Verified against
+anikoto.site, which lists five live domains alongside Google Fonts, Telegram and
+Reddit links — the token test keeps the five and drops the rest.
+
+**AniList** (`trackers/`) is read-only and needs no sign-in. `matching.ts` is pure
+— no storage, no settings — so the scoring rules are testable; `match.ts` holds
+the parts that touch IndexedDB. Two rules earn their keep:
+
+- The **search query** is cleaned but the **score** is not. AniList returns
+  nothing for "… Season 05" and everything for the same title without it, so the
+  season marker comes out of the query — and goes back into scoring, where a
+  season mismatch is capped below the auto-link threshold. Season 5 linking
+  silently to season 1 would attach the wrong air schedule with nothing in the UI
+  to suggest it.
+- Auto-linking needs 0.9 confidence. Below that the series stays unmatched and
+  visibly so, which is far better than a confidently wrong poster.
+
+Air times feed the `airing` schedule policy. No data, or a date already past the
+pad window, degrades to the fallback interval rather than never checking.
 
 ## Editing these files
 

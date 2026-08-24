@@ -55,11 +55,20 @@ function computeNext(policy: SchedulePolicy, anime: TrackedAnime, now: number): 
             return from + (Math.floor(elapsed / period) + 1) * period
         }
 
-        case "airing":
-            // Airing data arrives with the AniList work. Until then this degrades
-            // to plain polling rather than silently never checking.
-            logger.debug(`${anime.key}: no airing data yet, falling back to ${policy.fallbackHours}h`)
-            return (anime.lastCheckedAt || now) + Math.max(0.25, policy.fallbackHours) * HOUR
+        case "airing": {
+            const airing = anime.airing
+            // No tracker data, or a date that has already passed and not been
+            // refreshed: fall back to plain polling rather than never checking.
+            if (!airing || airing.at + policy.padAfterMin * MINUTE < now) {
+                logger.debug(`${anime.key}: no usable airing time, falling back to ${policy.fallbackHours}h`)
+                return (anime.lastCheckedAt || now) + Math.max(0.25, policy.fallbackHours) * HOUR
+            }
+
+            // Start looking shortly before it airs — sites publish early as often
+            // as late — and if that moment has already passed, look now.
+            const from = airing.at - policy.padBeforeMin * MINUTE
+            return Math.max(from, now)
+        }
 
         case "inherit":
             // resolveSchedule already collapsed inherit; a stray one means the

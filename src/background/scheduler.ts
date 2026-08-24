@@ -4,6 +4,8 @@ import type { TrackedAnime } from "~/model/types"
 import { refreshSeries } from "~/library/library"
 import { nextCheckAt } from "./schedule"
 import { notifyNewEpisodes } from "./notifications"
+import { resolveAllDomains } from "./domains"
+import { enrich } from "~/trackers/match"
 import { refreshBadge } from "./badge"
 import { cachedSettings } from "~/settings/storage"
 import { resolve, resolveSchedule } from "~/settings/resolver"
@@ -28,6 +30,9 @@ export function installScheduler() {
     browser.alarms.onAlarm.addListener(alarm => {
         if (alarm.name !== TICK_ALARM) return
         void runDueChecks().catch(error => logger.error("check run failed", error))
+        // Piggybacks on the same tick; resolveAllDomains decides for itself
+        // whether enough time has passed, so this costs nothing most minutes.
+        void resolveAllDomains().catch(error => logger.error("domain check failed", error))
     })
 
     logger.info(`scheduler installed, ticking every ${TICK_MINUTES}m`)
@@ -127,6 +132,7 @@ async function checkSource(sourceId: string, list: TrackedAnime[]): Promise<numb
                 await notifyNewEpisodes(updated, newEpisodes)
             }
 
+            await refreshTrackerIfStale(updated)
             await reschedule(updated)
         } catch (error) {
             logger.warn(`${anime.key}: check failed — ${error instanceof Error ? error.message : error}`)
@@ -164,4 +170,29 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
             }
         )
     })
+}
+
+/** Tracker data ages: air times move, series finish. Twelve hours is plenty. */
+const TRACKER_MAX_AGE_MS = 12 * 60 * 60 * 1000
+
+/**
+ * Piggyback tracker refresh on the check that just ran.
+ *
+ * A series on the `airing` policy needs current air times or its schedule
+ * silently degrades to the fallback interval, and refreshing here means no extra
+ * wake-ups and no separate rate-limit budget to reason about.
+ */
+async function refreshTrackerIfStale(anime: TrackedAnime): Promise<void> {
+    const wanted =
+        resolve("anilistMetadata", { anime, sourceId: anime.sourceId }) ||
+        resolve("anilistSchedule", { anime, sourceId: anime.sourceId })
+    if (!wanted) return
+    if (Date.now() - (anime.trackerCheckedAt ?? 0) < TRACKER_MAX_AGE_MS) return
+
+    try {
+        await enrich(anime.key)
+    } catch (error) {
+        // Never let a tracker hiccup fail an episode check.
+        logger.debug(`${anime.key}: tracker refresh skipped — ${error instanceof Error ? error.message : error}`)
+    }
 }

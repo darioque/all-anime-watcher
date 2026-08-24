@@ -2,6 +2,7 @@ import browser from "webextension-polyfill"
 import type { GlobalSettings } from "~/settings/schema"
 import type { PageInfo, Server } from "~/sources/types"
 import type { Stream } from "~/extractors/types"
+import type { DomainResolution } from "~/background/domains"
 import type { SchedulePolicy, TrackedAnime } from "~/model/types"
 
 /** A source as the UI sees it — no functions, safe to structured-clone. */
@@ -13,6 +14,12 @@ export interface SourceDescriptor {
     home: string
     enabled: boolean
     preferredDomain?: string
+    pinnedDomain?: string
+    knownDomains?: string[]
+    /** Whether the site announces its live domains somewhere. */
+    hasDomainSource?: boolean
+    lastDomainCheckAt?: number
+    lastDomainCheckResult?: "ok" | "moved" | "unreachable"
 }
 
 export interface PageIdentity {
@@ -75,6 +82,25 @@ export interface MessageMap {
     "settings:patch": { req: { patch: Partial<GlobalSettings> }; res: GlobalSettings }
 
     "sources:list": { req: Record<string, never>; res: SourceDescriptor[] }
+    "tracker:matches": {
+        req: { key: string }
+        res: {
+            id: number
+            title: string
+            year?: number
+            format?: string
+            episodes?: number
+            cover?: string
+            score: number
+        }[]
+    }
+    "tracker:link": { req: { key: string; anilistId: number }; res: TrackedAnime | null }
+    "tracker:unlink": { req: { key: string }; res: TrackedAnime | null }
+    "tracker:refresh": { req: { key?: string }; res: number }
+
+    "sources:resolveDomains": { req: { sourceId?: string; force?: boolean }; res: DomainResolution[] }
+    "sources:pinDomain": { req: { sourceId: string; host?: string }; res: boolean }
+
     "sources:search": {
         req: { sourceId: string; query: string }
         res: { title: string; url: string; seriesId: string; poster?: string }[]

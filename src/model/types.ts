@@ -110,6 +110,14 @@ export interface TrackedAnime {
     malId?: number
     /** True once the user has confirmed the tracker match, so we stop guessing. */
     trackerConfirmed?: boolean
+    /** Last tracker lookup, so an unmatchable series isn't re-searched every cycle. */
+    trackerCheckedAt?: number
+    /**
+     * Next episode's air time, from the tracker. Feeds the `airing` schedule
+     * policy; absent for a finished series, which makes that policy fall back to
+     * its interval rather than never checking.
+     */
+    airing?: { episode: number; at: number; fetchedAt: number }
 
     /** Descending by number, as the source returned it. */
     episodes: Episode[]

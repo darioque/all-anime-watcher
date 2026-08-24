@@ -2,6 +2,7 @@ import { on } from "../router"
 import { allSources, sourceById } from "~/sources/registry"
 import { getAllSourceState } from "~/model/db"
 import { fetchCtxFor } from "~/library/library"
+import { pinDomain, resolveAllDomains, resolveDomains } from "../domains"
 import type { SourceDescriptor } from "~/shared/messages"
 
 export function registerSourceHandlers() {
@@ -9,6 +10,7 @@ export function registerSourceHandlers() {
         const states = new Map((await getAllSourceState()).map(s => [s.sourceId, s]))
         return allSources().map<SourceDescriptor>(source => {
             const state = states.get(source.id)
+            const preferred = state?.pinnedDomain ?? state?.preferredDomain
             return {
                 id: source.id,
                 name: source.name,
@@ -16,9 +18,12 @@ export function registerSourceHandlers() {
                 domains: [...source.domains],
                 home: source.home,
                 enabled: state?.enabled ?? true,
-                ...((state?.pinnedDomain ?? state?.preferredDomain)
-                    ? { preferredDomain: state?.pinnedDomain ?? state?.preferredDomain }
-                    : {})
+                hasDomainSource: Boolean(source.domainSource),
+                knownDomains: state?.knownDomains ?? [...source.domains],
+                lastDomainCheckAt: state?.lastDomainCheckAt ?? 0,
+                ...(preferred ? { preferredDomain: preferred } : {}),
+                ...(state?.pinnedDomain ? { pinnedDomain: state.pinnedDomain } : {}),
+                ...(state?.lastDomainCheckResult ? { lastDomainCheckResult: state.lastDomainCheckResult } : {})
             }
         })
     })
@@ -34,5 +39,19 @@ export function registerSourceHandlers() {
             seriesId: r.seriesId,
             ...(r.poster ? { poster: r.poster } : {})
         }))
+    })
+
+    on("sources:resolveDomains", async ({ sourceId, force }) => {
+        if (!sourceId) return resolveAllDomains({ force: force ?? true })
+
+        const source = sourceById(sourceId)
+        if (!source) throw new Error(`unknown source "${sourceId}"`)
+        const result = await resolveDomains(source, { force: force ?? true })
+        return result ? [result] : []
+    })
+
+    on("sources:pinDomain", async ({ sourceId, host }) => {
+        const state = await pinDomain(sourceId, host)
+        return state !== null
     })
 }

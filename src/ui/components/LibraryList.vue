@@ -7,6 +7,8 @@ import { latestEpisode, nextEpisode, titleOf, unwatchedCount, watchState } from 
 import { relativeFuture, relativePast } from "~/shared/time"
 import SchedulePicker from "./SchedulePicker.vue"
 import SettingsPanel from "./SettingsPanel.vue"
+import SourcesPanel from "./SourcesPanel.vue"
+import TrackerDialog from "./TrackerDialog.vue"
 import RowMenu, { type MenuItem } from "./RowMenu.vue"
 import ConfirmDialog from "./ConfirmDialog.vue"
 
@@ -26,6 +28,7 @@ const scheduleFor = ref<string | null>(null)
 const showSettings = ref(false)
 const checking = ref(false)
 const pendingRemoval = ref<TrackedAnime | null>(null)
+const trackerFor = ref<TrackedAnime | null>(null)
 
 const sourceName = (id: string) => sources.value.find(s => s.id === id)?.name ?? id
 
@@ -160,6 +163,7 @@ function stateTags(a: TrackedAnime): { label: string; tone: "warn" | "muted" }[]
     if (!a.poll) tags.push({ label: "not checking", tone: "muted" })
     if (a.overrides.schedule) tags.push({ label: "custom schedule", tone: "muted" })
     if (a.failCount > 0) tags.push({ label: `${a.failCount} failed check${a.failCount > 1 ? "s" : ""}`, tone: "warn" })
+    if (a.airing) tags.push({ label: `ep ${a.airing.episode} ${relativeFuture(a.airing.at)}`, tone: "muted" })
     return tags
 }
 
@@ -184,7 +188,14 @@ function menuFor(a: TrackedAnime): MenuItem[] {
             checked: Boolean(a.overrides.schedule),
             action: () => (scheduleFor.value = scheduleFor.value === a.key ? null : a.key)
         },
-        { label: "Open series page", separated: true, action: () => open(a.url) },
+        {
+            label: a.anilistId ? "Change AniList match…" : "Match on AniList…",
+            checked: Boolean(a.anilistId),
+            separated: true,
+            hint: a.anilistId ? undefined : "Poster, canonical title and air times",
+            action: () => (trackerFor.value = a)
+        },
+        { label: "Open series page", action: () => open(a.url) },
         {
             label: "Reset watch status",
             disabled: !a.lastWatched,
@@ -265,6 +276,7 @@ defineExpose({ load })
         </header>
 
         <SettingsPanel v-if="showSettings && variant === 'page'" />
+        <SourcesPanel v-if="showSettings && variant === 'page'" />
 
         <div v-if="library.length > 1" class="controls-row">
             <input v-model="filter" type="search" placeholder="Filter by title" aria-label="Filter by title" />
@@ -364,6 +376,17 @@ defineExpose({ load })
                 </div>
             </li>
         </ul>
+
+        <TrackerDialog
+            :anime="trackerFor"
+            @close="trackerFor = null"
+            @updated="
+                value => {
+                    replace(value)
+                    trackerFor = null
+                }
+            "
+        />
 
         <ConfirmDialog
             :open="pendingRemoval !== null"

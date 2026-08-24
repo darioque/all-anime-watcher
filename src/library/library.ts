@@ -2,6 +2,7 @@ import type { Episode, SchedulePolicy, SourceState, TrackedAnime } from "~/model
 import { animeKey, progressKey } from "~/model/keys"
 import { resolve, resolveSchedule } from "~/settings/resolver"
 import { nextCheckAt } from "~/background/schedule"
+import { enrich } from "~/trackers/match"
 import * as db from "~/model/db"
 import { createFetchCtx } from "~/net/fetcher"
 import { sourceById } from "~/sources/registry"
@@ -135,6 +136,10 @@ export async function addSeries(options: {
     anime.nextCheckAt = nextCheckAt(anime, resolveSchedule(anime))
     await db.putAnime(anime)
     logger.info(`added ${key} — ${anime.episodes.length} episodes`)
+
+    // Fill in poster, canonical title and air times in the background. Never
+    // awaited: a slow or rate-limited tracker must not delay adding a series.
+    void enrich(key).catch(error => logger.debug(`${key}: tracker enrich skipped`, error))
     await ensureSourceState(source.id)
     return anime
 }

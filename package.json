@@ -11,6 +11,7 @@
         "build": "vite build && vite build --config vite.content.config.ts && node scripts/check-dist.mjs",
         "check": "node scripts/check-dist.mjs",
         "check:schedule": "esbuild scripts/check-schedule.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/schedule.mjs --log-level=warning && node .probe/schedule.mjs",
+        "check:matching": "esbuild scripts/check-matching.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/matching.mjs --log-level=warning && node .probe/matching.mjs",
         "watch": "vite build --watch --mode development",
         "watch:content": "vite build --config vite.content.config.ts --watch --mode development",
         "typecheck": "vue-tsc --noEmit",

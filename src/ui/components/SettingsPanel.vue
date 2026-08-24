@@ -120,6 +120,44 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
         ]
     },
     {
+        title: "AniList",
+        note: "Read-only. Nothing is sent to AniList, and no sign-in is needed for either of these.",
+        fields: [
+            {
+                key: "anilistMetadata",
+                label: "Fill in posters and titles from AniList",
+                help: "Only fills gaps — never replaces a poster or title the site already gave.",
+                type: "toggle"
+            },
+            {
+                key: "anilistSchedule",
+                label: "Use real air times for scheduling",
+                help: "Lets the “Air time” schedule check a series when its episode is actually due.",
+                type: "toggle"
+            }
+        ]
+    },
+    {
+        title: "Domains",
+        note: "Sites here change address often; see the Sources section below to check or pin one.",
+        fields: [
+            {
+                key: "domainCheckIntervalHours",
+                label: "Re-check announced domains every",
+                help: "Hours.",
+                type: "number",
+                min: 1,
+                max: 168
+            },
+            {
+                key: "autoPromoteDomain",
+                label: "Follow a site automatically when it moves",
+                help: "Rewrites stored links. Your watch history is never affected.",
+                type: "toggle"
+            }
+        ]
+    },
+    {
         title: "Interface",
         fields: [
             { key: "openInTab", label: "Toolbar button opens the full library", type: "toggle" },
