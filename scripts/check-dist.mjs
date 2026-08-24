@@ -98,6 +98,29 @@ if (fileExists("content.js")) {
     errors.push("dist/content.js is missing — the second build pass did not run")
 }
 
+/*
+ * `process.env` is a genuine runtime landmine: neither a page nor a service
+ * worker has it, so a surviving reference throws on the bundle's first statement.
+ * That is exactly how Vue's dev-warning guards took the whole content script
+ * down — Vite substitutes process.env.NODE_ENV in an app build but not in
+ * library mode.
+ *
+ * Deliberately narrow. Checks for `require(` and `module.exports` were tried and
+ * removed: bundlers emit both inside CommonJS interop shims where `module` is a
+ * local parameter, so they fire on healthy builds. A check you learn to ignore is
+ * worse than no check.
+ */
+for (const file of ["content.js", "background.js"]) {
+    if (!fileExists(file)) continue
+    const code = readFileSync(resolve(dist, file), "utf8")
+    if (/\bprocess\s*\.\s*env\b/.test(code)) {
+        errors.push(
+            `dist/${file} references process.env, which does not exist at runtime — ` +
+                "add a `define` for process.env.NODE_ENV in that build's vite config"
+        )
+    }
+}
+
 // --- permissions sanity
 const KNOWN = new Set([
     "activeTab", "alarms", "background", "bookmarks", "browsingData", "certificateProvider",

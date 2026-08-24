@@ -55,7 +55,16 @@ function inlineCss(): Plugin {
  */
 export default defineConfig(({ mode }) => ({
     plugins: [vue(), inlineCss()],
-    define: { __VUE_PROD_DEVTOOLS__: "false", __VUE_OPTIONS_API__: "false" },
+    define: {
+        // Vite's app build substitutes this automatically; library mode does not,
+        // and Vue's runtime is full of `process.env.NODE_ENV !== "production"`
+        // guards. Without the define they reach the page as a bare `process`
+        // reference and the bundle throws on its first line.
+        "process.env.NODE_ENV": JSON.stringify(mode === "development" ? "development" : "production"),
+        __VUE_PROD_DEVTOOLS__: "false",
+        __VUE_OPTIONS_API__: "false",
+        __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: "false"
+    },
     resolve: {
         alias: { "~": fileURLToPath(new URL("./src", import.meta.url)) }
     },

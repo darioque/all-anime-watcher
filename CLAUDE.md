@@ -39,6 +39,12 @@ builds repeatedly just to re-read output.**
 `npm run build` runs both, then `scripts/check-dist.mjs`. The second pass sets
 `emptyOutDir: false`, so order matters.
 
+**Library mode is not the app build.** Vite substitutes `process.env.NODE_ENV`
+automatically in an app build but *not* in library mode, and Vue's runtime is
+full of `process.env.NODE_ENV !== "production"` guards — without an explicit
+`define` the content bundle throws `process is not defined` on its first line.
+Any dependency added to the content bundle needs the same consideration.
+
 **`check-dist.mjs` exists because Chrome rejects a whole extension for things a
 bundler is happy with.** It asserts every path the manifest references was actually
 emitted, that `default_locale` has a matching `_locales` subtree, that permissions
