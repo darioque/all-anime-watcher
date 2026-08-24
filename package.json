@@ -18,7 +18,8 @@
         "format": "prettier --write \"src/**/*.{ts,vue,css,html,json}\"",
         "probe": "esbuild scripts/probe-source.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/probe.mjs --log-level=warning && node .probe/probe.mjs",
         "check:myanime": "esbuild scripts/check-myanime.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/myanime.mjs --log-level=warning && node .probe/myanime.mjs",
-        "check:grouping": "esbuild scripts/check-grouping.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/grouping.mjs --log-level=warning && node .probe/grouping.mjs"
+        "check:grouping": "esbuild scripts/check-grouping.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/grouping.mjs --log-level=warning && node .probe/grouping.mjs",
+        "check:m3u8": "esbuild scripts/check-m3u8.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/m3u8.mjs --log-level=warning && node .probe/m3u8.mjs"
     },
     "dependencies": {
         "cheerio": "^1.2.0",

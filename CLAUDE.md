@@ -25,6 +25,7 @@ npm run check:schedule     # the schedule date maths
 npm run check:matching     # AniList title matching rules (offline)
 npm run check:myanime      # myanime.live identity parsing (offline)
 npm run check:grouping     # one-show-many-sources grouping rules (offline)
+npm run check:m3u8         # which hosts a playlist refers to (offline)
 npm run typecheck          # vue-tsc, must stay clean
 npm run probe -- lmanime   # run a source against the live site
 PROBE_SERVER=3 npm run probe -- lmanime   # exercise one video host
@@ -363,7 +364,18 @@ hostname rotates, so the Referer it demands is declared on the `Stream` and
 `ensureRefererRule`. Subtitle hosts need the same treatment and are a different
 domain from the video.
 
-**A DNR rule has to name the right initiator, and there are two.** The proxy's
+**A DNR rule has to cover every host in the chain, and there are more than one.**
+An HLS manifest is not one host: MegaPlay serves the manifest from
+`cdn.watching.onl` and every segment from `cr0x1.cloudvideo.lat`, both
+Referer-gated. A rewrite installed for the URL the extractor returned gets the
+manifest and none of the video, and the symptom is *not* an error — hls.js
+retries a failing segment long enough that it reads as buffering that never ends.
+`coverPlaylistHosts` walks the playlist two levels deep (master → variant →
+segments) and installs a rule for every host it names, including the ones hidden
+in `URI="…"` attributes: the decryption key, alternate audio, subtitle
+renditions. Missing the key means an encrypted stream that never plays.
+
+**A DNR rule also has to name the right initiator, and there are two.** The proxy's
 fetches come from the extension; hls.js loads manifests and segments straight
 from the page we took over unless the extractor asked for the proxy. Scoping a
 rule to `initiatorDomains: [extensionId()]` therefore covers the extractor's own
