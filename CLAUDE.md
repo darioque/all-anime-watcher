@@ -186,11 +186,18 @@ An extractor turns one embed URL into playable streams and is shared by every
 source that embeds that host. `Stream.fetchVia` decides how the player fetches:
 
 - `page` — the `<video>` element or hls.js fetches directly. Cheapest. Works when
-  the host tolerates the page's origin. Mp4Upload is this.
+  the host tolerates the page's origin. Mp4Upload, OK.ru and StreamWish are this.
 - `background` — every manifest and segment is proxied through the service
   worker via `playback:fetch`. Required, not preferred, when a CDN sends no
   usable `access-control-allow-origin` or demands a Referer the page can't forge.
   Dailymotion is this.
+- `iframe` — **no extraction at all**: the host's own player runs in a frame
+  inside our chrome. Produced by `playback:streams` when no extractor matches, or
+  when one matches and fails. The viewer keeps episode navigation, the server
+  picker and library tracking, and loses only their position inside the episode.
+  The player treats it as a last resort — it walks every server first and only
+  embeds if nothing extractable worked. This is why an unknown host is degraded
+  rather than unsupported, and why writing an extractor is an optimisation.
 
 `Referer` and `Origin` are forbidden header names — `fetch()` silently refuses to
 set them — so an extractor declares `netRules` and `background/dnr.ts` installs
@@ -216,16 +223,19 @@ CORS**. That is why direct-file hosts (Mp4Upload, OK.ru) work with
 manifests and segments with XHR — needs the proxy whenever a CDN withholds
 `access-control-allow-origin`.
 
-**lmanime's ten servers resolve to five hosts.** `PROBE_SERVER=<n> npm run probe
--- lmanime` exercises one at a time.
+**Video hosts seen so far.** `PROBE_SERVER=<n> npm run probe -- <source>`
+exercises one at a time.
 
 | Host | Extractor | State |
 | --- | --- | --- |
 | mp4upload.com | `mp4upload` | works — direct MP4, played in the browser |
 | ok.ru | `okru` | works — direct MP4 at several renditions |
+| streamwish family | `streamwish` | works — covers embedwish, vidhidepro, bysekoze, morencius, FileLions, VidHide |
 | dailymotion.com | `dailymotion` | resolves to a master playlist; HLS playback unproven |
-| morencius.com | — | packed JS, StreamWish family. Next to write |
-| rumble.com | — | not written |
+| voe.sx, rumble.com, youtube.com | — | embedded via the iframe fallback |
+
+**Sources:** `lmanime` (AnimeStream theme), `mundodonghua` (custom PHP, packed-JS
+servers), `myanime` (WordPress REST API — series are *tags*, episodes are posts).
 
 ## Phase status
 

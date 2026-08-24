@@ -218,13 +218,22 @@ if (html) {
     await step(
         "seriesIdFromUrl",
         async () => source.seriesIdFromUrl(episodeUrl!),
-        id => (id ? `"${id}"` : "null — IDENTITY WOULD BREAK")
+        // Null is legitimate: some sites put nothing identifying in an episode
+        // URL, and getPageInfo supplies the identity instead. The check that
+        // actually matters is the one below, that getPageInfo yields a seriesId.
+        id => (id ? `"${id}"` : "null — identity comes from getPageInfo instead")
     )
 
     await step(
         "getPageInfo",
         () => source.getPageInfo(html, episodeUrl!, ctx),
-        i => `"${i.title}" ep ${i.number} → series ${i.seriesUrl}`
+        i => `"${i.title}" ep ${i.number} → series ${i.seriesUrl}`,
+        i => {
+            if (!i.seriesId) return "no seriesId — the library key can't be formed"
+            if (!Number.isFinite(i.number)) return "episode number is not a number"
+            if (!i.seriesUrl) return "no seriesUrl — the update loop would have nothing to poll"
+            return null
+        }
     )
 
     const servers = await step(
@@ -263,7 +272,10 @@ if (html) {
     if (embedUrl) {
         const extractor = extractorFor(embedUrl)
         if (!extractor) {
-            fail("extractor", `no extractor handles ${new URL(embedUrl).hostname}`)
+            // Not a failure: the player embeds the host's own frame instead. The
+            // viewer keeps episode navigation and tracking and loses only their
+            // position inside the episode, so this is degraded, not broken.
+            warn("extractor", `no extractor for ${new URL(embedUrl).hostname} — the player will embed it instead`)
         } else {
             pass("extractor", `${new URL(embedUrl).hostname} → ${extractor.id}`)
 

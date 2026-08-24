@@ -15,7 +15,14 @@ export interface Span {
 
 export interface Stream {
     url: string
-    kind: "hls" | "mp4" | "dash"
+    /**
+     * `iframe` is the fallback for a host we can't extract: the embed plays in
+     * its own player inside our chrome. Episode navigation, the server picker and
+     * the library all keep working; only in-video progress is lost, since the
+     * page can't see inside a cross-origin frame. Better than a dead end, and it
+     * means an unknown host is degraded rather than unsupported.
+     */
+    kind: "hls" | "mp4" | "dash" | "iframe"
     /** "1080p". Absent means an adaptive master playlist. */
     quality?: string
     /** Label shown in the quality/server picker. */

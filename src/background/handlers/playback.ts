@@ -29,10 +29,23 @@ export function registerPlaybackHandlers() {
         const embedUrl = server.embedUrl ?? (await source.resolveServer?.(server as Server, ctx))
         if (!embedUrl) throw new Error(`could not resolve server "${server.name}" to an embed URL`)
 
+        const host = new URL(embedUrl).hostname
         const extractor = extractorFor(embedUrl)
+
+        /**
+         * No extractor is not a failure any more. Hand back an `iframe` stream so
+         * the host's own player can run inside our chrome — the viewer keeps
+         * episode navigation, the server picker and tracking, and only loses
+         * in-video progress. The player prefers a real stream and only settles
+         * for this once every server has been tried.
+         */
         if (!extractor) {
-            // Expected while the player walks its fallback list; not a defect.
-            throw new ExpectedError(`no extractor knows how to play ${new URL(embedUrl).hostname}`)
+            logger.info(`${server.name}: no extractor for ${host}, offering the embed itself`)
+            return {
+                embedUrl,
+                extractorId: null,
+                streams: [{ url: embedUrl, kind: "iframe" as const, label: host.replace(/^(www|geo)\./, "") }]
+            }
         }
 
         const extractCtx: ExtractCtx = {
@@ -41,9 +54,21 @@ export function registerPlaybackHandlers() {
             json: (url, init) => ctx.json(url, { headers: init?.headers ?? {} })
         }
 
-        const streams = await extractor.extract(embedUrl, extractCtx)
-        logger.info(`${server.name} → ${extractor.id} → ${streams.length} stream(s)`)
-        return { embedUrl, extractorId: extractor.id, streams }
+        try {
+            const streams = await extractor.extract(embedUrl, extractCtx)
+            logger.info(`${server.name} → ${extractor.id} → ${streams.length} stream(s)`)
+            return { embedUrl, extractorId: extractor.id, streams }
+        } catch (error) {
+            // An extractor that knows the host but couldn't read it — a deleted
+            // file, a changed player — still leaves the embed itself playable.
+            const detail = error instanceof Error ? error.message : String(error)
+            logger.info(`${server.name}: ${extractor.id} failed (${detail}), offering the embed itself`)
+            return {
+                embedUrl,
+                extractorId: null,
+                streams: [{ url: embedUrl, kind: "iframe" as const, label: host.replace(/^(www|geo)\./, "") }]
+            }
+        }
     })
 
     /**

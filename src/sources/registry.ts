@@ -1,6 +1,7 @@
 import type { AnimeSource } from "./types"
 import { lmanime } from "./sites/lmanime"
 import { mundodonghua } from "./sites/mundodonghua"
+import { myanime } from "./sites/myanime"
 import { matchDomain, hostOf, pathOf } from "~/shared/url"
 import { log } from "~/shared/logger"
 
@@ -11,7 +12,7 @@ const logger = log("sources")
  * static: the background needs the full list synchronously to answer a
  * navigation event without awaiting anything.
  */
-const ALL: AnimeSource[] = [lmanime, mundodonghua]
+const ALL: AnimeSource[] = [lmanime, mundodonghua, myanime]
 
 const byId = new Map<string, AnimeSource>(ALL.map(source => [source.id, source]))
 

@@ -28,6 +28,10 @@ const failedServers = ref(new Set<number>())
 const levels = ref<Level[]>([])
 const currentLevel = ref(-1)
 const streamLabel = ref("")
+/** Set while playing a host's own embed rather than a stream we extracted. */
+const embedded = ref<string | null>(null)
+/** Best embed seen while walking servers, used only if nothing extractable works. */
+const embedFallback = ref<{ stream: Stream; index: number } | null>(null)
 
 const info = computed(() => props.identity.pageInfo)
 const title = computed(() => (info.value ? `${info.value.title} — Episode ${info.value.number}` : "Loading…"))
@@ -95,7 +99,16 @@ async function playServer(index: number, auto = false): Promise<void> {
         const stream = result.streams[0]
         if (!stream) throw new Error("the extractor returned no streams")
 
-        streamLabel.value = `${result.extractorId}${stream.label ? ` · ${stream.label}` : ""}`
+        // An embed is a last resort, not a result: remember it and keep looking
+        // for a server we can actually extract, so we don't settle for a host's
+        // own player (and lose progress tracking) while a real stream exists.
+        if (stream.kind === "iframe" && auto) {
+            if (!embedFallback.value) embedFallback.value = { stream, index }
+            failedServers.value = new Set(failedServers.value).add(index)
+            if (await tryNextServer(`${server.name} can only be embedded`)) return
+        }
+
+        streamLabel.value = `${result.extractorId ?? "embedded"}${stream.label ? ` · ${stream.label}` : ""}`
         await attach(stream, index)
     } catch (error) {
         failedServers.value = new Set(failedServers.value).add(index)
@@ -106,16 +119,44 @@ async function playServer(index: number, auto = false): Promise<void> {
     }
 }
 
-/** Move to the next untried server. Returns false when there are none left. */
+/**
+ * Move to the next untried server. Returns false only when nothing is left to
+ * try — including the embedded fallback, which is used once every server has
+ * been exhausted rather than never.
+ */
 async function tryNextServer(reason: string): Promise<boolean> {
     const next = servers.value.findIndex((_, index) => !failedServers.value.has(index))
-    if (next === -1) return false
-    console.debug(`[AAW] server failed (${reason}), falling back to "${servers.value[next]?.name}"`)
-    await playServer(next, true)
-    return true
+    if (next !== -1) {
+        console.debug(`[AAW] ${reason}; trying "${servers.value[next]?.name}"`)
+        await playServer(next, true)
+        return true
+    }
+
+    const fallback = embedFallback.value
+    if (fallback) {
+        console.debug(`[AAW] ${reason}; no extractable server left, embedding "${servers.value[fallback.index]?.name}"`)
+        embedFallback.value = null
+        activeServer.value = fallback.index
+        streamLabel.value = `embedded · ${fallback.stream.label ?? ""}`.trim()
+        await attach(fallback.stream, fallback.index)
+        return true
+    }
+
+    return false
 }
 
 async function attach(stream: Stream, index: number) {
+    // The host's own player, in a frame. Nothing to attach and nothing to
+    // measure — progress stays wherever the library already had it.
+    if (stream.kind === "iframe") {
+        embedded.value = stream.url
+        status.value = "ready"
+        message.value = ""
+        return
+    }
+
+    embedded.value = null
+
     const element = video.value
     if (!element) return
 
@@ -380,7 +421,15 @@ onBeforeUnmount(() => {
         </header>
 
         <div class="stage">
-            <video ref="video" controls playsinline autoplay @ended="onEnded"></video>
+            <iframe
+                v-if="embedded"
+                :src="embedded"
+                class="embed"
+                allowfullscreen
+                allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
+                referrerpolicy="origin"
+            ></iframe>
+            <video v-show="!embedded" ref="video" controls playsinline autoplay @ended="onEnded"></video>
 
             <div v-if="status === 'resolving'" class="overlay">
                 <div class="spinner" aria-hidden="true"></div>
@@ -412,7 +461,11 @@ onBeforeUnmount(() => {
                 </button>
             </div>
 
-            <div v-if="levels.length > 1" class="group">
+            <span v-if="embedded" class="embed-note">
+                Playing this host's own player — episode tracking still works, but not your position inside the episode.
+            </span>
+
+            <div v-if="levels.length > 1 && !embedded" class="group">
                 <span class="label">Quality</span>
                 <button class="chip" :class="{ on: currentLevel === -1 }" @click="selectLevel(-1)">Auto</button>
                 <button
@@ -561,11 +614,19 @@ h1 {
     background: #000;
 }
 
-video {
+video,
+.embed {
     width: 100%;
     height: 100%;
     display: block;
     background: #000;
+    border: 0;
+}
+
+.embed-note {
+    font-size: 11px;
+    color: var(--ink-3);
+    align-self: center;
 }
 
 .overlay {

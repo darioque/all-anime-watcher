@@ -82,7 +82,7 @@ export interface MessageMap {
 
     "playback:streams": {
         req: { sourceId: string; server: Server; episodeUrl: string }
-        res: { embedUrl: string; extractorId: string; streams: Stream[] }
+        res: { embedUrl: string; extractorId: string | null; streams: Stream[] }
     }
     "playback:orderServers": {
         req: { sourceId: string; animeKey?: string; servers: Server[] }
