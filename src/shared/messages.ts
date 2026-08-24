@@ -30,6 +30,12 @@ export interface PageIdentity {
     key?: string
     /** Servers the page offers, already ordered by preference. */
     servers?: Server[]
+    /**
+     * Whether opening the episode should count as watching it when the player
+     * ends up embedding the site's own frame — the one case where no completion
+     * threshold can ever be reached, because nothing can see inside the frame.
+     */
+    markOnEmbed?: boolean
     error?: string
 }
 
@@ -58,7 +64,10 @@ export interface MessageMap {
 
     "library:list": { req: Record<string, never>; res: TrackedAnime[] }
     "library:get": { req: { key: string }; res: TrackedAnime | null }
-    "library:add": { req: { sourceId: string; seriesUrl: string }; res: TrackedAnime | null }
+    "library:add": {
+        req: { sourceId: string; seriesUrl: string; seriesId?: string; title?: string; poster?: string }
+        res: TrackedAnime | null
+    }
     "library:remove": { req: { key: string }; res: boolean }
     "library:setFlags": { req: { key: string; follow?: boolean; poll?: boolean }; res: TrackedAnime | null }
     "library:rename": { req: { key: string; displayTitle: string }; res: TrackedAnime | null }
@@ -74,7 +83,13 @@ export interface MessageMap {
     }
 
     "library:markWatched": {
-        req: { key: string; number: number; variant?: string }
+        req: {
+            key: string
+            number: number
+            variant?: string
+            /** Deliberate "set my position here", allowed to move backwards. */
+            force?: boolean
+        }
         res: TrackedAnime | null
     }
 
@@ -151,6 +166,39 @@ export interface Envelope<A extends Action = Action> {
 
 /** Errors are returned rather than thrown, so a sender can't take down a caller. */
 export type Reply<T> = { ok: true; data: T } | { ok: false; error: string }
+
+/**
+ * Background → open extension pages: "something in the library changed".
+ *
+ * A broadcast rather than a request: there may be a popup, a library tab, both,
+ * or neither, and none of them can be asked to poll — a series added from a site
+ * has to appear in an already-open library without the user reloading it.
+ *
+ * Deliberately outside `MessageMap`: nothing replies to it, and Chrome does not
+ * deliver a runtime message back to the context that sent it, so the background's
+ * own router never sees these.
+ */
+export const LIBRARY_CHANGED = "ui:libraryChanged"
+
+export interface LibraryChanged {
+    action: typeof LIBRARY_CHANGED
+    /** What happened, for logging and for deciding how much to reload. */
+    reason: string
+    /** The entry involved, when it was a single one. */
+    key?: string
+}
+
+/** Subscribe an extension page. Returns an unsubscribe function. */
+export function onLibraryChanged(handler: (event: LibraryChanged) => void): () => void {
+    const listener = (message: unknown) => {
+        const event = message as Partial<LibraryChanged> | undefined
+        if (event?.action === LIBRARY_CHANGED) handler(event as LibraryChanged)
+        // Returning nothing leaves the channel free for the real handlers.
+        return undefined
+    }
+    browser.runtime.onMessage.addListener(listener)
+    return () => browser.runtime.onMessage.removeListener(listener)
+}
 
 export async function send<A extends Action>(action: A, payload: Request<A>): Promise<Response<A>> {
     const reply = (await browser.runtime.sendMessage({ action, payload } satisfies Envelope<A>)) as

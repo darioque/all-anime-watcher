@@ -1,12 +1,12 @@
 import { on } from "../router"
 import { refreshBadge } from "../badge"
+import { libraryChanged } from "../broadcast"
 import { getAnime } from "~/model/db"
 import { animeKey } from "~/model/keys"
 import { addSeries, fetchCtxFor, markWatched } from "~/library/library"
 import { matchEpisodeUrl, sourceForUrl } from "~/sources/registry"
 import { orderServers } from "~/library/servers"
 import type { Server } from "~/sources/types"
-import { cachedSettings } from "~/settings/storage"
 import { resolve } from "~/settings/resolver"
 import { log } from "~/shared/logger"
 
@@ -38,7 +38,14 @@ export function registerPageHandlers() {
             const key = animeKey(source.id, pageInfo.seriesId)
 
             let entry = await getAnime(key)
-            if (!entry && cachedSettings().autoAddOnWatch) {
+
+            /*
+             * `autoAddOnWatch` decides whether an *unknown* series is added. It
+             * has never decided whether an already-tracked one keeps its position
+             * updated — turning it off means "stop collecting series", not "stop
+             * tracking the ones I chose". AMR draws the line in the same place.
+             */
+            if (!entry && resolve("autoAddOnWatch", { sourceId: source.id })) {
                 entry = await addSeries({
                     sourceId: source.id,
                     seriesUrl: pageInfo.seriesUrl,
@@ -46,13 +53,15 @@ export function registerPageHandlers() {
                     title: pageInfo.title,
                     tabId: sender.tab?.id
                 })
+                libraryChanged("added", entry.key)
             }
 
-            // Until the player exists, opening the page is the only signal that
-            // you are watching this episode — so it moves the pointer. Without
-            // this, "watch next" on a freshly added series points at episode 1.
+            // Opening the page is a tracking signal in its own right: the player
+            // may end up embedding a frame it cannot see inside, and on a freshly
+            // added series "watch next" would otherwise point at episode 1.
             if (entry && resolve("markWatchedOnOpen", { anime: entry, sourceId: source.id })) {
                 entry = (await markWatched(entry.key, pageInfo.number, pageInfo.variant)) ?? entry
+                libraryChanged("position", entry.key)
             }
 
             if (entry) await refreshBadge()
@@ -74,7 +83,12 @@ export function registerPageHandlers() {
                 isEpisode: true,
                 pageInfo,
                 servers,
-                ...(entry ? { key: entry.key } : {})
+                ...(entry ? { key: entry.key } : {}),
+                // Whether an embedded player should count the episode as watched
+                // on open. Resolved here so the player never has to know the
+                // settings chain, and sent even when untracked — the viewer can
+                // add the series from the player, and it applies from then on.
+                markOnEmbed: resolve("markWatchedOnEmbed", { anime: entry, sourceId: source.id })
             }
         } catch (error) {
             const message = error instanceof Error ? error.message : String(error)

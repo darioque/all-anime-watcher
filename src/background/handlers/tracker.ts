@@ -1,4 +1,5 @@
 import { on } from "../router"
+import { libraryChanged } from "../broadcast"
 import { getAllAnime, getAnime } from "~/model/db"
 import { titleOf } from "~/model/keys"
 import { enrich, findMatches, linkTo, unlink } from "~/trackers/match"
@@ -25,9 +26,17 @@ export function registerTrackerHandlers() {
         }))
     })
 
-    on("tracker:link", async ({ key, anilistId }) => linkTo(key, anilistId))
+    on("tracker:link", async ({ key, anilistId }) => {
+        const anime = await linkTo(key, anilistId)
+        libraryChanged("tracker-linked", key)
+        return anime
+    })
 
-    on("tracker:unlink", async ({ key }) => unlink(key))
+    on("tracker:unlink", async ({ key }) => {
+        const anime = await unlink(key)
+        libraryChanged("tracker-unlinked", key)
+        return anime
+    })
 
     /**
      * Refresh one series, or every series that wants tracker data.
@@ -39,6 +48,7 @@ export function registerTrackerHandlers() {
     on("tracker:refresh", async ({ key }) => {
         if (key) {
             await enrich(key, { force: true })
+            libraryChanged("tracker-refreshed", key)
             return 1
         }
 
@@ -57,6 +67,7 @@ export function registerTrackerHandlers() {
             }
         }
         logger.info(`tracker refresh touched ${done} series`)
+        if (done > 0) libraryChanged("tracker-refreshed")
         return done
     })
 }

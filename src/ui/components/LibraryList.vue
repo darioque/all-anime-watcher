@@ -1,9 +1,10 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue"
-import { send } from "~/shared/messages"
+import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue"
+import { onLibraryChanged, send } from "~/shared/messages"
 import type { SourceDescriptor } from "~/shared/messages"
-import type { SchedulePolicy, TrackedAnime } from "~/model/types"
-import { latestEpisode, nextEpisode, titleOf, unwatchedCount, watchState } from "~/model/keys"
+import type { Episode, SchedulePolicy, TrackedAnime } from "~/model/types"
+import type { GlobalSettings } from "~/settings/schema"
+import { episodeProgressKey, latestEpisode, nextEpisode, titleOf, unwatchedCount, watchState } from "~/model/keys"
 import { relativeFuture, relativePast } from "~/shared/time"
 import SchedulePicker from "./SchedulePicker.vue"
 import SettingsPanel from "./SettingsPanel.vue"
@@ -21,10 +22,22 @@ const error = ref<string | null>(null)
 const notice = ref<string | null>(null)
 const busy = ref(new Set<string>())
 
+type Sort = GlobalSettings["listSort"]
+
+/**
+ * Text filter is deliberately *not* persisted: it is how you find one series
+ * right now, and finding the list still filtered tomorrow reads as an empty
+ * library. Everything else here is a preference and is stored.
+ */
 const filter = ref("")
-const sort = ref<"recent" | "title" | "unwatched" | "next-check">("recent")
+const sort = ref<Sort>("recent")
 const onlyUnwatched = ref(false)
+const sourceFilter = ref("")
+/** False until settings have loaded, so restoring them doesn't look like a change. */
+const controlsReady = ref(false)
+
 const scheduleFor = ref<string | null>(null)
+const episodesFor = ref<string | null>(null)
 const showSettings = ref(false)
 const checking = ref(false)
 const pendingRemoval = ref<TrackedAnime | null>(null)
@@ -32,11 +45,18 @@ const trackerFor = ref<TrackedAnime | null>(null)
 
 const sourceName = (id: string) => sources.value.find(s => s.id === id)?.name ?? id
 
+/** Sources that actually have something in the library — the rest are noise. */
+const usedSources = computed(() => {
+    const ids = new Set(library.value.map(a => a.sourceId))
+    return sources.value.filter(source => ids.has(source.id))
+})
+
 const visible = computed(() => {
     const needle = filter.value.trim().toLowerCase()
     let list = library.value
     if (needle !== "") list = list.filter(a => titleOf(a).toLowerCase().includes(needle))
     if (onlyUnwatched.value) list = list.filter(a => watchState(a) === "new")
+    if (sourceFilter.value !== "") list = list.filter(a => a.sourceId === sourceFilter.value)
 
     const sorted = [...list]
     switch (sort.value) {
@@ -46,10 +66,25 @@ const visible = computed(() => {
             return sorted.sort((a, b) => unwatchedCount(b) - unwatchedCount(a))
         case "next-check":
             return sorted.sort((a, b) => a.nextCheckAt - b.nextCheckAt)
+        case "added":
+            return sorted.sort((a, b) => b.addedAt - a.addedAt)
         default:
             return sorted.sort((a, b) => b.lastEpisodeFoundAt - a.lastEpisodeFoundAt || b.addedAt - a.addedAt)
     }
 })
+
+/** Descending, so the newest episode is the first thing in the picker. */
+function episodesOf(anime: TrackedAnime): Episode[] {
+    return [...anime.episodes].sort((a, b) => b.number - a.number)
+}
+
+function episodeState(anime: TrackedAnime, episode: Episode): "watched" | "current" | "new" {
+    if (anime.progress[episodeProgressKey(episode)]?.completed) return "watched"
+    const from = anime.lastWatched?.number
+    if (from === undefined) return "new"
+    if (episode.number === from) return "current"
+    return episode.number > from ? "new" : "watched"
+}
 
 const newEpisodes = computed(() => library.value.reduce((n, a) => (a.follow ? n + unwatchedCount(a) : n), 0))
 const seriesWithNew = computed(() => library.value.filter(a => watchState(a) === "new").length)
@@ -67,6 +102,40 @@ async function load() {
         loading.value = false
     }
 }
+
+/** Quiet reload: no spinner, for refreshes the user did not ask for. */
+async function reload() {
+    try {
+        library.value = await send("library:list", {})
+    } catch {
+        // A failed background refresh should leave what is on screen alone.
+    }
+}
+
+/** Restore the list controls, then keep them saved as they change. */
+async function restoreControls() {
+    try {
+        const settings = await send("settings:get", {})
+        sort.value = settings.listSort
+        onlyUnwatched.value = settings.listOnlyUnwatched
+        sourceFilter.value = settings.listSourceFilter
+    } catch {
+        // Defaults are fine; this is a convenience, not state that matters.
+    } finally {
+        controlsReady.value = true
+    }
+}
+
+watch([sort, onlyUnwatched, sourceFilter], () => {
+    if (!controlsReady.value) return
+    void send("settings:patch", {
+        patch: {
+            listSort: sort.value,
+            listOnlyUnwatched: onlyUnwatched.value,
+            listSourceFilter: sourceFilter.value
+        }
+    }).catch(() => undefined)
+})
 
 const isBusy = (key: string) => busy.value.has(key)
 
@@ -118,6 +187,33 @@ const catchUp = (a: TrackedAnime) =>
         )
     })
 
+/** Open one episode from the picker. */
+function watchEpisode(a: TrackedAnime, number: number) {
+    const episode = a.episodes.find(ep => ep.number === number)
+    if (episode) open(episode.url)
+}
+
+/**
+ * Move the pointer deliberately, in either direction.
+ *
+ * Distinct from opening an episode, which only ever moves forward — the two are
+ * different intentions and conflating them is what made watching episode 157 of
+ * a series you were caught up at 160 on look like losing your place.
+ */
+const setPosition = (a: TrackedAnime, number: number) =>
+    withBusy(a.key, async () => {
+        const episode = a.episodes.find(ep => ep.number === number)
+        replace(
+            await send("library:markWatched", {
+                key: a.key,
+                number,
+                ...(episode?.variant ? { variant: episode.variant } : {}),
+                force: true
+            })
+        )
+        flash(`${titleOf(a)} — position set to episode ${number}`)
+    })
+
 const resetWatch = (a: TrackedAnime) =>
     withBusy(a.key, async () => {
         replace(await send("library:resetWatch", { key: a.key }))
@@ -152,8 +248,15 @@ async function checkAll() {
 const open = (url: string) => void send("tab:open", { url })
 
 function openSettings() {
-    if (props.variant === "page") showSettings.value = !showSettings.value
-    else void send("tab:openLibrary", {})
+    if (props.variant !== "page") {
+        void send("tab:openLibrary", {})
+        return
+    }
+    showSettings.value = !showSettings.value
+    // Settings open above the list. Opening them from halfway down a long
+    // library otherwise puts you in the middle of a panel you have not seen the
+    // top of.
+    if (showSettings.value) window.scrollTo({ top: 0, behavior: "smooth" })
 }
 
 /** States the viewer needs to see even when they aren't acting on them. */
@@ -183,6 +286,12 @@ function menuFor(a: TrackedAnime): MenuItem[] {
         },
         { label: "Following", checked: a.follow, separated: true, action: () => void toggleFollow(a) },
         { label: "Checking for new episodes", checked: a.poll, action: () => void togglePoll(a) },
+        {
+            label: "Episodes…",
+            disabled: a.episodes.length === 0,
+            hint: "Pick one to watch, or set where you are",
+            action: () => (episodesFor.value = episodesFor.value === a.key ? null : a.key)
+        },
         {
             label: "Schedule…",
             checked: Boolean(a.overrides.schedule),
@@ -228,9 +337,33 @@ function watchAction(a: TrackedAnime): { label: string; title: string; url?: str
     }
 }
 
+/*
+ * Anything can change the library while this is open: a series added by opening
+ * an episode on a site, a scheduled check finding something, the player moving
+ * the watch position. The background says so and the list re-reads itself —
+ * without this, a library tab left open shows yesterday's state until reloaded
+ * by hand.
+ */
+let unsubscribe: (() => void) | null = null
+
 onMounted(async () => {
     if (props.variant === "page" && window.location.hash === "#settings") showSettings.value = true
-    await load()
+    unsubscribe = onLibraryChanged(() => void reload())
+    // A popup is destroyed and rebuilt constantly, so it always arrives fresh;
+    // a long-lived tab can miss a broadcast while the worker was asleep.
+    if (props.variant === "page") {
+        document.addEventListener("visibilitychange", onVisible)
+    }
+    await Promise.all([load(), restoreControls()])
+})
+
+function onVisible() {
+    if (document.visibilityState === "visible") void reload()
+}
+
+onBeforeUnmount(() => {
+    unsubscribe?.()
+    document.removeEventListener("visibilitychange", onVisible)
 })
 
 defineExpose({ load })
@@ -280,11 +413,16 @@ defineExpose({ load })
 
         <div v-if="library.length > 1" class="controls-row">
             <input v-model="filter" type="search" placeholder="Filter by title" aria-label="Filter by title" />
+            <select v-if="usedSources.length > 1" v-model="sourceFilter" aria-label="Filter by source">
+                <option value="">All sources</option>
+                <option v-for="source in usedSources" :key="source.id" :value="source.id">{{ source.name }}</option>
+            </select>
             <select v-model="sort" aria-label="Sort by">
                 <option value="recent">Newest episode</option>
                 <option value="title">Title</option>
                 <option value="unwatched">Most unwatched</option>
                 <option value="next-check">Next check</option>
+                <option value="added">Recently added</option>
             </select>
             <button
                 class="btn"
@@ -363,6 +501,37 @@ defineExpose({ load })
                         <span v-if="isBusy(a.key)" class="working">working…</span>
                         <span class="grow"></span>
                         <RowMenu :items="menuFor(a)" :label="`Actions for ${titleOf(a)}`" />
+                    </div>
+
+                    <div v-if="episodesFor === a.key" class="episodes-panel">
+                        <div class="panel-head">
+                            <span class="panel-title">{{ a.episodes.length }} episodes</span>
+                            <button class="btn tiny" @click="episodesFor = null">Close</button>
+                        </div>
+                        <div class="episode-grid">
+                            <button
+                                v-for="ep in episodesOf(a)"
+                                :key="`${ep.number}-${ep.variant ?? ''}`"
+                                class="ep"
+                                :data-state="episodeState(a, ep)"
+                                :title="`${ep.title ?? `Episode ${ep.number}`}${ep.variant ? ` · ${ep.variant}` : ''} — click to watch`"
+                                @click="watchEpisode(a, ep.number)"
+                            >
+                                {{ ep.number }}
+                            </button>
+                        </div>
+                        <label class="set-position">
+                            <span>I'm at episode</span>
+                            <select
+                                :value="a.lastWatched?.number ?? ''"
+                                @change="setPosition(a, Number(($event.target as HTMLSelectElement).value))"
+                            >
+                                <option value="" disabled>not started</option>
+                                <option v-for="ep in episodesOf(a)" :key="ep.number" :value="ep.number">
+                                    Episode {{ ep.number }}
+                                </option>
+                            </select>
+                        </label>
                     </div>
 
                     <div v-if="scheduleFor === a.key" class="schedule">
@@ -594,12 +763,25 @@ h1 {
     border-radius: var(--radius) 0 0 var(--radius);
 }
 
+/*
+ * The three states have to be separable at a glance across a long list, and a
+ * 3px stripe in two shades of blue-green was not: "has new episodes" and "caught
+ * up" read as the same row. So they differ in more than hue — the one that wants
+ * attention is green, wider and tinted; the one that wants none is quiet.
+ */
+.row[data-state="new"] {
+    background: var(--state-new-soft);
+    border-color: var(--state-new-rule);
+}
+
 .row[data-state="new"] .stripe {
-    background: var(--accent);
+    background: var(--state-new);
+    width: 4px;
 }
 
 .row[data-state="current"] .stripe {
     background: var(--state-current);
+    opacity: 0.55;
 }
 
 .row[data-state="unstarted"] .stripe {
@@ -612,6 +794,93 @@ h1 {
 
 .row[data-state="paused"] .stripe {
     background: var(--ink-3);
+}
+
+.episodes-panel {
+    margin-top: 8px;
+    padding: 10px;
+    background: var(--ground);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+}
+
+.panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 8px;
+}
+
+.panel-title {
+    font-size: 11px;
+    color: var(--ink-3);
+}
+
+.btn.tiny {
+    font-size: 10px;
+    padding: 2px 6px;
+}
+
+.episode-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+    max-height: 168px;
+    overflow-y: auto;
+}
+
+.ep {
+    font-family: var(--mono);
+    font-size: 11px;
+    min-width: 34px;
+    padding: 3px 5px;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    background: var(--surface);
+    color: var(--ink-2);
+    cursor: pointer;
+}
+
+.ep:hover {
+    border-color: var(--accent);
+    color: var(--accent-ink);
+}
+
+.ep[data-state="watched"] {
+    color: var(--ink-3);
+    opacity: 0.6;
+}
+
+.ep[data-state="current"] {
+    border-color: var(--state-current);
+    color: var(--ink);
+    font-weight: 700;
+}
+
+.ep[data-state="new"] {
+    border-color: var(--state-new-rule);
+    color: var(--ink);
+}
+
+.set-position {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    margin-top: 10px;
+    padding-top: 8px;
+    border-top: 1px solid var(--rule);
+    font-size: 11px;
+    color: var(--ink-3);
+}
+
+.set-position select {
+    font: inherit;
+    font-size: 11px;
+    color: var(--ink);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 2px 4px;
 }
 
 .poster {

@@ -1,6 +1,7 @@
 import { send } from "~/shared/messages"
 import type { PageIdentity } from "~/shared/messages"
 import { isPlayerMounted, mountPlayer, unmountPlayer, type PlayerOptions } from "~/player/mount"
+import { removePageBadge, showPageBadge } from "./pageBadge"
 
 /**
  * Injected on episode pages only, by the background's navigation matcher.
@@ -72,6 +73,7 @@ async function identify() {
         skipIntro: "button",
         skipOutro: "button"
     }
+    let takeOver = true
     try {
         const settings = await send("settings:get", {})
         options = {
@@ -81,8 +83,20 @@ async function identify() {
             skipIntro: settings.skipIntro,
             skipOutro: settings.skipOutro
         }
+        takeOver = settings.takeOverPage
     } catch {
         // A settings read failure shouldn't block playback.
+    }
+
+    /*
+     * "Replace the site's player with ours" off means exactly that: the page is
+     * left alone. Tracking has already happened in the background by this point,
+     * so all that is left is a marker saying the page was recognised — and, if
+     * the series is not followed yet, the only way to follow it from the site.
+     */
+    if (!takeOver) {
+        showPageBadge(identity)
+        return
     }
 
     mountPlayer(identity, options)
@@ -100,7 +114,10 @@ function waitForBody(timeoutMs = 4000): Promise<void> {
     })
 }
 
-window.addEventListener("pagehide", () => unmountPlayer())
+window.addEventListener("pagehide", () => {
+    unmountPlayer()
+    removePageBadge()
+})
 
 /** Shadow root so the site's CSS can't erase the message. */
 function toast(message: string, kind: "info" | "warn") {

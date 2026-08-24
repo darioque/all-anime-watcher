@@ -72,8 +72,28 @@ export function invalidateSettingsCache() {
     sourceCache = null
 }
 
+/**
+ * Keep the cache *populated* rather than merely invalidating it.
+ *
+ * `cachedSettings()` is synchronous — the resolver is on the hot path and cannot
+ * await — and it falls back to `defaultSettings()` when the cache is empty. So
+ * nulling the cache here did not mean "re-read on next use", it meant "every
+ * setting silently reverts to its default until something happens to await
+ * loadSettings() again". Turning off `autoAddOnWatch` and watching a series get
+ * added anyway is what that looked like from the outside.
+ *
+ * The change record carries the new value, so the cache can be replaced in the
+ * same tick with no window where it is empty.
+ */
 browser.storage.onChanged.addListener((changes, area) => {
     if (area !== "local") return
-    if (GLOBAL_KEY in changes) cache = null
-    if (SOURCE_KEY in changes) sourceCache = null
+
+    if (GLOBAL_KEY in changes) {
+        const next = changes[GLOBAL_KEY]?.newValue as Partial<GlobalSettings> | undefined
+        cache = next ? { ...defaultSettings(), ...next } : null
+    }
+    if (SOURCE_KEY in changes) {
+        const next = changes[SOURCE_KEY]?.newValue as Record<string, SourceSettings> | undefined
+        sourceCache = next ?? null
+    }
 })

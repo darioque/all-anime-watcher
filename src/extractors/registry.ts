@@ -2,6 +2,7 @@ import type { Extractor, ExtractorNetRule } from "./types"
 import { DailymotionExtractor } from "./sites/dailymotion"
 import { Mp4UploadExtractor } from "./sites/mp4upload"
 import { OkRuExtractor } from "./sites/okru"
+import { MegaPlayExtractor } from "./sites/megaplay"
 import { StreamWishExtractor } from "./sites/streamwish"
 import { DirectStreamExtractor } from "./sites/directStream"
 import { hostOf } from "~/shared/url"
@@ -20,6 +21,7 @@ const ALL: Extractor[] = [
     new DailymotionExtractor(),
     new Mp4UploadExtractor(),
     new OkRuExtractor(),
+    new MegaPlayExtractor(),
     new StreamWishExtractor(),
     new DirectStreamExtractor()
 ]

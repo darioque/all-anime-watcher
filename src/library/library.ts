@@ -184,16 +184,32 @@ export async function refreshSeries(key: string): Promise<{ anime: TrackedAnime;
 /**
  * Move the watch pointer to an episode.
  *
- * Opening an episode always sets the pointer, even backwards — if you
- * deliberately open episode 12 after finishing 47, 12 is where you are. This
- * mirrors AMR's `fromSite` rule, which exists for exactly the same reason.
+ * The pointer only ever moves *forward* on its own. Opening episode 157 of a
+ * series you are caught up at 160 on is a rewatch, or a click on the wrong row,
+ * and either way it should not throw away where you actually were. This is AMR's
+ * rule too — its `consultManga` updates the position only when the chapter is
+ * newer than the stored one, and the `fromSite` flag that overrides that is set
+ * by the sync importer, never by reading a page.
+ *
+ * `force` is the deliberate version: "set my position to this episode", chosen
+ * from the UI, which may move in either direction.
  */
-export async function markWatched(key: string, number: number, variant?: string): Promise<TrackedAnime | null> {
+export async function markWatched(
+    key: string,
+    number: number,
+    variant?: string,
+    options: { force?: boolean } = {}
+): Promise<TrackedAnime | null> {
     const anime = await db.getAnime(key)
     if (!anime) return null
 
     const already = anime.lastWatched
     if (already && already.number === number && already.variant === variant) {
+        return anime
+    }
+
+    if (!options.force && already && number < already.number) {
+        logger.debug(`${key}: staying at episode ${already.number}, not moving back to ${number}`)
         return anime
     }
 
@@ -217,7 +233,7 @@ export async function updateProgress(input: {
     variant?: string
     positionSec: number
     durationSec?: number
-}): Promise<TrackedAnime | null> {
+}): Promise<{ anime: TrackedAnime; advanced: boolean } | null> {
     const anime = await db.getAnime(input.key)
     if (!anime) return null
 
@@ -230,7 +246,7 @@ export async function updateProgress(input: {
     const ratio = input.durationSec && input.durationSec > 0 ? input.positionSec / input.durationSec : 0
     const completed = previous?.completed === true || ratio >= threshold
 
-    if (!moved && completed === (previous?.completed ?? false)) return anime
+    if (!moved && completed === (previous?.completed ?? false)) return { anime, advanced: false }
 
     anime.progress[pk] = {
         positionSec: input.positionSec,
@@ -241,17 +257,19 @@ export async function updateProgress(input: {
 
     // Completing an episode advances the pointer, but never drags it backwards:
     // re-watching episode 3 should not undo being caught up at 47.
+    let advanced = false
     if (completed && (!anime.lastWatched || anime.lastWatched.number < input.number)) {
         anime.lastWatched = {
             number: input.number,
             ...(input.variant ? { variant: input.variant } : {}),
             at: Date.now()
         }
+        advanced = true
     }
 
     anime.updatedAt = Date.now()
     await db.putAnime(anime)
-    return anime
+    return { anime, advanced }
 }
 
 /**

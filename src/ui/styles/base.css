@@ -20,6 +20,12 @@
        colour can never drift into each other. */
     --state-current: #4a6fa5;
     --state-warn: #a4762a;
+    /* "Has new episodes" — deliberately a different hue family from --accent,
+       which is the brand colour and was too close to --state-current to tell
+       the two states apart in a long list. */
+    --state-new: #2f9e5e;
+    --state-new-soft: #eff8f2;
+    --state-new-rule: #b6ddc6;
     --shadow: 0 1px 2px rgba(16, 23, 28, 0.06), 0 8px 20px -12px rgba(16, 23, 28, 0.2);
 
     --radius: 6px;
@@ -45,6 +51,9 @@
         --danger-soft: #351f1c;
         --state-current: #6f9bd4;
         --state-warn: #d0a25a;
+        --state-new: #4fc27e;
+        --state-new-soft: #12251b;
+        --state-new-rule: #26523a;
         --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 20px -12px rgba(0, 0, 0, 0.7);
     }
 }

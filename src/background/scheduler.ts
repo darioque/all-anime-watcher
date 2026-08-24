@@ -7,7 +7,8 @@ import { notifyNewEpisodes } from "./notifications"
 import { resolveAllDomains } from "./domains"
 import { enrich } from "~/trackers/match"
 import { refreshBadge } from "./badge"
-import { cachedSettings } from "~/settings/storage"
+import { libraryChanged } from "./broadcast"
+import { loadSettings, loadSourceSettings, cachedSettings } from "~/settings/storage"
 import { resolve, resolveSchedule } from "~/settings/resolver"
 import { log } from "~/shared/logger"
 
@@ -60,6 +61,12 @@ export async function runDueChecks(options: { force?: boolean } = {}): Promise<n
         return 0
     }
 
+    // The alarm can fire into a freshly restarted worker whose settings cache is
+    // still empty, and `cachedSettings()` answers with defaults when it is —
+    // which would silently run the check with everyone's overrides ignored.
+    await loadSettings()
+    await loadSourceSettings()
+
     const settings = cachedSettings()
     const now = Date.now()
 
@@ -102,6 +109,8 @@ export async function runDueChecks(options: { force?: boolean } = {}): Promise<n
 
         lastRunFound = found
         await refreshBadge()
+        // An open library should show the result of a check it did not ask for.
+        libraryChanged("check-run")
         logger.info(`check run done — ${found} series with new episodes`)
     } finally {
         running = false

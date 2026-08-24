@@ -24,9 +24,23 @@ export interface GlobalSettings {
      * exists, completionThreshold is the more accurate signal and this can go off.
      */
     markWatchedOnOpen: boolean
+    /**
+     * Opening an episode counts it as watched when the site's own player is
+     * embedded rather than replaced.
+     *
+     * Nothing can see inside a cross-origin frame, so `completionThreshold` has
+     * no signal to work from there — without this an embedded episode would
+     * never be marked at all, however much of it you watched.
+     */
+    markWatchedOnEmbed: boolean
 
     // --- update scheduling
     schedule: SchedulePolicy
+    /**
+     * Minutes between an episode airing and a site having it subtitled and up.
+     * Used by the `airing` schedule; a per-anime policy can state its own.
+     */
+    releaseDelayMin: number
     /** Seconds between requests to the same source during a check run. */
     sourceRequestDelaySec: number
     /** How many sources may be checked concurrently. */
@@ -75,8 +89,12 @@ export interface GlobalSettings {
     maxParallelDownloads: number
 
     // --- ui
-    listSort: "recent-episode" | "title" | "added" | "unwatched" | "last-watched"
+    /** Library list controls, persisted so the list looks the same next time. */
+    listSort: "recent" | "title" | "unwatched" | "next-check" | "added"
     listSortAscending: boolean
+    listOnlyUnwatched: boolean
+    /** Source id, or "" for all of them. */
+    listSourceFilter: string
     groupBySeries: boolean
     perPage: number
     /** Clicking the toolbar icon opens the full library tab instead of the popup. */
@@ -87,6 +105,9 @@ export interface GlobalSettings {
 export interface SourceSettings {
     enabled?: boolean
     takeOverPage?: boolean
+    markWatchedOnEmbed?: boolean
+    /** How far behind a broadcast this particular site tends to run. */
+    releaseDelayMin?: number
     preferredQuality?: string
     preferredServers?: string[]
     variantPref?: Variant
@@ -106,10 +127,14 @@ export function defaultSettings(): GlobalSettings {
         followOnAdd: true,
         pollOnAdd: true,
         markWatchedOnOpen: true,
+        markWatchedOnEmbed: true,
 
         // Plain interval polling by default: it is what you would expect and it
         // never surprises you. Schedule-aware polling is opt-in, per anime.
         schedule: { mode: "interval", everyHours: 6 },
+        // An hour is a guess, but a better one than zero: no site has an episode
+        // the minute it airs, and checking then just burns the airing window.
+        releaseDelayMin: 60,
         sourceRequestDelaySec: 2,
         maxParallelSources: 3,
         maxChecksPerRun: 60,
@@ -140,8 +165,10 @@ export function defaultSettings(): GlobalSettings {
         downloadFilenameTemplate: "{title}/{title} - E{ep}.{ext}",
         maxParallelDownloads: 2,
 
-        listSort: "recent-episode",
+        listSort: "recent",
         listSortAscending: false,
+        listOnlyUnwatched: false,
+        listSourceFilter: "",
         groupBySeries: true,
         perPage: 25,
         openInTab: false

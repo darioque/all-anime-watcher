@@ -10,6 +10,7 @@
 import { allSources, sourceById } from "~/sources/registry"
 import { createFetchCtx } from "~/net/fetcher"
 import { extractorFor } from "~/extractors/registry"
+import type { ResolvedServer } from "~/sources/types"
 import type { ExtractCtx, ExtractorNetRule } from "~/extractors/types"
 import { setLogLevel } from "~/shared/logger"
 
@@ -115,6 +116,16 @@ function fail(label: string, error: unknown) {
 /** Something that did not work here but does not prove the extension is broken. */
 function warn(label: string, message: string) {
     console.log(`  \x1b[33m!\x1b[0m ${label.padEnd(20)} ${message}`)
+}
+
+/** Site-published intro/outro offsets, shown so a source that stops sending them is visible. */
+function describeSkips(skips: ResolvedServer["skips"]): string {
+    if (!skips) return ""
+    const parts = [
+        skips.intro && `intro ${skips.intro.startSec}–${skips.intro.endSec}s`,
+        skips.outro && `outro ${skips.outro.startSec}–${skips.outro.endSec}s`
+    ].filter(Boolean)
+    return parts.length > 0 ? `  \x1b[2m(site skips: ${parts.join(", ")})\x1b[0m` : ""
 }
 
 async function step<T>(
@@ -256,15 +267,35 @@ if (html) {
         if (servers && servers.length > 1) {
             console.log(`  \x1b[2m(server ${wanted} of ${servers.length}; set PROBE_SERVER to pick another)\x1b[0m`)
         }
-        // A source may hand back the embed URL directly or defer it. Either way
-        // the extractor chain below has to run — gating this on `resolveServer`
-        // silently skipped the most valuable check for every source that
-        // resolves eagerly.
-        embedUrl = chosen.embedUrl
-            ? await step("server embed", async () => chosen.embedUrl!, url => `${chosen.name} → ${url}`)
+        /*
+         * A source may hand back the embed URL directly or defer it. Either way
+         * the extractor chain below has to run — gating this on `resolveServer`
+         * silently skipped the most valuable check for every source that
+         * resolves eagerly.
+         *
+         * `resolveServer` may also answer with a ResolvedServer carrying the
+         * site's own skip offsets rather than a bare string. Normalising here is
+         * what the extension does too; not doing it handed `new URL()` the text
+         * "[object Object]".
+         */
+        const resolved = chosen.embedUrl
+            ? await step(
+                  "server embed",
+                  async () => ({ embedUrl: chosen.embedUrl! }) as ResolvedServer,
+                  r => `${chosen.name} → ${r.embedUrl}`
+              )
             : source.resolveServer
-              ? await step("resolveServer", () => source.resolveServer!(chosen, ctx), url => `${chosen.name} → ${url}`)
+              ? await step(
+                    "resolveServer",
+                    async () => {
+                        const answer = await source.resolveServer!(chosen, ctx)
+                        return (typeof answer === "string" ? { embedUrl: answer } : answer) as ResolvedServer
+                    },
+                    r => `${chosen.name} → ${r.embedUrl}${describeSkips(r.skips)}`
+                )
               : null
+
+        embedUrl = resolved?.embedUrl ?? null
 
         if (!embedUrl) {
             fail("server embed", `"${chosen.name}" has no embedUrl and the source has no resolveServer`)
@@ -307,7 +338,7 @@ if (html) {
                 await step(
                     "media loads",
                     async () => {
-                        const headers = { ...netHeadersFor(stream.url, extractor.netRules), Range: "bytes=0-2000" }
+                        const headers = { ...netHeadersFor(stream.url, extractor.netRules, stream), Range: "bytes=0-2000" }
                         const response = await fetch(stream.url, { headers })
                         return {
                             status: response.status,
@@ -324,7 +355,7 @@ if (html) {
                     "manifest loads",
                     async () => {
                         const rule = netRuleFor(stream.url, extractor.netRules)
-                        const headers = netHeadersFor(stream.url, extractor.netRules)
+                        const headers = netHeadersFor(stream.url, extractor.netRules, stream)
                         const result = await fetchWithRule(stream.url, rule, headers)
                         return { ...result, headers, removed: rule?.removeHeaders ?? [] }
                     },
@@ -362,12 +393,23 @@ function netRuleFor(url: string, rules: readonly ExtractorNetRule[] | undefined)
     })
 }
 
-function netHeadersFor(url: string, rules: readonly ExtractorNetRule[] | undefined): Record<string, string> {
+/**
+ * Headers the extension will end up sending: the extractor's declared rules,
+ * plus anything the stream itself asked for. The second half matters because a
+ * host whose CDN rotates cannot be written into a static rule — the extension
+ * installs those at playback time, and skipping them here reported a working
+ * stream as a 403.
+ */
+function netHeadersFor(
+    url: string,
+    rules: readonly ExtractorNetRule[] | undefined,
+    stream?: { headers?: Record<string, string> }
+): Record<string, string> {
     const rule = netRuleFor(url, rules)
-    if (!rule) return {}
     return {
-        ...(rule.referer ? { Referer: rule.referer } : {}),
-        ...(rule.origin ? { Origin: rule.origin } : {})
+        ...(rule?.referer ? { Referer: rule.referer } : {}),
+        ...(rule?.origin ? { Origin: rule.origin } : {}),
+        ...(stream?.headers ?? {})
     }
 }
 
@@ -440,5 +482,4 @@ if (seriesUrl) {
 }
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
-process.exit(failures > 0 ? 1 : 0)
 process.exit(failures > 0 ? 1 : 0)

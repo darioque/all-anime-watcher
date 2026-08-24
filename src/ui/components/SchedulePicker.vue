@@ -20,6 +20,15 @@ const weekday = ref<number>(props.modelValue.mode === "weekly" ? props.modelValu
 const time = ref(props.modelValue.mode === "weekly" ? props.modelValue.time : "18:00")
 const days = ref(props.modelValue.mode === "everyNDays" ? props.modelValue.days : 7)
 const fallbackHours = ref(props.modelValue.mode === "airing" ? props.modelValue.fallbackHours : 12)
+/**
+ * Blank means "use the default from settings" — the schedule policy stores
+ * `undefined`, not a number, so a series that has never been told otherwise
+ * follows a change to the global delay instead of freezing at whatever it was
+ * when the picker was last opened.
+ */
+const delayMin = ref<number | "">(
+    props.modelValue.mode === "airing" && props.modelValue.delayMin !== undefined ? props.modelValue.delayMin : ""
+)
 
 watch(
     () => props.modelValue,
@@ -31,7 +40,10 @@ watch(
             time.value = value.time
         }
         if (value.mode === "everyNDays") days.value = value.days
-        if (value.mode === "airing") fallbackHours.value = value.fallbackHours
+        if (value.mode === "airing") {
+            fallbackHours.value = value.fallbackHours
+            delayMin.value = value.delayMin ?? ""
+        }
     }
 )
 
@@ -46,7 +58,13 @@ function build(): SchedulePolicy {
         case "everyNDays":
             return { mode: "everyNDays", days: days.value, from: Date.now() }
         case "airing":
-            return { mode: "airing", padBeforeMin: 15, padAfterMin: 120, fallbackHours: fallbackHours.value }
+            return {
+                mode: "airing",
+                padBeforeMin: 15,
+                padAfterMin: 120,
+                fallbackHours: fallbackHours.value,
+                ...(delayMin.value === "" ? {} : { delayMin: Number(delayMin.value) })
+            }
         default:
             return { mode: "interval", everyHours: everyHours.value }
     }
@@ -66,8 +84,13 @@ const summary = computed(() => {
             return `Checked ${WEEKDAYS[weekday.value]}s at ${time.value}`
         case "everyNDays":
             return `Checked every ${days.value} day${days.value === 1 ? "" : "s"}`
-        case "airing":
-            return `Around the air time, falling back to every ${fallbackHours.value}h`
+        case "airing": {
+            const delay =
+                delayMin.value === ""
+                    ? "the usual delay for this site"
+                    : `${Number(delayMin.value) >= 60 ? `${Math.round((Number(delayMin.value) / 60) * 10) / 10}h` : `${delayMin.value}m`} after it airs`
+            return `Checked ${delay}, falling back to every ${fallbackHours.value}h`
+        }
         default:
             return ""
     }
@@ -123,15 +146,31 @@ const summary = computed(() => {
             <span class="unit">days, starting today</span>
         </div>
 
-        <div v-else-if="mode === 'airing'" class="row">
-            <label>Fall back to every</label>
-            <input v-model.number="fallbackHours" type="number" min="1" max="168" @change="emitChange" />
-            <span class="unit">hours when the air time is unknown</span>
-        </div>
+        <template v-else-if="mode === 'airing'">
+            <div class="row">
+                <label>Check</label>
+                <input
+                    v-model="delayMin"
+                    type="number"
+                    min="0"
+                    max="10080"
+                    step="15"
+                    placeholder="default"
+                    @change="emitChange"
+                />
+                <span class="unit">minutes after it airs — blank uses the setting</span>
+            </div>
+            <div class="row">
+                <label>Fall back to every</label>
+                <input v-model.number="fallbackHours" type="number" min="1" max="168" @change="emitChange" />
+                <span class="unit">hours when the air time is unknown</span>
+            </div>
+        </template>
 
         <p class="summary">{{ summary }}</p>
         <p v-if="mode === 'airing'" class="caveat">
-            Air times arrive with the AniList work. Until then this behaves like the fallback interval.
+            Needs the series matched on AniList and “Use real air times for scheduling” switched on. Without either it
+            behaves like the fallback interval.
         </p>
     </div>
 </template>

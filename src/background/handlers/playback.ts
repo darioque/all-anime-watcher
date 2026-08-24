@@ -1,5 +1,6 @@
 import { on } from "../router"
 import { getAnime } from "~/model/db"
+import { ensureRefererRule } from "../dnr"
 import { fetchSkipTimes } from "~/trackers/aniskip"
 import { fetchCtxFor } from "~/library/library"
 import { orderServers } from "~/library/servers"
@@ -67,6 +68,24 @@ export function registerPlaybackHandlers() {
             const withSkips = siteSkips
                 ? streams.map(stream => ({ ...stream, skips: { ...stream.skips, ...siteSkips } }))
                 : streams
+
+            /*
+             * A stream may name a Referer its CDN insists on. Neither the proxy
+             * nor the page can set that header, so it becomes a DNR rule scoped
+             * to the host this particular file came from.
+             *
+             * Subtitle tracks get the same treatment and often need it more:
+             * MegaPlay serves video and captions from two unrelated hosts that
+             * both refuse a request without the embed's Referer.
+             */
+            for (const stream of withSkips) {
+                const referer = stream.headers?.Referer ?? stream.headers?.referer
+                if (!referer) continue
+                for (const target of [stream.url, ...(stream.subtitles ?? []).map(track => track.url)]) {
+                    await ensureRefererRule(target, referer)
+                }
+            }
+
             logger.info(`${server.name} → ${extractor.id} → ${streams.length} stream(s)`)
             return { embedUrl, extractorId: extractor.id, streams: withSkips }
         } catch (error) {

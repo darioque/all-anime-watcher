@@ -131,3 +131,71 @@ async function isRegexSupported(regex: string): Promise<boolean> {
         return true
     }
 }
+
+/**
+ * Referer rewrites discovered at playback time, rather than declared up front.
+ *
+ * A static rule needs the CDN's hostname written into the source tree, and the
+ * hosts these players hand out rotate — MegaPlay's `cdn.watching.onl` is one
+ * name for something that has had several. An extractor that knows the Referer
+ * its CDN wants can say so on the stream, and the rule is installed for that
+ * host the moment the stream is resolved.
+ *
+ * Kept in its own id range so `installRules` can rebuild the declared rules
+ * without disturbing these, and bounded so a long session cannot accumulate
+ * rules for every host it ever touched.
+ */
+const RUNTIME_ID_BASE = 5000
+const MAX_RUNTIME_RULES = 24
+
+/** host → the rule id serving it, in insertion order for eviction. */
+const runtimeRules = new Map<string, number>()
+let nextRuntimeId = RUNTIME_ID_BASE
+
+export async function ensureRefererRule(url: string, referer: string): Promise<void> {
+    let host: string
+    try {
+        host = new URL(url).hostname
+    } catch {
+        return
+    }
+    if (host === "" || runtimeRules.has(host)) return
+
+    const id = nextRuntimeId++
+    // Wrap rather than grow without bound; ids are only ever ours.
+    if (nextRuntimeId > RUNTIME_ID_BASE + 1000) nextRuntimeId = RUNTIME_ID_BASE
+
+    const evict: number[] = []
+    while (runtimeRules.size >= MAX_RUNTIME_RULES) {
+        const oldest = runtimeRules.keys().next()
+        if (oldest.done) break
+        const victim = runtimeRules.get(oldest.value)
+        if (victim !== undefined) evict.push(victim)
+        runtimeRules.delete(oldest.value)
+    }
+
+    try {
+        await browser.declarativeNetRequest.updateDynamicRules({
+            removeRuleIds: [id, ...evict],
+            addRules: [
+                {
+                    id,
+                    priority: 2,
+                    action: {
+                        type: "modifyHeaders",
+                        requestHeaders: [{ header: "Referer", operation: "set", value: referer }]
+                    },
+                    condition: {
+                        initiatorDomains: [extensionId()],
+                        requestDomains: [host],
+                        resourceTypes: ["xmlhttprequest", "media", "other"]
+                    }
+                }
+            ]
+        })
+        runtimeRules.set(host, id)
+        logger.debug(`Referer for ${host} → ${referer}`)
+    } catch (error) {
+        logger.warn(`could not install a Referer rule for ${host}`, error)
+    }
+}

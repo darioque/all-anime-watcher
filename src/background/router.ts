@@ -1,5 +1,6 @@
 import browser from "webextension-polyfill"
 import type { Action, Envelope, Reply } from "~/shared/messages"
+import { loadSettings, loadSourceSettings } from "~/settings/storage"
 import { log } from "~/shared/logger"
 import { isExpected } from "~/shared/errors"
 
@@ -43,6 +44,10 @@ export function installRouter(ready: Promise<unknown>) {
 
             try {
                 await ready
+                // Cheap when the cache is warm, and the only guarantee that a
+                // handler reading settings synchronously never sees defaults —
+                // the worker can be restarted between any two messages.
+                await Promise.all([loadSettings(), loadSourceSettings()])
                 const data = await handler(envelope.payload ?? {}, sender)
                 return { ok: true, data }
             } catch (error) {

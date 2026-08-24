@@ -48,6 +48,17 @@ const activeSubtitle = ref<number>(-1)
 const pipSupported = typeof document !== "undefined" && "pictureInPictureEnabled" in document
 const showHelp = ref(false)
 
+/**
+ * Library key for this series, once it has one.
+ *
+ * Not `trackedKey.value` directly: with "add a series when I open an episode"
+ * turned off the page arrives untracked, and the viewer can add it from here —
+ * at which point everything keyed off it (progress, resume, episode list) has to
+ * start working without a reload.
+ */
+const trackedKey = ref<string | undefined>(props.identity.key)
+const adding = ref(false)
+
 const info = computed(() => props.identity.pageInfo)
 const title = computed(() => (info.value ? `${info.value.title} — Episode ${info.value.number}` : "Loading…"))
 
@@ -163,12 +174,21 @@ async function tryNextServer(reason: string): Promise<boolean> {
 }
 
 async function attach(stream: Stream, index: number) {
-    // The host's own player, in a frame. Nothing to attach and nothing to
-    // measure — progress stays wherever the library already had it.
+    /*
+     * The host's own player, in a frame. Nothing to attach and nothing to
+     * measure: a cross-origin frame reports no position, no duration and no
+     * ended event, so the completion threshold can never be reached here.
+     *
+     * Opening the episode is therefore the only signal there will ever be, and
+     * it is taken — otherwise every episode watched on an unextractable host
+     * stays "unwatched" forever. It never moves the pointer backwards; the
+     * library decides that.
+     */
     if (stream.kind === "iframe") {
         embedded.value = stream.url
         status.value = "ready"
         message.value = ""
+        if (props.identity.markOnEmbed !== false) markWatchedHere()
         return
     }
 
@@ -306,10 +326,10 @@ function applySkips(stream: Stream) {
     inSkip.value = null
 
     if (skips.value.intro && skips.value.outro) return
-    if (!props.identity.key || !info.value) return
+    if (!trackedKey.value || !info.value) return
 
     void send("playback:skipTimes", {
-        key: props.identity.key,
+        key: trackedKey.value,
         number: info.value.number,
         ...(video.value && Number.isFinite(video.value.duration) ? { durationSec: video.value.duration } : {})
     })
@@ -421,13 +441,54 @@ async function togglePip() {
     }
 }
 
+// ------------------------------------------------------------------ library
+
+/** Record this episode as the viewer's position, without any progress signal. */
+function markWatchedHere() {
+    if (!trackedKey.value || !info.value) return
+    void send("library:markWatched", {
+        key: trackedKey.value,
+        number: info.value.number,
+        ...(info.value.variant ? { variant: info.value.variant } : {})
+    }).catch(() => undefined)
+}
+
+/**
+ * Follow this series from the player.
+ *
+ * The identity was already worked out by the background when the page was read,
+ * so this passes it along rather than making the source derive it again from a
+ * URL — which for a site whose episode URLs don't name their series would give a
+ * different answer, or none.
+ */
+async function addToLibrary() {
+    if (!info.value || !props.identity.sourceId || adding.value) return
+    adding.value = true
+    try {
+        const anime = await send("library:add", {
+            sourceId: props.identity.sourceId,
+            seriesUrl: info.value.seriesUrl,
+            seriesId: info.value.seriesId,
+            title: info.value.title
+        })
+        if (!anime) return
+        trackedKey.value = anime.key
+        await loadEpisodeList()
+        if (embedded.value && props.identity.markOnEmbed !== false) markWatchedHere()
+    } catch (error) {
+        message.value = error instanceof Error ? error.message : String(error)
+    } finally {
+        adding.value = false
+    }
+}
+
 // ------------------------------------------------------------------ progress
 
 /** Resume where the viewer left off, if they were more than a few seconds in. */
 async function restorePosition() {
-    if (!props.identity.key || !info.value || !video.value) return
+    if (!trackedKey.value || !info.value || !video.value) return
     try {
-        const anime = await send("library:get", { key: props.identity.key })
+        const anime = await send("library:get", { key: trackedKey.value })
         const key = `${info.value.number}:${info.value.variant ?? ""}`
         const saved = anime?.progress?.[key]
         if (saved && !saved.completed && saved.positionSec > 5) {
@@ -440,7 +501,7 @@ async function restorePosition() {
 
 function reportProgress() {
     const element = video.value
-    if (!element || !props.identity.key || !info.value) return
+    if (!element || !trackedKey.value || !info.value) return
     if (element.paused || element.seeking) return
 
     const positionSec = Math.floor(element.currentTime)
@@ -448,7 +509,7 @@ function reportProgress() {
     lastReported = positionSec
 
     void send("progress:update", {
-        key: props.identity.key,
+        key: trackedKey.value,
         number: info.value.number,
         ...(info.value.variant ? { variant: info.value.variant } : {}),
         positionSec,
@@ -487,9 +548,9 @@ function onEnded() {
 
 /** Ascending, so "next" is the following entry rather than the preceding one. */
 async function loadEpisodeList() {
-    if (!props.identity.key) return
+    if (!trackedKey.value) return
     try {
-        const anime = await send("library:get", { key: props.identity.key })
+        const anime = await send("library:get", { key: trackedKey.value })
         episodes.value = [...(anime?.episodes ?? [])].sort((a, b) => a.number - b.number)
     } catch {
         // Navigation is a convenience; failing to build it shouldn't stop playback.
@@ -596,6 +657,10 @@ onBeforeUnmount(() => {
                 </button>
             </div>
 
+            <button v-if="info && !trackedKey" class="follow" :disabled="adding" @click="addToLibrary">
+                {{ adding ? "Adding…" : "+ Follow this series" }}
+            </button>
+
             <a v-if="info" class="tag link" :href="info.seriesUrl">All episodes</a>
         </header>
 
@@ -604,7 +669,6 @@ onBeforeUnmount(() => {
                 v-if="embedded"
                 :src="embedded"
                 class="embed"
-                allowfullscreen
                 allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
                 referrerpolicy="origin"
             ></iframe>
@@ -726,6 +790,24 @@ onBeforeUnmount(() => {
 </template>
 
 <style scoped>
+.follow {
+    font: inherit;
+    font-size: 11px;
+    font-weight: 600;
+    color: #04222a;
+    background: #45cddb;
+    border: none;
+    border-radius: 4px;
+    padding: 4px 10px;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.follow:disabled {
+    opacity: 0.6;
+    cursor: default;
+}
+
 /*
  * Self-contained: the host page's stylesheet is stripped before we mount, but
  * anything left behind must not be able to reach in, so every value is literal

@@ -57,17 +57,27 @@ function computeNext(policy: SchedulePolicy, anime: TrackedAnime, now: number): 
 
         case "airing": {
             const airing = anime.airing
+
+            /*
+             * The tracker knows when an episode *broadcasts*. It does not know
+             * when this site will have it subtitled and uploaded, which for a
+             * fansubbed donghua is hours later — checking at the broadcast minute
+             * reliably finds nothing and then waits out the fallback interval.
+             * `delayMin` is that gap; resolveSchedule fills it in from the source
+             * or the global default when the policy leaves it unset.
+             */
+            const expected = airing ? airing.at + (policy.delayMin ?? 0) * MINUTE : 0
+
             // No tracker data, or a date that has already passed and not been
             // refreshed: fall back to plain polling rather than never checking.
-            if (!airing || airing.at + policy.padAfterMin * MINUTE < now) {
+            if (!airing || expected + policy.padAfterMin * MINUTE < now) {
                 logger.debug(`${anime.key}: no usable airing time, falling back to ${policy.fallbackHours}h`)
                 return (anime.lastCheckedAt || now) + Math.max(0.25, policy.fallbackHours) * HOUR
             }
 
-            // Start looking shortly before it airs — sites publish early as often
-            // as late — and if that moment has already passed, look now.
-            const from = airing.at - policy.padBeforeMin * MINUTE
-            return Math.max(from, now)
+            // Start looking shortly before it is expected — sites publish early
+            // as often as late — and if that moment has passed, look now.
+            return Math.max(expected - policy.padBeforeMin * MINUTE, now)
         }
 
         case "inherit":

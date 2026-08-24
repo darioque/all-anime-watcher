@@ -42,6 +42,15 @@ export default defineConfig({
         target: "chrome120",
         sourcemap: true,
         minify: false,
+        /*
+         * No <link rel="modulepreload"> in the emitted HTML.
+         *
+         * Chrome refuses those inside an extension page — "cross-world extension
+         * resource mismatch" — so every one of them is a console warning followed
+         * by the module being fetched again normally. They exist to hide network
+         * latency, and there is none: these files are on disk.
+         */
+        modulePreload: false,
         rollupOptions: {
             input: {
                 background: resolve(root, "src/background/index.ts"),

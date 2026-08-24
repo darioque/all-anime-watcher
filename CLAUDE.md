@@ -23,6 +23,7 @@ npm run build              # both passes + dist validation → dist/
 npm run check              # validate dist/ alone
 npm run check:schedule     # the schedule date maths
 npm run check:matching     # AniList title matching rules (offline)
+npm run check:myanime      # myanime.live identity parsing (offline)
 npm run typecheck          # vue-tsc, must stay clean
 npm run probe -- lmanime   # run a source against the live site
 PROBE_SERVER=3 npm run probe -- lmanime   # exercise one video host
@@ -98,6 +99,13 @@ These are load-bearing. Breaking one costs a rewrite later.
    `trackers/matching.ts`, `shared/vtt.ts` — each time discovered by trying to
    write the test. Split first: rules in a pure module, storage and messaging in
    the caller.
+10. **A synchronous cache with a default fallback must never be left empty.**
+    `cachedSettings()` returns `cache ?? defaultSettings()`, so "invalidate the
+    cache" and "revert every setting to its default" were the same statement.
+    Every setting silently reset itself the moment any setting was changed, and
+    it looked from the outside like one toggle being ignored. Storage change
+    events carry `newValue`; *replace* the cache from it in the same tick rather
+    than nulling it and hoping something re-reads in time.
 
 ## Nothing hardcoded
 
@@ -149,11 +157,34 @@ scripts/probe-source.mts the CLI Lab page
 | --- | --- | --- |
 | lmanime.com | WordPress `animestream` theme | done — plays in the browser |
 | mundodonghua.com | custom PHP, packed-JS server tabs | done — probe green |
-| myanime.live | WordPress REST API; series are tags | done — probe green |
+| myanime.live | WordPress REST API; no series pages at all | done — probe green |
 | anikototv.to | AnimeKai/AnimeSuge family, signed AJAX | done — probe green |
 
 All four launch sources are in. The remaining phase-4 item is an **in-extension
 Lab page**; `npm run probe` covers the same ground from the CLI for now.
+
+**myanime.live has no series identity to read**, which makes it the hardest of
+the four and a useful template for sites like it. Each post is one episode, and
+the site groups them four different ways depending on how nervous it was about
+the rights holder. In the order `getPageInfo` tries them:
+
+1. the post's own **"All Episodes" button**, linking to `/?s=<query>` — the
+   site's own grouping, and the only thing that works for posts stripped of a
+   title;
+2. the **post slug**, minus its episode marker;
+3. the **post title**, same cut, which is where the display name comes from;
+4. the post's **tags** — the original approach and the worst of the four: many
+   posts carry none, and where they do the tag is as likely to name the
+   protagonist ("Lin Feng") as the show.
+
+Two consequences worth keeping. The stored `seriesUrl` is a `/?s=` search page,
+with the series id pinned in the fragment (`#aaw=…`) when the best query is
+broader than the series name — a series retitled mid-run needs a broad query to
+find its older episodes and a specific id to filter the results. And posts that
+state no number at all are numbered from their **position between posts that
+do**, only where the arithmetic fits exactly; the rest are dropped, because a
+wrong number puts watch history on the wrong episode. `npm run check:myanime`
+covers all of it.
 
 **Anikoto's signing**, since this family is common: `vrf = base64(rc4("simple-hash", animeId))`.
 The key and algorithm are both in the site's own `main.js`, which uses the same
@@ -278,11 +309,30 @@ exercises one at a time.
 | mp4upload.com | `mp4upload` | works — direct MP4, played in the browser |
 | ok.ru | `okru` | works — direct MP4 at several renditions |
 | streamwish family | `streamwish` | works — covers embedwish, vidhidepro, bysekoze, morencius, FileLions, VidHide |
-| dailymotion.com | `dailymotion` | resolves to a master playlist; HLS playback unproven |
+| megaplay family | `megaplay` | works — HLS + subtitles; covers megaplay.buzz, vidtube.site and the rest of the white-labelled engine |
+| dailymotion.com | `dailymotion` | resolves to a master playlist; the manifest 403s intermittently — see below |
 | voe.sx, rumble.com, youtube.com | — | embedded via the iframe fallback |
 
+**MegaPlay** is two requests and no obfuscation: the embed page carries a
+`data-id` that is *not* the id in the URL, and `/stream/getSources?id=<data-id>`
+answers with the m3u8, the subtitle tracks and intro/outro offsets. Its CDN
+hostname rotates, so the Referer it demands is declared on the `Stream` and
+`background/dnr.ts` installs a rule for that host at playback time — see
+`ensureRefererRule`. Subtitle hosts need the same treatment and are a different
+domain from the video.
+
+**Dailymotion's 403 is not a header problem.** Both a token-shaped explanation
+and a header-shaped one fit some of the evidence, which is exactly why it keeps
+getting misdiagnosed — an earlier pass concluded `Accept-Encoding` and shipped a
+DNR removal rule for it. Repeating a single header variant with a *fresh* token
+each time shows the same variant both passing and failing, so the variable is the
+`sec=` token, not what is sent with it. Do not add header rules for this without
+a repeat-measured result. In practice the player falls through to the next server
+on a fatal HLS error, which is why lmanime and myanime still play.
+
 **Sources:** `lmanime` (AnimeStream theme), `mundodonghua` (custom PHP, packed-JS
-servers), `myanime` (WordPress REST API — series are *tags*, episodes are posts).
+servers), `myanime` (WordPress REST API, no series pages), `anikoto` (AnimeKai
+family, signed AJAX, embeds on the MegaPlay engine).
 
 ## Phase status
 
@@ -303,7 +353,21 @@ servers), `myanime` (WordPress REST API — series are *tags*, episodes are post
 6. **done** — skip intro/outro (site offsets first, AniSkip as fallback),
    subtitle tracks with SRT→VTT conversion, keyboard shortcuts with a `?`
    overlay, Picture-in-Picture, quality preference, episode navigation
-7. downloads (OPFS pipeline) and import/export
-8. breadth and library depth: categories with include/exclude filtering and
+6.5 **done** — corrections from the first real week of use. The settings cache
+   bug (rule 10), a watch pointer that moved backwards, myanime's identity
+   rework, the MegaPlay extractor, live-updating library UI, an episode picker
+   per row, source filtering, persisted list controls, a release delay for the
+   airing schedule, and honouring `takeOverPage` with an in-page badge when it
+   is off.
+7. **finding and grouping** — a search page for adding series deliberately
+   rather than only by opening an episode, and one row per *show* across
+   sources with an expander (AMR's model), keyed on the AniList match rather
+   than on titles. The two belong together: both are about a show existing in
+   more than one place.
+8. downloads (OPFS pipeline) and import/export. Import/export is the only
+   data-transfer path there is, since sync was dropped on purpose, so it has to
+   round-trip losslessly.
+9. breadth and library depth: categories with include/exclude filtering and
    bulk actions (AMR's model; `TrackedAnime.categories` already exists and is
-   unused), ZoroTheme family, Spanish sources, AniList write-back, stats
+   unused) — a source that only carries donghua should seed one — plus the
+   ZoroTheme family, Spanish sources, AniList write-back, stats

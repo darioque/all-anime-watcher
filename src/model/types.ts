@@ -61,6 +61,8 @@ export interface AnimeOverrides {
     autoAdvance?: boolean
     completionThreshold?: number
     markWatchedOnOpen?: boolean
+    markWatchedOnEmbed?: boolean
+    releaseDelayMin?: number
     takeOverPage?: boolean
     notifyNewEpisode?: boolean
     pushToTracker?: boolean
@@ -75,8 +77,15 @@ export type SchedulePolicy =
     | { mode: "inherit" }
     /** Plain polling, AMR's behaviour. */
     | { mode: "interval"; everyHours: number }
-    /** Poll around the real air time; falls back to interval when unknown. */
-    | { mode: "airing"; padBeforeMin: number; padAfterMin: number; fallbackHours: number }
+    /**
+     * Poll around the real air time; falls back to interval when unknown.
+     *
+     * `delayMin` is the gap between a broadcast and this *site* having it —
+     * fansub and donghua sites are rarely instant, so checking at the broadcast
+     * minute mostly finds nothing. Left undefined it falls through to the
+     * source's `releaseDelayMin` and then to the global one.
+     */
+    | { mode: "airing"; delayMin?: number; padBeforeMin: number; padAfterMin: number; fallbackHours: number }
     /**
      * "Every Tuesday at 18:00", in the browser's local time.
      *

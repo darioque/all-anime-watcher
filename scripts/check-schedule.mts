@@ -121,5 +121,29 @@ check("one failure keeps the normal slot", failedOnce === now + 6 * HOUR, "backo
 check("repeated failures back off further", failedLots > now + 6 * HOUR, `+${Math.round((failedLots - now) / HOUR)}h`)
 check("backoff is capped", failedLots <= now + 12 * HOUR)
 
+// --- release delay: the gap between a broadcast and this site having it subbed
+const withDelay = { ...airingPolicy, delayMin: 180 } as const
+const airsInAnHour = now + HOUR
+
+const delayed = at(withDelay, { airing: { episode: 12, at: airsInAnHour, fetchedAt: now } })
+check(
+    "the release delay pushes the slot back",
+    delayed === airsInAnHour + 180 * 60_000 - 15 * 60_000,
+    `air +3h, minus the 15m pad`
+)
+
+// An episode that aired three hours ago is past its two-hour pad and falls back
+// to the interval. The same episode on a site that runs three hours behind is
+// due *right now* — which is the whole point of the delay.
+const airedThreeHoursAgo = now - 3 * HOUR
+const stillDue = at(withDelay, { airing: { episode: 12, at: airedThreeHoursAgo, fetchedAt: now } })
+const noDelay = at(airingPolicy, { airing: { episode: 12, at: airedThreeHoursAgo, fetchedAt: now } })
+check("a delayed episode is due as the site catches up", stillDue === now)
+check("the same episode without a delay has fallen back", noDelay === now + 12 * HOUR)
+
+// The delay must not resurrect data that is simply old.
+const veryStale = at(withDelay, { airing: { episode: 12, at: now - 30 * DAY, fetchedAt: now - 30 * DAY } })
+check("a delay does not rescue stale airing data", veryStale === now + 12 * HOUR)
+
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

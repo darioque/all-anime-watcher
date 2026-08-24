@@ -34,7 +34,13 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
             {
                 key: "markWatchedOnOpen",
                 label: "Opening an episode moves my position to it",
-                help: "Turn this off once you trust the completion threshold instead.",
+                help: "Only ever forward — opening an earlier episode is a rewatch and leaves your position alone.",
+                type: "toggle"
+            },
+            {
+                key: "markWatchedOnEmbed",
+                label: "Count an embedded episode as watched on open",
+                help: "For hosts we can't extract, where the site's own player runs in a frame. Nothing can see inside one, so opening it is the only signal there will ever be.",
                 type: "toggle"
             },
             {
@@ -61,6 +67,15 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
                 max: 60
             },
             { key: "maxParallelSources", label: "Sites checked at once", type: "number", min: 1, max: 10 },
+            {
+                key: "releaseDelayMin",
+                label: "Sites are usually behind the broadcast by",
+                help: "Minutes. Used by the “Air time” schedule — no site has an episode subtitled the minute it airs, and checking then just wastes the window. A series can state its own.",
+                type: "number",
+                min: 0,
+                max: 10080,
+                step: 15
+            },
             { key: "maxChecksPerRun", label: "Most series checked per wake-up", type: "number", min: 1, max: 500 },
             {
                 key: "checkTimeoutSec",
