@@ -249,6 +249,32 @@ export async function updateProgress(input: {
     return anime
 }
 
+/**
+ * Drop the newest stored episodes so the next check rediscovers them as new.
+ *
+ * There is otherwise no way to exercise the new-episode path: adding a series
+ * records its whole back catalogue as the baseline, and you cannot make a site
+ * publish an episode on demand. This forgets the top of the list, so a forced
+ * check finds them, counts them as new, and notifies exactly as it would in the
+ * wild.
+ */
+export async function forgetNewestEpisodes(key: string, count = 1): Promise<TrackedAnime | null> {
+    const anime = await db.getAnime(key)
+    if (!anime) return null
+
+    const sorted = [...anime.episodes].sort((a, b) => b.number - a.number)
+    const dropped = sorted.slice(0, Math.max(1, count))
+    anime.episodes = sorted.slice(Math.max(1, count))
+
+    // Due immediately, so the next tick (or a forced run) picks it up.
+    anime.nextCheckAt = 0
+    anime.updatedAt = Date.now()
+    await db.putAnime(anime)
+
+    logger.info(`${key}: forgot ${dropped.length} episode(s) — ${dropped.map(e => e.number).join(", ")}`)
+    return anime
+}
+
 export async function setFlags(key: string, flags: { follow?: boolean; poll?: boolean }): Promise<TrackedAnime | null> {
     const anime = await db.getAnime(key)
     if (!anime) return null

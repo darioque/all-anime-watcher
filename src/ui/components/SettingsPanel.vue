@@ -160,6 +160,20 @@ async function patch(key: keyof GlobalSettings, value: unknown) {
     }
 }
 
+const notificationResult = ref<string | null>(null)
+
+async function testNotification() {
+    try {
+        const ok = await send("debug:testNotification", {})
+        notificationResult.value = ok
+            ? "Sent — if nothing appeared, notifications are blocked at the OS or browser level."
+            : "The browser refused to raise it."
+    } catch (e) {
+        notificationResult.value = e instanceof Error ? e.message : String(e)
+    }
+    setTimeout(() => (notificationResult.value = null), 10000)
+}
+
 const asList = (value: unknown) => (Array.isArray(value) ? value.join(", ") : "")
 const fromList = (value: string) =>
     value
@@ -237,6 +251,24 @@ onMounted(load)
                             :value="settings[field.key]"
                             @change="patch(field.key, ($event.target as HTMLInputElement).value)"
                         />
+                    </div>
+                </div>
+            </div>
+
+            <div class="group">
+                <h3>Checking it works</h3>
+                <p class="note">
+                    New-episode notifications are hard to try out, since you can't make a site publish an episode. Send
+                    a test one here; to exercise the real path, use “Forget newest episode” in a series' ⋯ menu and then
+                    “Check every series now”.
+                </p>
+                <div class="field">
+                    <div class="text">
+                        <label for="test-notification">Send a test notification</label>
+                        <p v-if="notificationResult" class="help">{{ notificationResult }}</p>
+                    </div>
+                    <div class="control">
+                        <button id="test-notification" class="btn" @click="testNotification">Send</button>
                     </div>
                 </div>
             </div>

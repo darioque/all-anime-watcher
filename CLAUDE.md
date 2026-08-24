@@ -138,6 +138,18 @@ scripts/probe-source.mts the CLI Lab page
 | mundodonghua.com | custom PHP, `/donghua/` + `/ver/` | phase 4 |
 | myanime.live | WordPress `aamla` blog theme | phase 4 |
 
+## Editing these files
+
+Several patches to `.vue` files have silently no-op'd because an exact-string
+replace ran against markup prettier had already reformatted — leaving working
+code that nothing could reach (a settings panel with no button, a `checkAll` with
+no caller). Typecheck passes in that state, so it proves nothing.
+
+Rewrite the file or use a real editor tool; if you must patch by string, assert
+the replacement changed the buffer, and afterwards grep the *built bundle* for a
+user-visible string from the change. `grep -F "Check every series now" dist/*.js`
+is the check that would have caught all three.
+
 ## UI surfaces
 
 The popup is the compact view; **the full library page (`src/ui/library/`) is the
@@ -150,6 +162,17 @@ popup has to be *cleared* via `action.setPopup({ popup: "" })`, not just ignored
 Watch state (`watchState()` in `model/keys.ts`) drives the row stripe: `new`,
 `current`, `unstarted`, `paused`. Colour is never the only signal — the pill and
 the button label say the same thing.
+
+A row shows **one** action button (the watch button); everything else lives in
+its `⋯` menu, and destructive actions go behind a `ConfirmDialog`. A row of six
+buttons stops being scannable the moment the library is real, and Remove should
+never sit next to Refresh.
+
+**Testing notifications:** you can't make a site publish an episode, so use
+“Forget newest episode” in a series' ⋯ menu (drops the top of the stored list)
+then “Check every series now”. The real path then runs: the source returns the
+episode, it counts as new, and it notifies. Settings has a plain test
+notification too, for checking the OS-level plumbing.
 
 ## Extractors and video hosts
 
@@ -215,4 +238,6 @@ manifests and segments with XHR — needs the proxy whenever a CDN withholds
 5. domain resolution, AniList metadata/schedule, per-anime schedule policies
 6. player depth: skips, auto-advance, tracks, shortcuts, PiP
 7. downloads (OPFS pipeline) and import/export
-8. breadth: ZoroTheme family, Spanish sources, AniList write-back, stats
+8. breadth and library depth: categories with include/exclude filtering and
+   bulk actions (AMR's model; `TrackedAnime.categories` already exists and is
+   unused), ZoroTheme family, Spanish sources, AniList write-back, stats

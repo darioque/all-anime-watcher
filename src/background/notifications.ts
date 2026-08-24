@@ -87,3 +87,21 @@ export async function notifyNewEpisodes(anime: TrackedAnime, added: Episode[]): 
 function formatNumber(value: number): string {
     return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(2)))
 }
+
+/** Prove the notification path end to end without waiting for a real release. */
+export async function testNotification(): Promise<boolean> {
+    if (!browser.notifications) return false
+    try {
+        await browser.notifications.create(`aaw-test-${counter++}`, {
+            type: "basic",
+            title: "All Anime Watcher",
+            message: "Notifications are working.",
+            contextMessage: "test",
+            iconUrl: browser.runtime.getURL("assets/icons/icon-128.png")
+        })
+        return true
+    } catch (error) {
+        logger.warn("test notification failed", error)
+        return false
+    }
+}

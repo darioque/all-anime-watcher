@@ -4,6 +4,7 @@ import { refreshBadge } from "../badge"
 import { getAllAnime, getAnime } from "~/model/db"
 import {
     addSeries,
+    forgetNewestEpisodes,
     markWatched,
     refreshSeries,
     remove,
@@ -13,6 +14,7 @@ import {
     updateProgress
 } from "~/library/library"
 import { runDueChecks, schedulerStatus } from "../scheduler"
+import { testNotification } from "../notifications"
 
 export function registerLibraryHandlers() {
     on("library:list", async () => {
@@ -48,6 +50,10 @@ export function registerLibraryHandlers() {
     on("library:checkAll", async ({ force }) => runDueChecks({ force: force ?? true }))
 
     on("scheduler:status", async () => schedulerStatus())
+
+    on("library:forgetNewest", async ({ key, count }) => forgetNewestEpisodes(key, count ?? 1))
+
+    on("debug:testNotification", async () => testNotification())
 
     on("library:setSchedule", async ({ key, schedule }) => setSchedule(key, schedule))
 

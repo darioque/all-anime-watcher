@@ -2,12 +2,13 @@
 import { computed, onMounted, ref } from "vue"
 import { send } from "~/shared/messages"
 import type { SourceDescriptor } from "~/shared/messages"
-import type { TrackedAnime } from "~/model/types"
+import type { SchedulePolicy, TrackedAnime } from "~/model/types"
 import { latestEpisode, nextEpisode, titleOf, unwatchedCount, watchState } from "~/model/keys"
-import type { SchedulePolicy } from "~/model/types"
 import { relativeFuture, relativePast } from "~/shared/time"
 import SchedulePicker from "./SchedulePicker.vue"
 import SettingsPanel from "./SettingsPanel.vue"
+import RowMenu, { type MenuItem } from "./RowMenu.vue"
+import ConfirmDialog from "./ConfirmDialog.vue"
 
 const props = withDefaults(defineProps<{ variant?: "popup" | "page" }>(), { variant: "popup" })
 
@@ -15,21 +16,22 @@ const library = ref<TrackedAnime[]>([])
 const sources = ref<SourceDescriptor[]>([])
 const loading = ref(true)
 const error = ref<string | null>(null)
+const notice = ref<string | null>(null)
 const busy = ref(new Set<string>())
+
 const filter = ref("")
 const sort = ref<"recent" | "title" | "unwatched" | "next-check">("recent")
 const onlyUnwatched = ref(false)
-const expanded = ref<string | null>(null)
+const scheduleFor = ref<string | null>(null)
 const showSettings = ref(false)
 const checking = ref(false)
-const checkResult = ref<string | null>(null)
+const pendingRemoval = ref<TrackedAnime | null>(null)
 
 const sourceName = (id: string) => sources.value.find(s => s.id === id)?.name ?? id
 
 const visible = computed(() => {
     const needle = filter.value.trim().toLowerCase()
     let list = library.value
-
     if (needle !== "") list = list.filter(a => titleOf(a).toLowerCase().includes(needle))
     if (onlyUnwatched.value) list = list.filter(a => watchState(a) === "new")
 
@@ -82,6 +84,13 @@ function replace(updated: TrackedAnime | null) {
     if (updated) library.value = library.value.map(a => (a.key === updated.key ? updated : a))
 }
 
+function flash(message: string) {
+    notice.value = message
+    setTimeout(() => (notice.value = null), 6000)
+}
+
+// ---------------------------------------------------------------- actions
+
 const refresh = (a: TrackedAnime) => withBusy(a.key, async () => replace(await send("library:refresh", { key: a.key })))
 
 const toggleFollow = (a: TrackedAnime) =>
@@ -90,32 +99,9 @@ const toggleFollow = (a: TrackedAnime) =>
 const togglePoll = (a: TrackedAnime) =>
     withBusy(a.key, async () => replace(await send("library:setFlags", { key: a.key, poll: !a.poll })))
 
-/** Check every polled series now, ignoring their schedules. */
-async function checkAll() {
-    checking.value = true
-    checkResult.value = null
-    try {
-        const found = await send("library:checkAll", { force: true })
-        checkResult.value = found === 0 ? "No new episodes" : `${found} series updated`
-        await load()
-    } catch (e) {
-        error.value = e instanceof Error ? e.message : String(e)
-    } finally {
-        checking.value = false
-        setTimeout(() => (checkResult.value = null), 6000)
-    }
-}
-
 const setSchedule = (a: TrackedAnime, schedule: SchedulePolicy) =>
     withBusy(a.key, async () => replace(await send("library:setSchedule", { key: a.key, schedule })))
 
-const remove = (a: TrackedAnime) =>
-    withBusy(a.key, async () => {
-        await send("library:remove", { key: a.key })
-        library.value = library.value.filter(x => x.key !== a.key)
-    })
-
-/** Mark everything up to the newest episode as seen, without opening anything. */
 const catchUp = (a: TrackedAnime) =>
     withBusy(a.key, async () => {
         const latest = latestEpisode(a)
@@ -129,17 +115,89 @@ const catchUp = (a: TrackedAnime) =>
         )
     })
 
+const forgetNewest = (a: TrackedAnime) =>
+    withBusy(a.key, async () => {
+        replace(await send("library:forgetNewest", { key: a.key, count: 1 }))
+        flash(`Forgot the newest episode of ${titleOf(a)} — run “Check all now” to rediscover it`)
+    })
+
+async function confirmRemoval() {
+    const target = pendingRemoval.value
+    pendingRemoval.value = null
+    if (!target) return
+    await withBusy(target.key, async () => {
+        await send("library:remove", { key: target.key })
+        library.value = library.value.filter(x => x.key !== target.key)
+        flash(`Removed ${titleOf(target)}`)
+    })
+}
+
+async function checkAll() {
+    checking.value = true
+    error.value = null
+    try {
+        const found = await send("library:checkAll", { force: true })
+        flash(found === 0 ? "Checked everything — nothing new" : `${found} series updated`)
+        await load()
+    } catch (e) {
+        error.value = e instanceof Error ? e.message : String(e)
+    } finally {
+        checking.value = false
+    }
+}
+
 const open = (url: string) => void send("tab:open", { url })
 
+function openSettings() {
+    if (props.variant === "page") showSettings.value = !showSettings.value
+    else void send("tab:openLibrary", {})
+}
+
+/** States the viewer needs to see even when they aren't acting on them. */
+function stateTags(a: TrackedAnime): { label: string; tone: "warn" | "muted" }[] {
+    const tags: { label: string; tone: "warn" | "muted" }[] = []
+    if (!a.follow) tags.push({ label: "not followed", tone: "muted" })
+    if (!a.poll) tags.push({ label: "not checking", tone: "muted" })
+    if (a.overrides.schedule) tags.push({ label: "custom schedule", tone: "muted" })
+    if (a.failCount > 0) tags.push({ label: `${a.failCount} failed check${a.failCount > 1 ? "s" : ""}`, tone: "warn" })
+    return tags
+}
+
 /**
- * The button's label states plainly where it will take you, because "next" is a
- * lie when the pointer is at the newest episode or the series was never opened.
+ * Everything that isn't the one thing you came to do. Kept in a menu because a
+ * row of six buttons stops being scannable the moment the library is real, and
+ * destructive actions should not sit next to routine ones.
  */
+function menuFor(a: TrackedAnime): MenuItem[] {
+    return [
+        { label: "Refresh episode list", action: () => void refresh(a) },
+        {
+            label: "Mark as caught up",
+            disabled: watchState(a) !== "new",
+            hint: "Move your position to the newest episode",
+            action: () => void catchUp(a)
+        },
+        { label: "Following", checked: a.follow, separated: true, action: () => void toggleFollow(a) },
+        { label: "Checking for new episodes", checked: a.poll, action: () => void togglePoll(a) },
+        {
+            label: "Schedule…",
+            checked: Boolean(a.overrides.schedule),
+            action: () => (scheduleFor.value = scheduleFor.value === a.key ? null : a.key)
+        },
+        { label: "Open series page", separated: true, action: () => open(a.url) },
+        {
+            label: "Forget newest episode",
+            hint: "Developer aid for testing notifications",
+            action: () => void forgetNewest(a)
+        },
+        { label: "Remove from library…", danger: true, separated: true, action: () => (pendingRemoval.value = a) }
+    ]
+}
+
 function watchAction(a: TrackedAnime): { label: string; title: string; url?: string } {
     const state = watchState(a)
-    if (state === "unstarted") {
-        return { label: "No episodes", title: "The source returned no episodes yet" }
-    }
+    if (state === "unstarted") return { label: "No episodes", title: "The source returned no episodes yet" }
+
     const next = nextEpisode(a)
     if (!next) {
         const latest = latestEpisode(a)
@@ -158,7 +216,11 @@ function watchAction(a: TrackedAnime): { label: string; title: string; url?: str
     }
 }
 
-onMounted(load)
+onMounted(async () => {
+    if (props.variant === "page" && window.location.hash === "#settings") showSettings.value = true
+    await load()
+})
+
 defineExpose({ load })
 </script>
 
@@ -170,17 +232,34 @@ defineExpose({ load })
                 <h1>All Anime Watcher</h1>
             </div>
             <div class="head-meta">
-                <span v-if="newEpisodes > 0" class="pill accent"> {{ newEpisodes }} new in {{ seriesWithNew }} </span>
+                <span v-if="newEpisodes > 0" class="pill accent">{{ newEpisodes }} new in {{ seriesWithNew }}</span>
                 <span class="pill">{{ library.length }} tracked</span>
+
+                <button
+                    class="btn icon"
+                    :disabled="checking || library.length === 0"
+                    :title="checking ? 'Checking…' : 'Check every series now'"
+                    @click="checkAll"
+                >
+                    <span :class="{ spin: checking }">⟳</span>
+                </button>
+                <button class="btn icon" title="Reload the list" @click="load">↻</button>
                 <button
                     v-if="variant === 'popup'"
                     class="btn icon"
-                    title="Open full library"
+                    title="Open the full library"
                     @click="send('tab:openLibrary', {})"
                 >
                     ⤢
                 </button>
-                <button class="btn icon" title="Reload list" @click="load">↻</button>
+                <button
+                    class="btn icon"
+                    :class="{ primary: showSettings }"
+                    :title="variant === 'page' ? 'Settings' : 'Settings (opens the full library)'"
+                    @click="openSettings"
+                >
+                    ⚙
+                </button>
             </div>
         </header>
 
@@ -204,9 +283,8 @@ defineExpose({ load })
             </button>
         </div>
 
-        <p v-if="checkResult" class="banner subtle">{{ checkResult }}</p>
-
         <p v-if="error" class="banner error">{{ error }}</p>
+        <p v-if="notice" class="banner subtle">{{ notice }}</p>
         <p v-if="loading" class="banner">Loading…</p>
 
         <div v-else-if="library.length === 0" class="empty">
@@ -224,7 +302,7 @@ defineExpose({ load })
             <li v-for="a in visible" :key="a.key" class="row" :data-state="watchState(a)">
                 <span class="stripe" aria-hidden="true"></span>
 
-                <div class="poster" :class="{ ph: !a.poster }">
+                <div class="poster">
                     <img v-if="a.poster" :src="a.poster" alt="" loading="lazy" />
                 </div>
 
@@ -251,9 +329,13 @@ defineExpose({ load })
                         </span>
                     </div>
 
-                    <p v-if="a.lastError" class="row-error" :title="a.lastError">
-                        Last check failed{{ a.failCount > 1 ? ` (${a.failCount}×)` : "" }}
-                    </p>
+                    <div v-if="stateTags(a).length > 0" class="tags">
+                        <span v-for="tag in stateTags(a)" :key="tag.label" class="tag" :class="tag.tone">
+                            {{ tag.label }}
+                        </span>
+                    </div>
+
+                    <p v-if="a.lastError" class="row-error" :title="a.lastError">Last check failed</p>
 
                     <div class="actions">
                         <button
@@ -265,50 +347,12 @@ defineExpose({ load })
                         >
                             {{ watchAction(a).label }}
                         </button>
-                        <button class="btn" :disabled="isBusy(a.key)" @click="refresh(a)">
-                            {{ isBusy(a.key) ? "…" : "Refresh" }}
-                        </button>
-                        <button
-                            v-if="watchState(a) === 'new'"
-                            class="btn"
-                            :disabled="isBusy(a.key)"
-                            title="Move your position to the newest episode without opening it"
-                            @click="catchUp(a)"
-                        >
-                            Catch up
-                        </button>
-                        <button
-                            class="btn"
-                            :class="{ primary: a.follow }"
-                            :disabled="isBusy(a.key)"
-                            :title="a.follow ? 'Following — click to unfollow' : 'Not followed'"
-                            @click="toggleFollow(a)"
-                        >
-                            {{ a.follow ? "Following" : "Follow" }}
-                        </button>
-                        <button
-                            class="btn"
-                            :class="{ primary: a.poll }"
-                            :disabled="isBusy(a.key)"
-                            :title="a.poll ? 'Checking for new episodes' : 'Not checking'"
-                            @click="togglePoll(a)"
-                        >
-                            {{ a.poll ? "Checking" : "Paused" }}
-                        </button>
-                        <button
-                            class="btn"
-                            :class="{ primary: expanded === a.key }"
-                            title="When should this be checked?"
-                            @click="expanded = expanded === a.key ? null : a.key"
-                        >
-                            Schedule
-                        </button>
-                        <button class="btn danger icon" title="Remove" :disabled="isBusy(a.key)" @click="remove(a)">
-                            ✕
-                        </button>
+                        <span v-if="isBusy(a.key)" class="working">working…</span>
+                        <span class="grow"></span>
+                        <RowMenu :items="menuFor(a)" :label="`Actions for ${titleOf(a)}`" />
                     </div>
 
-                    <div v-if="expanded === a.key" class="schedule">
+                    <div v-if="scheduleFor === a.key" class="schedule">
                         <SchedulePicker
                             allow-inherit
                             inherited-label="global default"
@@ -319,6 +363,16 @@ defineExpose({ load })
                 </div>
             </li>
         </ul>
+
+        <ConfirmDialog
+            :open="pendingRemoval !== null"
+            danger
+            confirm-label="Remove"
+            :title="`Remove ${pendingRemoval ? titleOf(pendingRemoval) : ''}?`"
+            body="This forgets the series, your position in it, and its watch history. Opening an episode again will re-add it from scratch."
+            @cancel="pendingRemoval = null"
+            @confirm="confirmRemoval"
+        />
     </div>
 </template>
 
@@ -329,7 +383,7 @@ defineExpose({ load })
 }
 
 .library.popup {
-    width: 420px;
+    width: 440px;
     max-height: 580px;
     overflow-y: auto;
 }
@@ -343,7 +397,7 @@ defineExpose({ load })
 header {
     position: sticky;
     top: 0;
-    z-index: 2;
+    z-index: 20;
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -387,7 +441,7 @@ h1 {
 .head-meta {
     display: flex;
     align-items: center;
-    gap: 6px;
+    gap: 5px;
 }
 
 .pill {
@@ -405,6 +459,23 @@ h1 {
     background: var(--accent-soft);
     color: var(--accent-ink);
     font-weight: 700;
+}
+
+.spin {
+    display: inline-block;
+    animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .spin {
+        animation: none;
+    }
 }
 
 .controls-row {
@@ -438,20 +509,6 @@ h1 {
     font-size: 11px;
 }
 
-.banner.subtle {
-    margin: 8px 14px 0;
-    font-size: 11px;
-    color: var(--accent-ink);
-}
-
-.schedule {
-    margin-top: 8px;
-    padding: 10px;
-    background: var(--ground);
-    border: 1px solid var(--rule);
-    border-radius: var(--radius);
-}
-
 .banner {
     margin: 12px 14px;
     color: var(--ink-3);
@@ -462,6 +519,12 @@ h1 {
     background: var(--danger-soft);
     padding: 8px 10px;
     border-radius: var(--radius);
+}
+
+.banner.subtle {
+    margin: 10px 14px 0;
+    font-size: 11px;
+    color: var(--accent-ink);
 }
 
 .empty {
@@ -488,11 +551,6 @@ h1 {
     gap: 8px;
 }
 
-/*
- * The stripe encodes watch state the way AMR uses row colour: something new,
- * caught up, or not being followed. Colour is the signal; the pill and the
- * button label carry the same information for anyone who can't use it.
- */
 .row {
     position: relative;
     display: grid;
@@ -503,13 +561,13 @@ h1 {
     border: 1px solid var(--rule);
     border-radius: var(--radius);
     box-shadow: var(--shadow);
-    overflow: hidden;
 }
 
 .stripe {
     position: absolute;
     inset: 0 auto 0 0;
     width: 3px;
+    border-radius: var(--radius) 0 0 var(--radius);
 }
 
 .row[data-state="new"] .stripe {
@@ -525,7 +583,7 @@ h1 {
 }
 
 .row[data-state="paused"] {
-    opacity: 0.62;
+    opacity: 0.66;
 }
 
 .row[data-state="paused"] .stripe {
@@ -604,6 +662,24 @@ h1 {
     font-style: italic;
 }
 
+.tags {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px;
+}
+
+.tag {
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: var(--surface-2);
+    color: var(--ink-3);
+}
+
+.tag.warn {
+    color: var(--state-warn);
+}
+
 .row-error {
     margin: 2px 0 0;
     font-size: 11px;
@@ -612,13 +688,30 @@ h1 {
 
 .actions {
     display: flex;
-    flex-wrap: wrap;
-    gap: 5px;
+    align-items: center;
+    gap: 6px;
     margin-top: 4px;
 }
 
 .actions .btn {
     font-size: 11px;
-    padding: 3px 7px;
+    padding: 3px 8px;
+}
+
+.grow {
+    flex: 1 1 auto;
+}
+
+.working {
+    font-size: 10px;
+    color: var(--ink-3);
+}
+
+.schedule {
+    margin-top: 8px;
+    padding: 10px;
+    background: var(--ground);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
 }
 </style>
