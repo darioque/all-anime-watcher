@@ -39,6 +39,10 @@ export interface MessageMap {
     "library:setFlags": { req: { key: string; follow?: boolean; poll?: boolean }; res: TrackedAnime | null }
     "library:rename": { req: { key: string; displayTitle: string }; res: TrackedAnime | null }
     "library:refresh": { req: { key: string }; res: TrackedAnime | null }
+    "library:markWatched": {
+        req: { key: string; number: number; variant?: string }
+        res: TrackedAnime | null
+    }
 
     "settings:get": { req: Record<string, never>; res: GlobalSettings }
     "settings:patch": { req: { patch: Partial<GlobalSettings> }; res: GlobalSettings }
@@ -50,6 +54,7 @@ export interface MessageMap {
     }
 
     "tab:open": { req: { url: string; active?: boolean }; res: boolean }
+    "tab:openLibrary": { req: Record<string, never>; res: boolean }
 }
 
 export type Action = keyof MessageMap

@@ -60,6 +60,7 @@ export interface AnimeOverrides {
     skipOutro?: "off" | "button" | "auto"
     autoAdvance?: boolean
     completionThreshold?: number
+    markWatchedOnOpen?: boolean
     takeOverPage?: boolean
     notifyNewEpisode?: boolean
     pushToTracker?: boolean

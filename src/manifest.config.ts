@@ -28,6 +28,13 @@ export const manifest = {
         type: "module"
     },
 
+    // Full library view, opened in a tab. Registered as the options page too, so
+    // the browser's own "Extension options" entry lands somewhere useful.
+    options_ui: {
+        page: "src/ui/library/index.html",
+        open_in_tab: true
+    },
+
     permissions: [
         // Reading tab context and injecting the player
         "tabs",

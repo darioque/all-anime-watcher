@@ -42,17 +42,43 @@ export function hasUnwatched(anime: Pick<TrackedAnime, "episodes" | "lastWatched
     return anime.follow && unwatchedCount(anime) > 0
 }
 
-/** The episode to open on "continue". Lowest unwatched, else the last watched. */
+/**
+ * The episode "watch next" should open: the lowest episode above the watch
+ * pointer. With no pointer yet this is the earliest episode — the series has
+ * never been opened, so starting at the beginning is right.
+ *
+ * Returns undefined when the pointer is already at the newest episode, which the
+ * UI must treat as "up to date" rather than silently falling back to episode 1.
+ */
 export function nextEpisode(anime: Pick<TrackedAnime, "episodes" | "lastWatched">): Episode | undefined {
+    const lowest = (candidates: Episode[]) =>
+        candidates.reduce<Episode | undefined>((lo, ep) => (!lo || ep.number < lo.number ? ep : lo), undefined)
+
     const from = anime.lastWatched?.number
-    if (from === undefined) {
-        return anime.episodes.reduce<Episode | undefined>(
-            (lo, ep) => (!lo || ep.number < lo.number ? ep : lo),
-            undefined
-        )
-    }
-    return anime.episodes.reduce<Episode | undefined>(
-        (lo, ep) => (ep.number > from && (!lo || ep.number < lo.number) ? ep : lo),
-        undefined
-    )
+    if (from === undefined) return lowest(anime.episodes)
+    return lowest(anime.episodes.filter(ep => ep.number > from))
+}
+
+/** The newest episode the source lists. */
+export function latestEpisode(anime: Pick<TrackedAnime, "episodes">): Episode | undefined {
+    return anime.episodes.reduce<Episode | undefined>((hi, ep) => (!hi || ep.number > hi.number ? ep : hi), undefined)
+}
+
+/**
+ * How an entry should read at a glance. AMR encodes the same three states as row
+ * colours (colornew / colorread / colornotfollow); naming them here keeps that
+ * meaning out of the stylesheet.
+ *
+ *  - `new`       followed, and something sits above the watch pointer
+ *  - `current`   followed, and caught up
+ *  - `unstarted` followed, but the source returned no episodes
+ *  - `paused`    not followed
+ */
+export type WatchState = "new" | "current" | "unstarted" | "paused"
+
+export function watchState(anime: Pick<TrackedAnime, "episodes" | "lastWatched" | "follow">): WatchState {
+    if (!anime.follow) return "paused"
+    if (anime.episodes.length === 0) return "unstarted"
+    if (unwatchedCount(anime) > 0) return "new"
+    return "current"
 }

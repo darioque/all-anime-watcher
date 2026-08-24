@@ -43,9 +43,20 @@ function fail(label: string, error: unknown) {
     console.log(`  \x1b[31m✗\x1b[0m ${label.padEnd(20)} ${message}`)
 }
 
-async function step<T>(label: string, run: () => Promise<T>, describe: (value: T) => string): Promise<T | null> {
+async function step<T>(
+    label: string,
+    run: () => Promise<T>,
+    describe: (value: T) => string,
+    /** Return a message to turn a successful call into a failure. */
+    assert?: (value: T) => string | null
+): Promise<T | null> {
     try {
         const value = await run()
+        const problem = assert?.(value) ?? null
+        if (problem) {
+            fail(label, problem)
+            return value
+        }
         pass(label, describe(value))
         return value
     } catch (error) {
@@ -54,13 +65,29 @@ async function step<T>(label: string, run: () => Promise<T>, describe: (value: T
     }
 }
 
+/**
+ * A poster URL has to be something a browser can actually render. Lazy-loading
+ * themes keep a blank inline SVG in `src` and the real URL in `data-src`, so
+ * "there is a poster" is not the same as "the poster works" — this probe used to
+ * pass on a placeholder.
+ */
+function posterProblem(poster: string | undefined, what: string): string | null {
+    if (!poster) return null
+    if (poster.startsWith("data:")) {
+        return `${what} is a data: URI (${poster.slice(0, 48)}…) — almost certainly a lazy-load placeholder`
+    }
+    if (!/^https?:\/\//.test(poster)) return `${what} is not an absolute URL: ${poster}`
+    return null
+}
+
 console.log(`\n\x1b[1m${source.name}\x1b[0m  (${source.id})  →  ${base}\n`)
 
 // -------------------------------------------------------------- search
 const results = await step(
     "search",
     () => source.search("a", ctx),
-    r => `${r.length} result(s)` + (r[0] ? `, first: "${r[0].title}" → ${r[0].seriesId}` : "")
+    r => `${r.length} result(s)` + (r[0] ? `, first: "${r[0].title}" → ${r[0].seriesId}` : ""),
+    r => (r.length === 0 ? "no results for a one-letter query — the selector is probably wrong" : posterProblem(r[0]?.poster, "search poster"))
 )
 
 // -------------------------------------------------------------- series
@@ -71,7 +98,8 @@ if (seriesUrl) {
     await step(
         "getSeries",
         () => source.getSeries(seriesUrl, ctx),
-        s => `"${s.title}"${s.poster ? ", has poster" : ", NO poster"}, status=${s.status}`
+        s => `"${s.title}", status=${s.status}\n                       poster: ${s.poster ?? "(none)"}`,
+        s => posterProblem(s.poster, "series poster")
     )
 
     const episodes = await step(
@@ -79,8 +107,15 @@ if (seriesUrl) {
         () => source.getEpisodes(seriesUrl, ctx),
         e => {
             const numbers = e.slice(0, 3).map(x => x.number).join(", ")
-            const descending = e.every((x, i) => i === 0 || e[i - 1]!.number >= x.number)
-            return `${e.length} episode(s), newest first: [${numbers}], sorted=${descending ? "ok" : "WRONG"}`
+            return `${e.length} episode(s), newest first: [${numbers}]`
+        },
+        e => {
+            if (e.length === 0) return "no episodes — the update loop would have nothing to compare"
+            if (!e.every((x, i) => i === 0 || e[i - 1]!.number >= x.number)) {
+                return "episodes are not sorted descending; the newest-episode check relies on it"
+            }
+            if (e.some(x => !Number.isFinite(x.number))) return "an episode has a non-numeric number"
+            return null
         }
     )
 
@@ -129,6 +164,22 @@ if (html) {
             "resolveServer",
             () => source.resolveServer!(servers[0]!, ctx),
             url => `${servers[0]!.name} → ${url}`
+        )
+    }
+}
+
+// A poster that parses but 404s is still a broken image in the list.
+if (seriesUrl) {
+    const info = await source.getSeries(seriesUrl, ctx).catch(() => null)
+    if (info?.poster && /^https?:\/\//.test(info.poster)) {
+        await step(
+            "poster loads",
+            async () => {
+                const response = await fetch(info.poster!, { headers: { Referer: `${base}/` } })
+                return { status: response.status, type: response.headers.get("content-type") ?? "" }
+            },
+            r => `HTTP ${r.status}, ${r.type}`,
+            r => (r.status >= 400 ? `HTTP ${r.status}` : r.type.startsWith("image/") ? null : `not an image: ${r.type}`)
         )
     }
 }

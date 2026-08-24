@@ -2,7 +2,7 @@ import browser from "webextension-polyfill"
 import { installRouter } from "./router"
 import { installNavigationListeners, reloadExtraDomains } from "./navigation"
 import { registerPageHandlers } from "./handlers/page"
-import { registerLibraryHandlers } from "./handlers/library"
+import { openLibraryTab, registerLibraryHandlers } from "./handlers/library"
 import { registerSettingsHandlers } from "./handlers/settings"
 import { registerSourceHandlers } from "./handlers/sources"
 import { refreshBadge } from "./badge"
@@ -28,6 +28,7 @@ async function initialise() {
     }
     await reloadExtraDomains()
     await refreshBadge()
+    await applyToolbarBehaviour(settings.openInTab)
 
     logger.info(`ready — ${allSources().length} source(s)`)
     return true
@@ -46,6 +47,30 @@ const ready = initialise().catch(error => {
 
 installRouter(ready)
 installNavigationListeners()
+
+/**
+ * `openInTab` swaps the toolbar button between popup and full library tab. Chrome
+ * only fires action.onClicked when there is no popup, so the popup has to be
+ * cleared rather than merely ignored.
+ */
+async function applyToolbarBehaviour(openInTab: boolean) {
+    try {
+        await browser.action.setPopup({ popup: openInTab ? "" : "src/ui/popup/index.html" })
+    } catch (error) {
+        logger.warn("could not switch the toolbar behaviour", error)
+    }
+}
+
+browser.action.onClicked.addListener(() => {
+    // Only reached while openInTab is on — otherwise the popup consumes the click.
+    void openLibraryTab()
+})
+
+browser.storage.onChanged.addListener((changes, area) => {
+    if (area !== "local" || !("settings" in changes)) return
+    const next = changes.settings?.newValue as { openInTab?: boolean } | undefined
+    if (next) void applyToolbarBehaviour(Boolean(next.openInTab))
+})
 
 browser.runtime.onInstalled.addListener(details => {
     logger.info(`onInstalled: ${details.reason}`)

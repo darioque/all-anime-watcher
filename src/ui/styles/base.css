@@ -16,6 +16,10 @@
     --accent-soft: #dceef0;
     --danger: #a8382c;
     --danger-soft: #f6e0dd;
+    /* Watch-state stripes. Separate from --accent so semantic colour and brand
+       colour can never drift into each other. */
+    --state-current: #4a6fa5;
+    --state-warn: #a4762a;
     --shadow: 0 1px 2px rgba(16, 23, 28, 0.06), 0 8px 20px -12px rgba(16, 23, 28, 0.2);
 
     --radius: 6px;
@@ -39,6 +43,8 @@
         --accent-soft: #0f2e34;
         --danger: #e58b7e;
         --danger-soft: #351f1c;
+        --state-current: #6f9bd4;
+        --state-warn: #d0a25a;
         --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 8px 20px -12px rgba(0, 0, 0, 0.7);
     }
 }

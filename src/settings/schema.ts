@@ -18,6 +18,12 @@ export interface GlobalSettings {
     followOnAdd: boolean
     /** Poll newly added series for new episodes. */
     pollOnAdd: boolean
+    /**
+     * Opening an episode page moves your position to it — AMR's `addauto`, and
+     * the only tracking signal available until the player lands. Once playback
+     * exists, completionThreshold is the more accurate signal and this can go off.
+     */
+    markWatchedOnOpen: boolean
 
     // --- update scheduling
     schedule: SchedulePolicy
@@ -73,6 +79,8 @@ export interface GlobalSettings {
     listSortAscending: boolean
     groupBySeries: boolean
     perPage: number
+    /** Clicking the toolbar icon opens the full library tab instead of the popup. */
+    openInTab: boolean
 }
 
 /** Anything a source can override globally, for every anime on that source. */
@@ -97,6 +105,7 @@ export function defaultSettings(): GlobalSettings {
         autoAddOnWatch: true,
         followOnAdd: true,
         pollOnAdd: true,
+        markWatchedOnOpen: true,
 
         // Plain interval polling by default: it is what you would expect and it
         // never surprises you. Schedule-aware polling is opt-in, per anime.
@@ -134,7 +143,8 @@ export function defaultSettings(): GlobalSettings {
         listSort: "recent-episode",
         listSortAscending: false,
         groupBySeries: true,
-        perPage: 25
+        perPage: 25,
+        openInTab: false
     }
 }
 

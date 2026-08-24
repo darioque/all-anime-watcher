@@ -2,7 +2,7 @@ import browser from "webextension-polyfill"
 import { on } from "../router"
 import { refreshBadge } from "../badge"
 import { getAllAnime, getAnime } from "~/model/db"
-import { addSeries, refreshSeries, remove, rename, setFlags } from "~/library/library"
+import { addSeries, markWatched, refreshSeries, remove, rename, setFlags } from "~/library/library"
 
 export function registerLibraryHandlers() {
     on("library:list", async () => {
@@ -35,6 +35,12 @@ export function registerLibraryHandlers() {
 
     on("library:rename", async ({ key, displayTitle }) => rename(key, displayTitle))
 
+    on("library:markWatched", async ({ key, number, variant }) => {
+        const anime = await markWatched(key, number, variant)
+        await refreshBadge()
+        return anime
+    })
+
     on("library:refresh", async ({ key }) => {
         const { anime } = await refreshSeries(key)
         await refreshBadge()
@@ -45,4 +51,25 @@ export function registerLibraryHandlers() {
         await browser.tabs.create({ url, active: active ?? true })
         return true
     })
+
+    on("tab:openLibrary", async () => {
+        await openLibraryTab()
+        return true
+    })
+}
+
+/**
+ * Focus an existing library tab rather than piling up duplicates — the library is
+ * a place you keep open, not something you open repeatedly.
+ */
+export async function openLibraryTab() {
+    const url = browser.runtime.getURL("src/ui/library/index.html")
+    const existing = await browser.tabs.query({ url })
+    const first = existing[0]
+    if (first?.id !== undefined) {
+        await browser.tabs.update(first.id, { active: true })
+        if (first.windowId !== undefined) await browser.windows.update(first.windowId, { focused: true })
+        return
+    }
+    await browser.tabs.create({ url, active: true })
 }

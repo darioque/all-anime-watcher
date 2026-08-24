@@ -2,9 +2,10 @@ import { on } from "../router"
 import { refreshBadge } from "../badge"
 import { getAnime } from "~/model/db"
 import { animeKey } from "~/model/keys"
-import { addSeries, fetchCtxFor } from "~/library/library"
+import { addSeries, fetchCtxFor, markWatched } from "~/library/library"
 import { matchEpisodeUrl, sourceForUrl } from "~/sources/registry"
 import { cachedSettings } from "~/settings/storage"
+import { resolve } from "~/settings/resolver"
 import { log } from "~/shared/logger"
 
 const logger = log("handler:page")
@@ -43,8 +44,16 @@ export function registerPageHandlers() {
                     title: pageInfo.title,
                     tabId: sender.tab?.id
                 })
-                await refreshBadge()
             }
+
+            // Until the player exists, opening the page is the only signal that
+            // you are watching this episode — so it moves the pointer. Without
+            // this, "watch next" on a freshly added series points at episode 1.
+            if (entry && resolve("markWatchedOnOpen", { anime: entry, sourceId: source.id })) {
+                entry = (await markWatched(entry.key, pageInfo.number, pageInfo.variant)) ?? entry
+            }
+
+            if (entry) await refreshBadge()
 
             return {
                 sourceId: source.id,

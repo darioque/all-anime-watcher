@@ -9,7 +9,7 @@ import type {
     SeriesInfo,
     Server
 } from "~/sources/types"
-import { attrOf, leadingNumber, looseDate, ownText, parse, type Selection } from "~/sources/html"
+import { attrOf, imageUrlFrom, leadingNumber, looseDate, ownText, parse } from "~/sources/html"
 import { absoluteUrl, ensureTrailingSlash, hostOf, pathOf } from "~/shared/url"
 import { log } from "~/shared/logger"
 
@@ -166,7 +166,7 @@ export class AnimeStream implements AnimeSource {
                 title: title.trim(),
                 url: absolute,
                 seriesId,
-                poster: this.imageOf($a.find("img").first(), ctx.baseUrl)
+                poster: imageUrlFrom($a.find("img").first(), ctx.baseUrl, $)
             })
         })
 
@@ -201,7 +201,7 @@ export class AnimeStream implements AnimeSource {
             title: $(this.sel.title).first().text().trim() || seriesId,
             seriesId,
             url: seriesUrl,
-            poster: this.imageOf($(this.sel.thumb).first(), ctx.baseUrl),
+            poster: imageUrlFrom($(this.sel.thumb).first(), ctx.baseUrl, $),
             description: $(this.sel.description).first().text().trim() || undefined,
             genres: genres.length ? genres : undefined,
             status
@@ -348,14 +348,6 @@ export class AnimeStream implements AnimeSource {
         } catch {
             throw new Error("server payload was neither a URL nor valid base64")
         }
-    }
-
-    protected imageOf($img: Selection, base: string): string | undefined {
-        const src = attrOf($img, "src", "data-src", "data-lazy-src", "srcset")
-        if (!src) return undefined
-        // srcset: take the first candidate.
-        const first = src.split(",")[0]?.trim().split(/\s+/)[0]
-        return first ? absoluteUrl(first, base) : undefined
     }
 
     /** Host currently configured, for logging and Referer defaults. */

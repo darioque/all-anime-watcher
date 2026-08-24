@@ -172,6 +172,29 @@ export async function refreshSeries(key: string): Promise<{ anime: TrackedAnime;
     }
 }
 
+/**
+ * Move the watch pointer to an episode.
+ *
+ * Opening an episode always sets the pointer, even backwards — if you
+ * deliberately open episode 12 after finishing 47, 12 is where you are. This
+ * mirrors AMR's `fromSite` rule, which exists for exactly the same reason.
+ */
+export async function markWatched(key: string, number: number, variant?: string): Promise<TrackedAnime | null> {
+    const anime = await db.getAnime(key)
+    if (!anime) return null
+
+    const already = anime.lastWatched
+    if (already && already.number === number && already.variant === variant) {
+        return anime
+    }
+
+    anime.lastWatched = { number, ...(variant ? { variant } : {}), at: Date.now() }
+    anime.updatedAt = Date.now()
+    await db.putAnime(anime)
+    logger.info(`${key}: position → episode ${number}${variant ? ` (${variant})` : ""}`)
+    return anime
+}
+
 export async function setFlags(key: string, flags: { follow?: boolean; poll?: boolean }): Promise<TrackedAnime | null> {
     const anime = await db.getAnime(key)
     if (!anime) return null

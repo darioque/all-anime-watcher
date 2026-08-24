@@ -132,9 +132,23 @@ scripts/probe-source.mts the CLI Lab page
 | mundodonghua.com | custom PHP, `/donghua/` + `/ver/` | phase 4 |
 | myanime.live | WordPress `aamla` blog theme | phase 4 |
 
+## UI surfaces
+
+The popup is the compact view; **the full library page (`src/ui/library/`) is the
+one the user actually lives in** — that's how they use AMR. Both render the same
+`ui/components/LibraryList.vue` with a `variant` prop, so a feature added to one
+appears in the other. `openInTab` swaps the toolbar button to open the page
+directly; Chrome only fires `action.onClicked` when there is no popup, so the
+popup has to be *cleared* via `action.setPopup({ popup: "" })`, not just ignored.
+
+Watch state (`watchState()` in `model/keys.ts`) drives the row stripe: `new`,
+`current`, `unstarted`, `paused`. Colour is never the only signal — the pill and
+the button label say the same thing.
+
 ## Phase status
 
-1. **done** — skeleton, detection, settings resolver, IndexedDB, lmanime, popup
+1. **done** — skeleton, detection, settings resolver, IndexedDB, lmanime, popup +
+   full library page
 2. next — one episode end to end: servers → extractor → hls.js in the page.
    Settles the CSP strip and the fetch ladder. Highest-risk phase, deliberately early.
 3. library and tracking depth, update loop, notifications
