@@ -363,6 +363,16 @@ hostname rotates, so the Referer it demands is declared on the `Stream` and
 `ensureRefererRule`. Subtitle hosts need the same treatment and are a different
 domain from the video.
 
+**A DNR rule has to name the right initiator, and there are two.** The proxy's
+fetches come from the extension; hls.js loads manifests and segments straight
+from the page we took over unless the extractor asked for the proxy. Scoping a
+rule to `initiatorDomains: [extensionId()]` therefore covers the extractor's own
+requests and *not* the playback that follows, which is a 403 that looks exactly
+like a dead server. Runtime rules now list both, including domains discovered
+after a source moved. The player also escalates once to the proxy on a fatal HLS
+error before writing a server off, so a rewrite that fails to reach a page
+request degrades to slow rather than broken.
+
 **Dailymotion's 403 is not a header problem.** Both a token-shaped explanation
 and a header-shaped one fit some of the evidence, which is why it keeps getting
 misdiagnosed — an earlier pass concluded `Accept-Encoding` and shipped a DNR

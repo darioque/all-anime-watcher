@@ -92,6 +92,15 @@ function goTo(episode: Episode | undefined) {
     window.location.href = episode.url
 }
 
+/** Bare hostname, for labelling an embed the viewer is being handed. */
+function hostLabel(url: string): string {
+    try {
+        return new URL(url).hostname.replace(/^(www|geo)\./, "")
+    } catch {
+        return "embed"
+    }
+}
+
 let tickTimer: number | undefined
 let lastReported = -1
 
@@ -125,11 +134,28 @@ async function playServer(index: number, auto = false): Promise<void> {
         const stream = result.streams[0]
         if (!stream) throw new Error("the extractor returned no streams")
 
-        // An embed is a last resort, not a result: remember it and keep looking
-        // for a server we can actually extract, so we don't settle for a host's
-        // own player (and lose progress tracking) while a real stream exists.
+        /*
+         * Remember the host's own player, whatever happened here.
+         *
+         * Previously this was only kept when the *stream* was an iframe — an
+         * unextractable host. But an extractor that succeeds and then hands back
+         * a stream the browser refuses to play (a 403 on the manifest, a dead
+         * CDN) leaves the viewer with nothing, while the embed that would have
+         * played sat one field away in the same response. Every server now
+         * contributes a fallback; the first one wins, since it is the
+         * highest-preference server.
+         */
+        if (!embedFallback.value && result.embedUrl) {
+            embedFallback.value = {
+                stream: { url: result.embedUrl, kind: "iframe", label: hostLabel(result.embedUrl) },
+                index
+            }
+        }
+
+        // An embed is a last resort, not a result: keep looking for a server we
+        // can actually extract, so we don't settle for a host's own player (and
+        // lose progress tracking) while a real stream exists.
         if (stream.kind === "iframe" && auto) {
-            if (!embedFallback.value) embedFallback.value = { stream, index }
             failedServers.value = new Set(failedServers.value).add(index)
             if (await tryNextServer(`${server.name} can only be embedded`)) return
         }
@@ -160,6 +186,8 @@ async function tryNextServer(reason: string): Promise<boolean> {
         return true
     }
 
+    // Every server tried and none played: the host's own frame is what is left,
+    // and it is a better answer than an error message.
     const fallback = embedFallback.value
     if (fallback) {
         console.debug(`[AAW] ${reason}; no extractable server left, embedding "${servers.value[fallback.index]?.name}"`)
@@ -173,7 +201,7 @@ async function tryNextServer(reason: string): Promise<boolean> {
     return false
 }
 
-async function attach(stream: Stream, index: number) {
+async function attach(stream: Stream, index: number, viaProxy = false) {
     /*
      * The host's own player, in a frame. Nothing to attach and nothing to
      * measure: a cross-origin frame reports no position, no duration and no
@@ -247,6 +275,26 @@ async function attach(stream: Stream, index: number) {
     instance.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return
         const detail = `${data.details}${data.response?.code ? ` (HTTP ${data.response.code})` : ""}`
+
+        /*
+         * Escalate to the proxy before giving up on the server.
+         *
+         * Loading straight from the page is the fast path — no base64 round trip
+         * per segment — but it only works where the CDN accepts what the page
+         * sends. A header rewrite the extension installs may not reach a request
+         * the page makes itself, and the symptom is a 403 that looks exactly
+         * like a dead server. One retry through the background settles which it
+         * was, and costs a second on a stream that was going to fail anyway.
+         */
+        if (!viaProxy && stream.fetchVia !== "background") {
+            console.debug(
+                `[AAW] ${detail} loading directly; retrying "${servers.value[index]?.name}" through the proxy`
+            )
+            teardown()
+            void attach({ ...stream, fetchVia: "background" }, index, true)
+            return
+        }
+
         failedServers.value = new Set(failedServers.value).add(index)
         void tryNextServer(detail).then(moved => {
             if (moved) return

@@ -16,6 +16,15 @@ const recentTabs = new Set<number>()
 /** Runtime-discovered hosts, refreshed when domain resolution promotes one. */
 let extraDomains = new Map<string, string[]>()
 
+/**
+ * Every host we have ever seen for a source, including ones discovered after a
+ * move. DNR rules scoped to "our own pages" need these — a source promoted to a
+ * new domain would otherwise stop matching its own header rewrites.
+ */
+export function knownSourceDomains(): string[] {
+    return [...new Set([...extraDomains.values()].flat())]
+}
+
 export async function reloadExtraDomains() {
     const states = await getAllSourceState()
     extraDomains = new Map(states.map(s => [s.sourceId, s.knownDomains]))

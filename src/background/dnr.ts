@@ -1,6 +1,7 @@
 import browser from "webextension-polyfill"
 import { allNetRules } from "~/extractors/registry"
 import { allSources } from "~/sources/registry"
+import { knownSourceDomains } from "./navigation"
 import { log } from "~/shared/logger"
 
 const logger = log("dnr")
@@ -33,8 +34,10 @@ export async function installRules(): Promise<void> {
     let id = ID_BASE
 
     // Pages of our own sources, so a `page`-scoped rule can be narrowed to
-    // requests our taken-over player actually makes.
-    const sourceDomains = [...new Set(allSources().flatMap(source => source.domains))]
+    // requests our taken-over player actually makes. Discovered domains count:
+    // a source that has moved is still ours, and scoping to the declared list
+    // alone would drop its rewrites the moment it did.
+    const sourceDomains = ourPageDomains()
 
     for (const rule of allNetRules()) {
         const requestHeaders: browser.DeclarativeNetRequest.RuleActionRequestHeadersItemType[] = []
@@ -194,7 +197,16 @@ export async function ensureRefererRule(url: string, referer: string): Promise<v
                         requestHeaders: [{ header: "Referer", operation: "set", value: referer }]
                     },
                     condition: {
-                        initiatorDomains: [extensionId()],
+                        /*
+                         * Both initiators, because a stream is loaded from
+                         * whichever context is cheapest. hls.js fetches
+                         * manifests and segments straight from the page we took
+                         * over unless the extractor asked for the proxy, and a
+                         * rule scoped to the extension alone left exactly those
+                         * requests bare — MegaPlay's CDN 403s on the page's own
+                         * Referer, which is the site rather than the embed host.
+                         */
+                        initiatorDomains: [extensionId(), ...ourPageDomains()],
                         requestDomains: [host],
                         resourceTypes: ["xmlhttprequest", "media", "other"]
                     }
@@ -216,4 +228,9 @@ function hasDeclaredRule(host: string): boolean {
         const byDomain = rule.requestDomains?.some(d => host === d || host.endsWith(`.${d}`)) ?? false
         return byFilter || byDomain
     })
+}
+
+/** Hosts whose pages we replace with the player, so a page fetch is ours too. */
+function ourPageDomains(): string[] {
+    return [...new Set([...allSources().flatMap(source => source.domains), ...knownSourceDomains()])]
 }
