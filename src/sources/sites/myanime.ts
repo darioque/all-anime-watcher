@@ -1,7 +1,7 @@
 import type { Episode } from "~/model/types"
 import type { AnimeSource, FetchCtx, PageInfo, SearchResult, SeriesInfo, Server } from "~/sources/types"
 import { attrOf, parse } from "~/sources/html"
-import { absoluteUrl, fragmentOf, hostOf, pathOf, samePath } from "~/shared/url"
+import { absoluteUrl, fragmentOf, hostOf, pathOf } from "~/shared/url"
 import { log } from "~/shared/logger"
 import {
     numberPosts,
@@ -143,20 +143,15 @@ export class MyAnime implements AnimeSource {
         const posts = await this.postsForSeries(seriesUrl, ctx)
         const numbered = numberPosts(posts)
 
-        const inferred = numbered.filter(post => post.inferred).length
         const dropped = posts.length - numbered.length
-        if (inferred > 0 || dropped > 0) {
-            logger.info(
-                `${seriesUrl}: ${numbered.length} episodes ` +
-                    `(${inferred} numbered by position, ${dropped} unnumberable and skipped)`
-            )
+        if (dropped > 0) {
+            logger.info(`${seriesUrl}: ${numbered.length} episodes, ${dropped} post(s) that state no episode number`)
         }
 
         return numbered.map(post => ({
             number: post.number,
             url: post.link,
             variant: "sub",
-            ...(post.inferred ? { title: `Episode ${post.number} (numbered by posting order)` } : {}),
             ...(Number.isFinite(post.date) ? { airedAt: post.date } : {})
         }))
     }
@@ -174,50 +169,36 @@ export class MyAnime implements AnimeSource {
         const postSlug = pathOf(url).split("/").filter(Boolean).at(-1) ?? ""
         const pageTitle = this.postTitle($)
 
-        /*
-         * The site's own "All Episodes" button, which points at the search that
-         * gathers this series. It is the only identity available on a post the
-         * site has stripped of title, slug and tags, and where it exists it beats
-         * anything derived, because it is what the site itself groups by.
-         */
-        const allEpisodes = this.allEpisodesQuery($, url)
-
         const fromSlug = seriesSlugOf(postSlug)
         const fromTitle = seriesTitleOf(pageTitle)
         const tag = this.postTags($).find(candidate => postSlug.startsWith(candidate.slug))
 
-        const seriesId = fromSlug ?? (allEpisodes ? slugify(allEpisodes) : null) ?? tag?.slug ?? null
+        /*
+         * Not used: the post's own "All Episodes" button.
+         *
+         * It looks like the site's own grouping — it links to `/?s=<query>` — and
+         * on a titled post it is roughly right. On an untitled post it is a
+         * template field nobody filled in: *every* untitled post on the site links
+         * to the same query, whichever show it belongs to. Trusting it filed
+         * several unrelated shows under one entry named after whichever one the
+         * placeholder happened to name.
+         */
+        const seriesId = fromSlug ?? tag?.slug ?? null
         if (!seriesId) {
             throw new Error(
-                `${url} carries no title, slug, tag or "All Episodes" link, so there is nothing to group it by`
+                `${url} has no title, slug or tag naming a series. The site publishes some shows ` +
+                    `with all three stripped, and nothing on the page says which show it is.`
             )
         }
 
-        const title = fromTitle ?? allEpisodes ?? tag?.name ?? seriesId.replace(/-/g, " ")
-        const seriesUrl =
-            fromSlug || allEpisodes
-                ? // The site's own "All Episodes" query first: it is tuned for
-                  // recall across however many ways the site has titled this
-                  // series over the years, which the current title is not.
-                  this.groupingUrlFor(ctx, seriesId, allEpisodes ?? fromTitle ?? undefined)
-                : `${ctx.baseUrl}/tag/${seriesId}/`
+        const title = fromTitle ?? tag?.name ?? seriesId.replace(/-/g, " ")
+        const seriesUrl = fromSlug
+            ? this.groupingUrlFor(ctx, seriesId, fromTitle ?? undefined)
+            : `${ctx.baseUrl}/tag/${seriesId}/`
 
-        let number = statedNumber(pageTitle) ?? statedNumber(postSlug)
-
-        /*
-         * An untitled post states nothing at all. Its number can still be
-         * recovered from where it sits among its siblings — see numberPosts — but
-         * only by fetching them, so this stays the last resort rather than the
-         * first move.
-         */
-        if (number === null) {
-            logger.debug(`${url}: no episode number on the page, recovering it from the series' post order`)
-            const episodes = await this.getEpisodes(seriesUrl, ctx)
-            number = episodes.find(episode => samePath(episode.url, url))?.number ?? null
-        }
-
+        const number = statedNumber(pageTitle) ?? statedNumber(postSlug)
         if (number === null || !Number.isFinite(number)) {
-            throw new Error(`could not work out which episode ${url} is`)
+            throw new Error(`${url} does not say which episode it is`)
         }
 
         return {
@@ -312,21 +293,6 @@ export class MyAnime implements AnimeSource {
         return tags
     }
 
-    /** The `?s=` query behind the post's "All Episodes" button, if it has one. */
-    private allEpisodesQuery($: ReturnType<typeof parse>, url: string): string | null {
-        let found: string | null = null
-        $("a[href*='?s=']").each((_, element) => {
-            if (found) return
-            const href = attrOf($(element), "href")
-            if (!href) return
-            // The theme's own search form lands on the same shape; only links
-            // inside the post body carry a series query.
-            const query = searchQueryFromUrl(absoluteUrl(href, url))
-            if (query) found = query
-        })
-        return found
-    }
-
     /**
      * Every post belonging to a series, from whichever groupings are available.
      *
@@ -361,26 +327,23 @@ export class MyAnime implements AnimeSource {
         const wanted = [seriesId, ...(dominant ? [dominant] : [])]
 
         /*
-         * A post whose slug names a *different* series is noise from a broad
-         * query and goes. A post whose slug names no series at all stays: those
-         * are the untitled ones, and the only reason a full-text search reached
-         * one is that its body carries this series' own "All Episodes" link.
-         * Dropping them lost exactly the newest episodes of the series that need
-         * this treatment most.
+         * A post is kept only when its own slug names this series. Everything
+         * else the query dragged in is noise: searching "Wan Jie Du Zun" also
+         * returns "Wan Jie Zhizun – The Emperor of Myriad Realms", a different
+         * show entirely.
+         *
+         * Untitled posts — no title, no tag, a numeric slug — are dropped here
+         * even though they came back from the query. Nothing on such a post says
+         * which series it belongs to, so keeping them meant assigning them to
+         * whichever series happened to be asking.
          */
-        const strict = searchPosts.filter(post => {
+        const matched = searchPosts.filter(post => {
             const slug = seriesSlugOf(post.slug)
-            return slug === null || wanted.some(candidate => sameSeries(candidate, slug))
+            return slug !== null && wanted.some(candidate => sameSeries(candidate, slug))
         })
 
-        /*
-         * Nothing matched strictly and there is no tag: this is a series the site
-         * publishes untitled, so no post can name it and the query — a code the
-         * site invented for exactly this purpose — is the only grouping there is.
-         */
-        const pool = tagPosts.length > 0 || strict.length > 0 ? [...tagPosts, ...strict] : searchPosts
-
         const byLink = new Map<string, WpPostView>()
+        const pool = [...tagPosts, ...matched]
         for (const post of pool) byLink.set(post.link, post)
         return [...byLink.values()]
     }

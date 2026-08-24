@@ -68,19 +68,6 @@ export function swapOrigin(url: string, newOrigin: string): string {
     }
 }
 
-/**
- * Same page, ignoring origin and a trailing slash.
- *
- * Domains move and stored URLs are rewritten, so two references to one page can
- * differ in origin and still be the same page — comparing whole URLs would say
- * otherwise and quietly lose the match.
- */
-export function samePath(a: string, b: string): boolean {
-    const path = (value: string) => stripTrailingSlash(pathOf(value))
-    const left = path(a)
-    return left !== "" && left === path(b)
-}
-
 /** The `#fragment`, without its leading hash. "" when there is none. */
 export function fragmentOf(url: string): string {
     try {

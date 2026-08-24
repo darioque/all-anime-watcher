@@ -165,26 +165,38 @@ Lab page**; `npm run probe` covers the same ground from the CLI for now.
 
 **myanime.live has no series identity to read**, which makes it the hardest of
 the four and a useful template for sites like it. Each post is one episode, and
-the site groups them four different ways depending on how nervous it was about
-the rights holder. In the order `getPageInfo` tries them:
+identity has to be reconstructed. In the order `getPageInfo` tries:
 
-1. the post's own **"All Episodes" button**, linking to `/?s=<query>` — the
-   site's own grouping, and the only thing that works for posts stripped of a
-   title;
-2. the **post slug**, minus its episode marker;
-3. the **post title**, same cut, which is where the display name comes from;
-4. the post's **tags** — the original approach and the worst of the four: many
+1. the **post slug**, minus its episode marker
+   ("wan-jie-du-zun-…-episode-476-english-sub" → "wan-jie-du-zun-…");
+2. the **post title**, same cut, which is where the display name comes from;
+3. the post's **tags** — the original approach and the worst of the three: many
    posts carry none, and where they do the tag is as likely to name the
    protagonist ("Lin Feng") as the show.
 
-Two consequences worth keeping. The stored `seriesUrl` is a `/?s=` search page,
-with the series id pinned in the fragment (`#aaw=…`) when the best query is
-broader than the series name — a series retitled mid-run needs a broad query to
-find its older episodes and a specific id to filter the results. And posts that
-state no number at all are numbered from their **position between posts that
-do**, only where the arithmetic fits exactly; the rest are dropped, because a
-wrong number puts watch history on the wrong episode. `npm run check:myanime`
-covers all of it.
+The stored `seriesUrl` is a `/?s=` search page, with the series id pinned in the
+fragment (`#aaw=…`) when the best query is broader than the series name — a
+series retitled mid-run needs a broad query to find its older episodes and a
+specific id to filter the results.
+
+**Do not use the post's "All Episodes" button.** It links to `/?s=<query>` and
+looks exactly like the site's own grouping — which is why a previous pass built
+identity on it. It is an unfilled template field: *every* untitled post on the
+site links to the same query, whichever show it belongs to. Building on it filed
+several unrelated shows under one entry named after whatever the placeholder
+happened to say.
+
+**Some shows are simply not trackable here, and that is the answer.** The site
+publishes a few with no title, no tag and a numeric slug — a rights-holder dodge.
+For one of them, the actual show is *Primeval Overlord [Ancient God Sovereign]*,
+which appears nowhere in the post: not the title, not the slug, not the tags, not
+the featured image, not the body. Searching the REST API for the show's name, or
+for the code in its *video* title (`POAGSs1ep11eng`), returns nothing — the code
+lives on the video host, not in any WordPress field. So even a user-supplied name
+would produce an entry that could never find its next episode. `getPageInfo`
+throws with a message saying so, the same way it reports a missing tag. Do not
+try to rescue these by grouping them on anything the page shares with other
+untitled posts; everything they share is the placeholder.
 
 **Anikoto's signing**, since this family is common: `vrf = base64(rc4("simple-hash", animeId))`.
 The key and algorithm are both in the site's own `main.js`, which uses the same

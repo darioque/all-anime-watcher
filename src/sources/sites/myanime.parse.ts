@@ -18,16 +18,12 @@
 export interface PostLike {
     slug: string
     title: string
-    /** Epoch ms. Used to order posts whose number has to be inferred. */
+    /** Epoch ms. Surfaced as the episode's air date. */
     date: number
 }
 
-/** Whatever was handed in, plus the number worked out for it. */
-export type Numbered<T> = T & {
-    number: number
-    /** True when the number came from position rather than from the post itself. */
-    inferred: boolean
-}
+/** Whatever was handed in, plus the episode number read off it. */
+export type Numbered<T> = T & { number: number }
 
 /**
  * Episode number as stated by a post's own title or slug.
@@ -131,71 +127,25 @@ export function slugify(value: string): string {
 }
 
 /**
- * Give every post a number, inferring the ones the site did not state.
+ * Number the posts that say which episode they are, and drop the rest.
  *
- * Some series are posted with no title, no tag and a numeric slug — the site
- * hiding from a rights holder — but interleaved with siblings that *do* say
- * their number. Those act as anchors: posts are ordered newest-first by date, so
- * a post one position above an anchor is one episode later.
- *
- * Inference is deliberately narrow. Forward from the newest anchor is safe.
- * Between two anchors it is only applied when the gap in episode numbers matches
- * the number of posts sitting in it exactly — if the site skipped or doubled an
- * episode, the arithmetic stops agreeing and guessing would put watch history on
- * the wrong episode. Posts that cannot be numbered are dropped, which is visible
- * as a gap rather than silently wrong.
+ * An earlier version inferred the missing ones from their position between posts
+ * that *do* state a number. That only made sense while untitled posts could be
+ * attributed to a series at all; they cannot — see `postsForSeries` — so nothing
+ * unnumbered ever reaches this now, and inferring would only ever have been
+ * guessing at which show it was guessing about.
  */
 export function numberPosts<T extends PostLike>(posts: T[]): Numbered<T>[] {
-    const ordered = [...posts].sort((a, b) => b.date - a.date)
-    const stated = ordered.map(post => statedNumber(post.title) ?? statedNumber(post.slug))
+    const numbered: Numbered<T>[] = []
 
-    const anchors: number[] = []
-    for (const [index, value] of stated.entries()) {
-        if (value !== null) anchors.push(index)
+    for (const post of posts) {
+        const number = statedNumber(post.title) ?? statedNumber(post.slug)
+        if (number === null) continue
+        numbered.push({ ...post, number })
     }
 
-    const result: Numbered<T>[] = []
-
-    for (const [index, post] of ordered.entries()) {
-        const own = stated[index]
-        if (own !== null && own !== undefined) {
-            result.push({ ...post, number: own, inferred: false })
-            continue
-        }
-        if (anchors.length === 0) continue
-
-        const inferred = inferAt(index, anchors, stated)
-        if (inferred !== null) result.push({ ...post, number: inferred, inferred: true })
-    }
-
-    result.sort((a, b) => b.number - a.number)
-    return result
-}
-
-/** The number for the post at `index`, from the anchors around it. */
-function inferAt(index: number, anchors: number[], stated: (number | null)[]): number | null {
-    const below = anchors.find(anchor => anchor > index)
-    const above = [...anchors].reverse().find(anchor => anchor < index)
-
-    // Newest-first order, so a lower index is a later episode.
-    const belowNumber = below !== undefined ? stated[below] : null
-    const aboveNumber = above !== undefined ? stated[above] : null
-
-    if (belowNumber !== null && belowNumber !== undefined && below !== undefined) {
-        const candidate = belowNumber + (below - index)
-
-        // Bounded on both sides: only trust it when the count fits the gap.
-        if (aboveNumber !== null && aboveNumber !== undefined && above !== undefined) {
-            const fits = aboveNumber - belowNumber === below - above
-            return fits ? candidate : null
-        }
-        // Only older anchors exist, so this is newer than everything numbered.
-        return candidate
-    }
-
-    // Nothing below: every anchor is newer than this post. Counting backwards
-    // past an unknown number of unnumbered posts is not something to guess at.
-    return null
+    numbered.sort((a, b) => b.number - a.number)
+    return numbered
 }
 
 /**

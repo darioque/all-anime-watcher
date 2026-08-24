@@ -5,10 +5,9 @@
  *   npm run check:myanime
  *
  * This is the source with no series pages, where identity has to be reconstructed
- * from a post slug, a post title, a search link or the order posts were published
- * in. Every case below is a real URL taken off the live site — a regex that looks
- * right and quietly files two seasons under one entry is exactly the failure this
- * is here to catch.
+ * from a post slug or a post title. Every case below is a real URL taken off the
+ * live site — a regex that looks right and quietly files two seasons under one
+ * entry is exactly the failure this is here to catch.
  */
 import {
     numberPosts,
@@ -47,6 +46,18 @@ eq("episode 0 is a number, not 'absent'", statedNumber("prologue episode 0 engli
 // "episode" contains "ep", so a bare `ep\d` pattern run first reads the wrong number.
 eq("'episode' is not read as 'ep'", statedNumber("Season 2 episode 7"), 7)
 eq("'ep' inside a word is not a number", statedNumber("sleep01-something"), null)
+/*
+ * The cost of that last rule, recorded rather than worked around: "ep" is only
+ * read as an episode marker when a digit or separator sits in front of it, so a
+ * code with no digit in it ("SHOWep10eng") is refused too. WordPress lowercases
+ * slugs, which makes "showep10eng" and "sleep01" structurally identical — there
+ * is no rule that accepts one and rejects the other. Refusing both is the safe
+ * direction: a missing episode is a gap, a wrong one puts watch history on the
+ * wrong episode. The site's real codes all carry a digit ("ZXJDS4ep03eng",
+ * "POAGSs1ep11eng"), so this has not cost anything yet.
+ */
+eq("a code with no digit before 'ep' is refused too", statedNumber("showep10eng"), null)
+eq("the site's real codes all carry one", statedNumber("POAGSs1ep11eng"), 11)
 
 // --- series slugs
 eq(
@@ -109,47 +120,38 @@ check(
 check("a bare season number does not match either", !sameSeries("xian-ni", "xian-ni-2"))
 check("unrelated series do not match", !sameSeries("wan-jie-du-zun", "wan-jie-zhizun-the-emperor-of-myriad-realms"))
 
-// --- numbering posts the site refused to label
+// --- numbering posts
 const DAY = 86_400_000
 const base = Date.parse("2026-08-01T00:00:00Z")
 const post = (slug: string, title: string, day: number) => ({ slug, title, date: base + day * DAY })
 
-// Newest first: three untitled posts sitting above a post that states its number.
-const mixed = numberPosts([
-    post("120873", "", 10),
-    post("120870", "", 9),
-    post("120858", "", 8),
-    post("dzznf-tgr3dii-episode-87-english-sub", "DZZNF- TGR3DII Episode 87 english sub", 7),
-    post("dzznf-tgr3dii-episode-86-english-sub", "DZZNF- TGR3DII Episode 86 english sub", 6)
+const numbered = numberPosts([
+    post("show-episode-12-english-sub", "Show episode 12", 6),
+    post("show-episode-11-english-sub", "Show episode 11", 5),
+    post("zxjds4ep10eng", "ZXJDS4ep10eng", 4)
 ])
-eq("every post gets a number", mixed.length, 5)
-eq("the newest untitled post counts on from the anchor", mixed[0]?.number, 90)
-check(
-    "inferred posts are marked as such",
-    mixed[0]?.inferred === true && mixed.find(p => p.number === 87)?.inferred === false
-)
+eq("posts that state a number are kept", numbered.length, 3)
+eq("newest first", numbered[0]?.number, 12)
+eq("both spellings are read", numbered[2]?.number, 10)
 
-// Two anchors with a gap that does not fit the posts between them: the site
-// skipped or doubled an episode, and guessing would put history on the wrong one.
-const inconsistent = numberPosts([
-    post("show-episode-20-english-sub", "Show episode 20", 5),
-    post("111111", "", 4),
-    post("show-episode-12-english-sub", "Show episode 12", 3)
+/*
+ * Untitled posts — no title, no tag, a numeric slug — carry no episode number
+ * and no series. An earlier version inferred their numbers from where they sat
+ * between posts that do state one, on the strength of the "All Episodes" link
+ * appearing to group them. That link turned out to be an unfilled template
+ * field: every untitled post on the site points at the same query whichever show
+ * it belongs to, so the posts being "between" anything was an illusion, and the
+ * inference was numbering one show's episodes from another show's anchors.
+ */
+const withUntitled = numberPosts([
+    post("show-episode-12-english-sub", "Show episode 12", 6),
+    post("120873", "", 5),
+    post("show-episode-11-english-sub", "Show episode 11", 4)
 ])
-eq("an unnumberable post is dropped, not guessed", inconsistent.length, 2)
-check("the anchors themselves survive", inconsistent.every(p => !p.inferred))
+eq("a post that states no number is dropped", withUntitled.length, 2)
+check("and the ones around it are untouched", withUntitled.map(p => p.number).join(",") === "12,11")
 
-// Nothing to anchor on at all.
-eq("posts with no anchor anywhere are dropped", numberPosts([post("999", "", 1), post("998", "", 2)]).length, 0)
-
-// A gap that *does* fit is safe to fill.
-const fits = numberPosts([
-    post("show-episode-9-english-sub", "Show episode 9", 5),
-    post("222222", "", 4),
-    post("show-episode-7-english-sub", "Show episode 7", 3)
-])
-eq("a gap that fits exactly is filled", fits.length, 3)
-eq("and it is filled with the right number", fits.find(p => p.inferred)?.number, 8)
+eq("posts with nothing to go on at all yield nothing", numberPosts([post("999", "", 1), post("998", "", 2)]).length, 0)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)
