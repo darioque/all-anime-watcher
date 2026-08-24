@@ -1,0 +1,9 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128" width="128" height="128">
+  <rect width="128" height="128" rx="28" fill="#0e1a1f"/>
+  <!-- stacked episodes: two receding cards behind the play face -->
+  <rect x="30" y="24" width="68" height="12" rx="5" fill="#1f5a63"/>
+  <rect x="24" y="38" width="80" height="12" rx="5" fill="#2c7d88"/>
+  <!-- play face -->
+  <rect x="18" y="52" width="92" height="56" rx="12" fill="#45cddb"/>
+  <path d="M55 68.5 L82 80 L55 91.5 Z" fill="#0e1a1f"/>
+</svg>

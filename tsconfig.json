@@ -1,0 +1,27 @@
+{
+    "compilerOptions": {
+        "target": "ES2022",
+        "module": "ESNext",
+        "moduleResolution": "bundler",
+        "lib": ["ES2023", "DOM", "DOM.Iterable", "WebWorker"],
+        "types": ["chrome", "node", "vite/client"],
+
+        "strict": true,
+        "noUncheckedIndexedAccess": true,
+        "noImplicitOverride": true,
+        "exactOptionalPropertyTypes": false,
+        "noFallthroughCasesInSwitch": true,
+
+        "verbatimModuleSyntax": true,
+        "isolatedModules": true,
+        "resolveJsonModule": true,
+        // vite.config.ts imports manifest.config.ts with its extension so Vite 8's
+        // native config loader can resolve it without a bundling step.
+        "allowImportingTsExtensions": true,
+        "skipLibCheck": true,
+        "noEmit": true,
+
+        "paths": { "~/*": ["./src/*"] }
+    },
+    "include": ["src/**/*.ts", "src/**/*.vue", "vite.config.ts"]
+}
