@@ -26,12 +26,17 @@ export interface PageIdentity {
     error?: string
 }
 
-/** Response of the playback proxy. Exactly one of text/buffer is set. */
+/**
+ * Response of the playback proxy. Exactly one of `text` / `base64` is set.
+ *
+ * Binary comes back base64-encoded because Chrome JSON-serialises extension
+ * messages — an ArrayBuffer would arrive as `{}`. See shared/binary.ts.
+ */
 export interface ProxyResponse {
     status: number
     url?: string
     text?: string
-    buffer?: ArrayBuffer
+    base64?: string
     error?: string
 }
 

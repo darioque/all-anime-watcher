@@ -1,6 +1,7 @@
 import browser from "webextension-polyfill"
 import type { Action, Envelope, Reply } from "~/shared/messages"
 import { log } from "~/shared/logger"
+import { isExpected } from "~/shared/errors"
 
 const logger = log("router")
 

@@ -1,5 +1,6 @@
 import type { Loader, LoaderCallbacks, LoaderConfiguration, LoaderContext, LoaderStats } from "hls.js"
 import { send } from "~/shared/messages"
+import { base64ToBuffer } from "~/shared/binary"
 
 /**
  * An hls.js loader that fetches through the background service worker instead of
@@ -11,10 +12,10 @@ import { send } from "~/shared/messages"
  * The background has host permissions, so it is exempt from CORS, and a DNR rule
  * supplies the Referer.
  *
- * The cost is a structured-clone copy of every segment across the message
- * boundary. Measured on a 1080p stream that is a few MB/s of copying, which is
- * well within what messaging handles; `fetchVia` on a Stream decides per stream
- * so a CDN that behaves gets the cheaper direct path.
+ * Binary comes back base64-encoded: Chrome JSON-serialises extension messages,
+ * so an ArrayBuffer arrives as `{}`. That cost ~33% in transfer size, and is why
+ * `fetchVia` exists — a CDN that will serve the page directly should never come
+ * through here.
  */
 export class BackgroundLoader implements Loader<LoaderContext> {
     context: LoaderContext | null = null
@@ -55,7 +56,24 @@ export class BackgroundLoader implements Loader<LoaderContext> {
                     return
                 }
 
-                const payload = wantsText ? (response.text ?? "") : (response.buffer ?? new ArrayBuffer(0))
+                let payload: string | ArrayBuffer
+                if (wantsText) {
+                    payload = response.text ?? ""
+                } else {
+                    if (typeof response.base64 !== "string") {
+                        // Guard rather than hand hls.js something that isn't bytes:
+                        // it would surface as a confusing fragParsingError instead.
+                        callbacks.onError(
+                            { code: response.status, text: "proxy returned no binary payload" },
+                            context,
+                            null,
+                            this.stats
+                        )
+                        return
+                    }
+                    payload = base64ToBuffer(response.base64)
+                }
+
                 const length = typeof payload === "string" ? payload.length : payload.byteLength
 
                 const now = performance.now()

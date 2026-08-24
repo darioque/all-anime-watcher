@@ -169,11 +169,34 @@ declarativeNetRequest rules. `appliesTo: "page"` scopes a rule to requests our
 taken-over pages make (a `<video src>`), `"extension"` to the proxy's own.
 
 The player falls through to the next server automatically when one fails, so a
-dead host degrades instead of dead-ending.
+dead host degrades instead of dead-ending. Failures that are part of that walk
+(no extractor for a host, a dead server) throw `ExpectedError` so the router logs
+them at debug — a fallback chain must not fill the console with stack traces.
 
-**lmanime's ten servers resolve to five hosts:** dailymotion, mp4upload, ok.ru,
-morencius.com (packed-JS, StreamWish family) and rumble. Only the first two have
-extractors. `PROBE_SERVER=<n> npm run probe -- lmanime` exercises one at a time.
+**Chrome JSON-serialises extension messages.** An `ArrayBuffer` sent through
+`runtime.sendMessage` arrives as `{}` — it does *not* structured-clone, whatever
+the MDN page for the standard API says. The playback proxy therefore base64s
+binary payloads (`shared/binary.ts`), at 33% transfer overhead. This cost a real
+debugging session: empty fragments reach hls.js as `fragParsingError`, which
+reads like a codec problem and is actually a transport one. Anything else that
+moves bytes across the message boundary needs the same treatment.
+
+A plain `<video src>` is a media load, not a fetch, so it is **not subject to
+CORS**. That is why direct-file hosts (Mp4Upload, OK.ru) work with
+`fetchVia: "page"` and only need a DNR Referer rule, while hls.js — which fetches
+manifests and segments with XHR — needs the proxy whenever a CDN withholds
+`access-control-allow-origin`.
+
+**lmanime's ten servers resolve to five hosts.** `PROBE_SERVER=<n> npm run probe
+-- lmanime` exercises one at a time.
+
+| Host | Extractor | State |
+| --- | --- | --- |
+| mp4upload.com | `mp4upload` | works — direct MP4, played in the browser |
+| ok.ru | `okru` | works — direct MP4 at several renditions |
+| dailymotion.com | `dailymotion` | resolves to a master playlist; HLS playback unproven |
+| morencius.com | — | packed JS, StreamWish family. Next to write |
+| rumble.com | — | not written |
 
 ## Phase status
 

@@ -1,6 +1,7 @@
 import type { Extractor, ExtractorNetRule } from "./types"
 import { DailymotionExtractor } from "./sites/dailymotion"
 import { Mp4UploadExtractor } from "./sites/mp4upload"
+import { OkRuExtractor } from "./sites/okru"
 import { DirectStreamExtractor } from "./sites/directStream"
 import { hostOf } from "~/shared/url"
 import { log } from "~/shared/logger"
@@ -14,7 +15,12 @@ const logger = log("extractors")
  * Order matters only in that the URL-shape matcher must come last, so a host
  * that happens to end in .mp4 still reaches its own extractor first.
  */
-const ALL: Extractor[] = [new DailymotionExtractor(), new Mp4UploadExtractor(), new DirectStreamExtractor()]
+const ALL: Extractor[] = [
+    new DailymotionExtractor(),
+    new Mp4UploadExtractor(),
+    new OkRuExtractor(),
+    new DirectStreamExtractor()
+]
 
 export function allExtractors(): readonly Extractor[] {
     return ALL
@@ -29,7 +35,7 @@ export function extractorFor(embedUrl: string): Extractor | undefined {
             return extractor
         }
     }
-    logger.warn(`no extractor for ${host || embedUrl}`)
+    logger.debug(`no extractor for ${host || embedUrl}`)
     return undefined
 }
 

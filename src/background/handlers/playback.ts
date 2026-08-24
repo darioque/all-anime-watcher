@@ -8,6 +8,8 @@ import type { ExtractCtx, Stream } from "~/extractors/types"
 import type { Server } from "~/sources/types"
 import { resolve } from "~/settings/resolver"
 import { log } from "~/shared/logger"
+import { bufferToBase64 } from "~/shared/binary"
+import { ExpectedError } from "~/shared/errors"
 
 const logger = log("handler:playback")
 
@@ -29,7 +31,8 @@ export function registerPlaybackHandlers() {
 
         const extractor = extractorFor(embedUrl)
         if (!extractor) {
-            throw new Error(`no extractor knows how to play ${new URL(embedUrl).hostname}`)
+            // Expected while the player walks its fallback list; not a defect.
+            throw new ExpectedError(`no extractor knows how to play ${new URL(embedUrl).hostname}`)
         }
 
         const extractCtx: ExtractCtx = {
@@ -84,7 +87,11 @@ export function registerPlaybackHandlers() {
         if (responseType === "text") {
             return { status: response.status, text: await response.text(), url: response.url }
         }
-        return { status: response.status, buffer: await response.arrayBuffer(), url: response.url }
+
+        // Base64, not the raw ArrayBuffer: Chrome JSON-serialises extension
+        // messages, so a buffer would arrive as `{}`. See shared/binary.ts.
+        const buffer = await response.arrayBuffer()
+        return { status: response.status, base64: bufferToBase64(buffer), url: response.url }
     })
 
     /** Which source, if any, owns an arbitrary URL. Used by the player for embeds. */
