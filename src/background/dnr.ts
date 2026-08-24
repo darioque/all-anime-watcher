@@ -161,6 +161,14 @@ export async function ensureRefererRule(url: string, referer: string): Promise<v
     }
     if (host === "" || runtimeRules.has(host)) return
 
+    // An extractor that declared a rule for this host chose its Referer
+    // deliberately. These run at a higher priority and would silently override
+    // that choice, so they stay out of the way.
+    if (hasDeclaredRule(host)) {
+        logger.debug(`${host} already has a declared rule; leaving it alone`)
+        return
+    }
+
     const id = nextRuntimeId++
     // Wrap rather than grow without bound; ids are only ever ours.
     if (nextRuntimeId > RUNTIME_ID_BASE + 1000) nextRuntimeId = RUNTIME_ID_BASE
@@ -198,4 +206,14 @@ export async function ensureRefererRule(url: string, referer: string): Promise<v
     } catch (error) {
         logger.warn(`could not install a Referer rule for ${host}`, error)
     }
+}
+
+/** Does any extractor already declare a header rewrite covering this host? */
+function hasDeclaredRule(host: string): boolean {
+    return allNetRules().some(rule => {
+        const token = rule.urlFilter?.replace(/^\|\|/, "")
+        const byFilter = token ? host === token || host.endsWith(`.${token}`) : false
+        const byDomain = rule.requestDomains?.some(d => host === d || host.endsWith(`.${d}`)) ?? false
+        return byFilter || byDomain
+    })
 }

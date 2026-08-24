@@ -19,9 +19,11 @@ const logger = log("extractor:megaplay")
  * through its own API, and it wins where the two disagree since it is closer to
  * the encode, but every other site on this host gets them from here for free.
  *
- * The CDN sends `access-control-allow-origin: *` but still 403s without a
- * Referer of the embed host — and that host rotates, so the rewrite is declared
- * on the stream and installed for whichever CDN this particular file came from.
+ * Referer is load-bearing twice over, and neither one can be set from `fetch()`:
+ * the embed page answers a Referer-less request with HTTP 200 and an error page,
+ * and the CDN 403s without a Referer of the embed host. Both hosts rotate, so
+ * both rewrites are installed as DNR rules at playback time rather than declared
+ * against hostnames here — see `ensureRefererRule`.
  */
 export class MegaPlayExtractor implements Extractor {
     readonly id = "megaplay"
@@ -51,7 +53,22 @@ export class MegaPlayExtractor implements Extractor {
 
         const fileId =
             /id="megaplay-player"[^>]*\bdata-id="(\d+)"/.exec(html)?.[1] ?? /\bdata-id="(\d+)"/.exec(html)?.[1]
-        if (!fileId) throw new Error("no data-id on the megaplay embed page")
+        if (!fileId) {
+            /*
+             * A missing Referer is answered with HTTP 200 and an error page, not
+             * a 4xx — so it arrives here looking exactly like markup that
+             * changed. `fetch()` cannot set Referer, so the header comes from a
+             * DNR rule the playback handler installs before calling this, and
+             * saying which of the two failed is the difference between a
+             * five-minute fix and re-deriving the whole extractor.
+             */
+            const rejected = /<title>\s*Error/i.test(html) || html.includes("mg-error")
+            throw new Error(
+                rejected
+                    ? "megaplay refused the request — it answers 200 with an error page when the Referer is missing"
+                    : "no data-id on the megaplay embed page"
+            )
+        }
 
         const payload = await ctx.json<SourcesResponse>(`${origin}/stream/getSources?id=${fileId}`, {
             headers: { Referer: embedUrl, "X-Requested-With": "XMLHttpRequest" }

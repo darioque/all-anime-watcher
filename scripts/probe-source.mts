@@ -6,6 +6,15 @@
  *   npm run probe -- <sourceId> [episodeUrl]
  *
  * With no episode URL it discovers one: search → series → newest episode.
+ *
+ * **Known blind spot.** Node's fetch can set `Referer` and `Origin`; the
+ * extension's cannot — both are forbidden header names there, and only a DNR
+ * rule can supply them. So this probe is *more capable* than the thing it is
+ * testing, and a host that needs one of those headers passes here and fails in
+ * the browser. MegaPlay did exactly that: it answers a Referer-less request with
+ * HTTP 200 and an error page, so the extension read it as markup that had
+ * changed while the probe stayed green. The stream checks below simulate the DNR
+ * rewrites for this reason; the extractor's own page fetches do not yet.
  */
 import { allSources, sourceById } from "~/sources/registry"
 import { createFetchCtx } from "~/net/fetcher"

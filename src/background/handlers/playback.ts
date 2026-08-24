@@ -62,6 +62,19 @@ export function registerPlaybackHandlers() {
             json: (url, init) => ctx.json(url, { headers: init?.headers ?? {} })
         }
 
+        /*
+         * The embed page itself needs a Referer, and `fetch()` cannot set one —
+         * it is a forbidden header, so the proxy's request arrives bare however
+         * carefully the extractor spells it out. MegaPlay answers such a request
+         * with HTTP 200 and an error page, which reads downstream as "the markup
+         * changed" rather than "the request was rejected".
+         *
+         * The value barely matters — MegaPlay only checks that one is present —
+         * so the source's own origin is used, which is what the site's iframe
+         * would have sent.
+         */
+        await ensureRefererRule(embedUrl, `${ctx.baseUrl}/`)
+
         try {
             const streams = await extractor.extract(embedUrl, extractCtx)
             // The site's own offsets win over anything the host guessed.
