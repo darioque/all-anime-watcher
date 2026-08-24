@@ -322,13 +322,27 @@ hostname rotates, so the Referer it demands is declared on the `Stream` and
 domain from the video.
 
 **Dailymotion's 403 is not a header problem.** Both a token-shaped explanation
-and a header-shaped one fit some of the evidence, which is exactly why it keeps
-getting misdiagnosed — an earlier pass concluded `Accept-Encoding` and shipped a
-DNR removal rule for it. Repeating a single header variant with a *fresh* token
-each time shows the same variant both passing and failing, so the variable is the
-`sec=` token, not what is sent with it. Do not add header rules for this without
-a repeat-measured result. In practice the player falls through to the next server
-on a fatal HLS error, which is why lmanime and myanime still play.
+and a header-shaped one fit some of the evidence, which is why it keeps getting
+misdiagnosed — an earlier pass concluded `Accept-Encoding` and shipped a DNR
+removal rule for it. Measuring one variant per attempt with a *fresh* `sec=`
+token each time, four attempts each:
+
+| Sent with the manifest request | Result |
+| --- | --- |
+| Referer only | 403, 403, **200**, 403 |
+| Referer + `Accept-Encoding: gzip, deflate, br` | 403, 403, 403, 403 |
+| Referer + `Origin: https://www.dailymotion.com` | 403, **200**, 403, **200** |
+
+Two variants both pass and fail with identical headers, so no header set is
+sufficient and the token is the dominant variable. The loose end: the
+`Accept-Encoding` row never succeeded. 0/4 against 1/4 is far short of a signal,
+and the *best*-performing row carries an `Origin` the header theory says should
+hurt — but it is the reason to re-measure rather than assume, if this is ever
+worth another look. Do not add header rules for this without a repeat-measured
+result; a single 200 proves nothing here.
+
+In practice the player falls through to the next server on a fatal HLS error,
+which is why lmanime and myanime still play.
 
 **Sources:** `lmanime` (AnimeStream theme), `mundodonghua` (custom PHP, packed-JS
 servers), `myanime` (WordPress REST API, no series pages), `anikoto` (AnimeKai
