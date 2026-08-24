@@ -24,7 +24,7 @@ export interface MatchCandidate {
 export const CONFIDENT = 0.9
 
 /** Strip everything that varies between how two sites write the same title. */
-function normalise(title: string): string {
+export function normalise(title: string): string {
     return title
         .toLowerCase()
         .replace(/\(\s*\d{4}\s*\)/g, " ")
@@ -35,7 +35,7 @@ function normalise(title: string): string {
 }
 
 /** Dice coefficient over bigrams — forgiving of word order and small edits. */
-function similarity(a: string, b: string): number {
+export function similarity(a: string, b: string): number {
     if (a === b) return 1
     if (a.length < 2 || b.length < 2) return 0
 

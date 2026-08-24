@@ -17,7 +17,8 @@
         "typecheck": "vue-tsc --noEmit",
         "format": "prettier --write \"src/**/*.{ts,vue,css,html,json}\"",
         "probe": "esbuild scripts/probe-source.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/probe.mjs --log-level=warning && node .probe/probe.mjs",
-        "check:myanime": "esbuild scripts/check-myanime.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/myanime.mjs --log-level=warning && node .probe/myanime.mjs"
+        "check:myanime": "esbuild scripts/check-myanime.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/myanime.mjs --log-level=warning && node .probe/myanime.mjs",
+        "check:grouping": "esbuild scripts/check-grouping.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/grouping.mjs --log-level=warning && node .probe/grouping.mjs"
     },
     "dependencies": {
         "cheerio": "^1.2.0",

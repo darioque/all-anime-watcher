@@ -198,6 +198,12 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
         fields: [
             { key: "openInTab", label: "Toolbar button opens the full library", type: "toggle" },
             {
+                key: "groupBySeries",
+                label: "One row per show, not per source",
+                help: "Collapses a series carried by several sites into one row. Matching on AniList is what makes this reliable — titles alone only catch near-identical spellings.",
+                type: "toggle"
+            },
+            {
                 key: "logLevel",
                 label: "Console detail",
                 type: "select",

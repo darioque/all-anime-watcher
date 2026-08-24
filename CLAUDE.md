@@ -24,6 +24,7 @@ npm run check              # validate dist/ alone
 npm run check:schedule     # the schedule date maths
 npm run check:matching     # AniList title matching rules (offline)
 npm run check:myanime      # myanime.live identity parsing (offline)
+npm run check:grouping     # one-show-many-sources grouping rules (offline)
 npm run typecheck          # vue-tsc, must stay clean
 npm run probe -- lmanime   # run a source against the live site
 PROBE_SERVER=3 npm run probe -- lmanime   # exercise one video host
@@ -205,6 +206,35 @@ confirm the scheme on a sibling site rather than guess. Every `ajax/*` endpoint
 answers with a `{status, result}` envelope; parsing the envelope as markup finds
 nothing and looks exactly like a selector that broke, so unwrap first.
 
+## Grouping
+
+`library/grouping.ts` collapses a show carried by several sources into one row.
+Pure, so `npm run check:grouping` can run the rules over a pile of titles.
+
+**The tracker id is the mechanism; the title is the fallback.** Two entries with
+the same `anilistId` are the same show whatever their titles say, and two with
+*different* ids are not the same show however alike they read. Titles only merge
+above a deliberately high similarity (0.87) with a matching season number, which
+catches "Xian Ni – Renegade Immortal" against "Xian Ni (Renegade Immortal)" and
+nothing looser.
+
+That threshold does *not* merge "Wan Jie Du Zun" with "Wan Jie Du Zun – Ten
+Thousand Worlds", which are the same donghua under a shortened name. This is
+deliberate. The failure of merging two different shows is silent and asymmetric —
+one show's episode count appears to jump and the quieter entry's watch position
+disappears behind the louder one's — while failing to merge just looks like the
+library did before. A prefix rule was tried and rejected: it cannot tell a
+subtitle from a different series. Both entries acquire an AniList id on add, and
+the group forms then.
+
+Matching compares **source** titles, never `displayTitle`. Renaming a series is a
+display preference, and matching on it split a renamed entry out of its own
+group.
+
+Aggregates are across sources by design: position is the *furthest* episode
+reached anywhere, so watching 40 on one site and 41 on another is being at 41,
+and the watch button opens whichever source actually carries the next episode.
+
 ## Domains and trackers
 
 **Domain resolution** (`background/domains.ts`) reads a source's `domainSource`
@@ -385,11 +415,9 @@ family, signed AJAX, embeds on the MegaPlay engine).
    per row, source filtering, persisted list controls, a release delay for the
    airing schedule, and honouring `takeOverPage` with an in-page badge when it
    is off.
-7. **finding and grouping** — a search page for adding series deliberately
-   rather than only by opening an episode, and one row per *show* across
-   sources with an expander (AMR's model), keyed on the AniList match rather
-   than on titles. The two belong together: both are about a show existing in
-   more than one place.
+7. **done** — a search page that asks every source at once and groups the
+   results by show, and one row per *show* in the library with an expander.
+   See "Grouping" below.
 8. downloads (OPFS pipeline) and import/export. Import/export is the only
    data-transfer path there is, since sync was dropped on purpose, so it has to
    round-trip losslessly.

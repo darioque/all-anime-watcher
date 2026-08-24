@@ -12,6 +12,9 @@ import SourcesPanel from "./SourcesPanel.vue"
 import TrackerDialog from "./TrackerDialog.vue"
 import RowMenu, { type MenuItem } from "./RowMenu.vue"
 import ConfirmDialog from "./ConfirmDialog.vue"
+import SearchPanel from "./SearchPanel.vue"
+import { groupSeries, groupLatest, groupPosition, groupUnwatched, preferredEntry } from "~/library/grouping"
+import type { SeriesGroup } from "~/library/grouping"
 
 const props = withDefaults(defineProps<{ variant?: "popup" | "page" }>(), { variant: "popup" })
 
@@ -39,6 +42,10 @@ const controlsReady = ref(false)
 const scheduleFor = ref<string | null>(null)
 const episodesFor = ref<string | null>(null)
 const showSettings = ref(false)
+const showSearch = ref(false)
+/** Groups the viewer has opened. Collapsed is the default — the point is fewer rows. */
+const expanded = ref(new Set<string>())
+const grouping = ref(true)
 const checking = ref(false)
 const pendingRemoval = ref<TrackedAnime | null>(null)
 const trackerFor = ref<TrackedAnime | null>(null)
@@ -72,6 +79,53 @@ const visible = computed(() => {
             return sorted.sort((a, b) => b.lastEpisodeFoundAt - a.lastEpisodeFoundAt || b.addedAt - a.addedAt)
     }
 })
+
+/**
+ * One row per show rather than per source.
+ *
+ * Sorting happens on entries first so the group order follows it — grouping
+ * preserves the order it was handed, so a group sits where its best entry would
+ * have.
+ */
+const groups = computed(() => groupSeries(visible.value, { enabled: grouping.value }))
+
+const isExpanded = (id: string) => expanded.value.has(id)
+
+function toggleGroup(id: string) {
+    const next = new Set(expanded.value)
+    if (!next.delete(id)) next.add(id)
+    expanded.value = next
+}
+
+/** Which entries of a group to draw: all of them unless it is a collapsed group. */
+function rowsOf(group: SeriesGroup<TrackedAnime>): TrackedAnime[] {
+    if (group.entries.length === 1) return group.entries
+    return isExpanded(group.id) ? group.entries : []
+}
+
+/**
+ * What the group header's watch button does: open the next episode from
+ * whichever source actually carries it.
+ */
+function groupWatch(group: SeriesGroup<TrackedAnime>): { label: string; url?: string; title: string } {
+    const entry = preferredEntry(group)
+    if (!entry) return { label: "No episodes", title: "No source returned any episodes yet" }
+
+    const from = groupPosition(group)
+    const next = [...entry.episodes]
+        .filter(episode => from === null || episode.number > from)
+        .sort((a, b) => a.number - b.number)[0]
+
+    if (!next) {
+        const latest = groupLatest(group)
+        return { label: "Up to date", title: latest === null ? "Caught up" : `Caught up at episode ${latest}` }
+    }
+    return {
+        label: from === null ? `Start at E${next.number}` : `Watch E${next.number}`,
+        title: `On ${sourceName(entry.sourceId)}${from === null ? "" : ` — furthest watched is episode ${from}`}`,
+        url: next.url
+    }
+}
 
 /** Descending, so the newest episode is the first thing in the picker. */
 function episodesOf(anime: TrackedAnime): Episode[] {
@@ -119,6 +173,7 @@ async function restoreControls() {
         sort.value = settings.listSort
         onlyUnwatched.value = settings.listOnlyUnwatched
         sourceFilter.value = settings.listSourceFilter
+        grouping.value = settings.groupBySeries
     } catch {
         // Defaults are fine; this is a convenience, not state that matters.
     } finally {
@@ -126,13 +181,14 @@ async function restoreControls() {
     }
 }
 
-watch([sort, onlyUnwatched, sourceFilter], () => {
+watch([sort, onlyUnwatched, sourceFilter, grouping], () => {
     if (!controlsReady.value) return
     void send("settings:patch", {
         patch: {
             listSort: sort.value,
             listOnlyUnwatched: onlyUnwatched.value,
-            listSourceFilter: sourceFilter.value
+            listSourceFilter: sourceFilter.value,
+            groupBySeries: grouping.value
         }
     }).catch(() => undefined)
 })
@@ -247,12 +303,35 @@ async function checkAll() {
 
 const open = (url: string) => void send("tab:open", { url })
 
+/** The full library owns the search panel; the popup is too narrow for results. */
+function openSearch() {
+    if (props.variant !== "page") {
+        void send("tab:openLibrary", {})
+        return
+    }
+    showSearch.value = !showSearch.value
+    if (showSearch.value) {
+        showSettings.value = false
+        window.scrollTo({ top: 0, behavior: "smooth" })
+    }
+}
+
+function onAdded(anime: TrackedAnime) {
+    // Insert rather than reload: a search result added while three sources are
+    // still returning should not take the results away.
+    if (!library.value.some(existing => existing.key === anime.key)) {
+        library.value = [anime, ...library.value]
+    }
+    flash(`Following ${titleOf(anime)}`)
+}
+
 function openSettings() {
     if (props.variant !== "page") {
         void send("tab:openLibrary", {})
         return
     }
     showSettings.value = !showSettings.value
+    if (showSettings.value) showSearch.value = false
     // Settings open above the list. Opening them from halfway down a long
     // library otherwise puts you in the middle of a panel you have not seen the
     // top of.
@@ -388,6 +467,14 @@ defineExpose({ load })
                 >
                     <span :class="{ spin: checking }">⟳</span>
                 </button>
+                <button
+                    class="btn icon"
+                    :class="{ primary: showSearch }"
+                    :title="variant === 'page' ? 'Find a series to follow' : 'Find a series (opens the full library)'"
+                    @click="openSearch"
+                >
+                    ⌕
+                </button>
                 <button class="btn icon" title="Reload the list" @click="load">↻</button>
                 <button
                     v-if="variant === 'popup'"
@@ -407,6 +494,14 @@ defineExpose({ load })
                 </button>
             </div>
         </header>
+
+        <SearchPanel
+            v-if="showSearch && variant === 'page'"
+            :library="library"
+            :sources="sources"
+            @added="onAdded"
+            @close="showSearch = false"
+        />
 
         <SettingsPanel v-if="showSettings && variant === 'page'" />
         <SourcesPanel v-if="showSettings && variant === 'page'" />
@@ -450,100 +545,155 @@ defineExpose({ load })
         </div>
 
         <ul v-else class="list">
-            <li v-for="a in visible" :key="a.key" class="row" :data-state="watchState(a)">
-                <span class="stripe" aria-hidden="true"></span>
+            <template v-for="group in groups" :key="group.id">
+                <li v-if="group.entries.length > 1" class="row group" :data-open="isExpanded(group.id)">
+                    <span class="stripe" aria-hidden="true"></span>
 
-                <div class="poster">
-                    <img v-if="a.poster" :src="a.poster" alt="" loading="lazy" />
-                </div>
-
-                <div class="body">
-                    <div class="title-row">
-                        <button class="title" :title="titleOf(a)" @click="open(a.url)">{{ titleOf(a) }}</button>
-                        <span v-if="watchState(a) === 'new'" class="pill accent tight">+{{ unwatchedCount(a) }}</span>
+                    <div class="poster">
+                        <img v-if="group.poster" :src="group.poster" alt="" loading="lazy" />
                     </div>
 
-                    <div class="meta">
-                        <span>{{ sourceName(a.sourceId) }}</span>
-                        <span class="sep">·</span>
-                        <span>{{ a.episodes.length }} ep</span>
-                        <span class="sep">·</span>
-                        <span v-if="a.lastWatched">at E{{ a.lastWatched.number }}</span>
-                        <span v-else class="faint">not started</span>
-                        <span class="sep">·</span>
-                        <span :title="a.lastCheckedAt ? new Date(a.lastCheckedAt).toLocaleString() : ''">
-                            checked {{ relativePast(a.lastCheckedAt) }}
-                        </span>
-                        <span class="sep">·</span>
-                        <span :title="a.nextCheckAt ? new Date(a.nextCheckAt).toLocaleString() : ''">
-                            next {{ relativeFuture(a.nextCheckAt) }}
-                        </span>
-                    </div>
-
-                    <div v-if="stateTags(a).length > 0" class="tags">
-                        <span v-for="tag in stateTags(a)" :key="tag.label" class="tag" :class="tag.tone">
-                            {{ tag.label }}
-                        </span>
-                    </div>
-
-                    <p v-if="a.lastError" class="row-error" :title="a.lastError">Last check failed</p>
-
-                    <div class="actions">
-                        <button
-                            class="btn"
-                            :class="{ primary: watchState(a) === 'new' }"
-                            :disabled="isBusy(a.key) || !watchAction(a).url"
-                            :title="watchAction(a).title"
-                            @click="open(watchAction(a).url!)"
-                        >
-                            {{ watchAction(a).label }}
-                        </button>
-                        <span v-if="isBusy(a.key)" class="working">working…</span>
-                        <span class="grow"></span>
-                        <RowMenu :items="menuFor(a)" :label="`Actions for ${titleOf(a)}`" />
-                    </div>
-
-                    <div v-if="episodesFor === a.key" class="episodes-panel">
-                        <div class="panel-head">
-                            <span class="panel-title">{{ a.episodes.length }} episodes</span>
-                            <button class="btn tiny" @click="episodesFor = null">Close</button>
+                    <div class="body">
+                        <div class="title-row">
+                            <button class="title" :title="group.title" @click="toggleGroup(group.id)">
+                                {{ group.title }}
+                            </button>
+                            <span v-if="groupUnwatched(group) > 0" class="pill accent tight">
+                                +{{ groupUnwatched(group) }}
+                            </span>
                         </div>
-                        <div class="episode-grid">
+
+                        <div class="meta">
+                            <span>{{ group.entries.map(e => sourceName(e.sourceId)).join(" · ") }}</span>
+                            <span class="sep">·</span>
+                            <span v-if="groupLatest(group) !== null">newest E{{ groupLatest(group) }}</span>
+                            <span class="sep">·</span>
+                            <span v-if="groupPosition(group) !== null">at E{{ groupPosition(group) }}</span>
+                            <span v-else class="faint">not started</span>
+                        </div>
+
+                        <div class="actions">
                             <button
-                                v-for="ep in episodesOf(a)"
-                                :key="`${ep.number}-${ep.variant ?? ''}`"
-                                class="ep"
-                                :data-state="episodeState(a, ep)"
-                                :title="`${ep.title ?? `Episode ${ep.number}`}${ep.variant ? ` · ${ep.variant}` : ''} — click to watch`"
-                                @click="watchEpisode(a, ep.number)"
+                                class="btn"
+                                :class="{ primary: groupUnwatched(group) > 0 }"
+                                :disabled="!groupWatch(group).url"
+                                :title="groupWatch(group).title"
+                                @click="open(groupWatch(group).url!)"
                             >
-                                {{ ep.number }}
+                                {{ groupWatch(group).label }}
+                            </button>
+                            <span class="grow"></span>
+                            <button class="btn expander" @click="toggleGroup(group.id)">
+                                {{ isExpanded(group.id) ? "Hide" : "Show" }} {{ group.entries.length }} sources
+                                <span class="caret">{{ isExpanded(group.id) ? "▴" : "▾" }}</span>
                             </button>
                         </div>
-                        <label class="set-position">
-                            <span>I'm at episode</span>
-                            <select
-                                :value="a.lastWatched?.number ?? ''"
-                                @change="setPosition(a, Number(($event.target as HTMLSelectElement).value))"
-                            >
-                                <option value="" disabled>not started</option>
-                                <option v-for="ep in episodesOf(a)" :key="ep.number" :value="ep.number">
-                                    Episode {{ ep.number }}
-                                </option>
-                            </select>
-                        </label>
+                    </div>
+                </li>
+
+                <li
+                    v-for="a in rowsOf(group)"
+                    :key="a.key"
+                    class="row"
+                    :class="{ nested: group.entries.length > 1 }"
+                    :data-state="watchState(a)"
+                >
+                    <span class="stripe" aria-hidden="true"></span>
+
+                    <div class="poster">
+                        <img v-if="a.poster" :src="a.poster" alt="" loading="lazy" />
                     </div>
 
-                    <div v-if="scheduleFor === a.key" class="schedule">
-                        <SchedulePicker
-                            allow-inherit
-                            inherited-label="global default"
-                            :model-value="a.overrides.schedule ?? { mode: 'inherit' }"
-                            @update:model-value="value => setSchedule(a, value)"
-                        />
+                    <div class="body">
+                        <div class="title-row">
+                            <button class="title" :title="titleOf(a)" @click="open(a.url)">{{ titleOf(a) }}</button>
+                            <span v-if="watchState(a) === 'new'" class="pill accent tight"
+                                >+{{ unwatchedCount(a) }}</span
+                            >
+                        </div>
+
+                        <div class="meta">
+                            <span>{{ sourceName(a.sourceId) }}</span>
+                            <span class="sep">·</span>
+                            <span>{{ a.episodes.length }} ep</span>
+                            <span class="sep">·</span>
+                            <span v-if="a.lastWatched">at E{{ a.lastWatched.number }}</span>
+                            <span v-else class="faint">not started</span>
+                            <span class="sep">·</span>
+                            <span :title="a.lastCheckedAt ? new Date(a.lastCheckedAt).toLocaleString() : ''">
+                                checked {{ relativePast(a.lastCheckedAt) }}
+                            </span>
+                            <span class="sep">·</span>
+                            <span :title="a.nextCheckAt ? new Date(a.nextCheckAt).toLocaleString() : ''">
+                                next {{ relativeFuture(a.nextCheckAt) }}
+                            </span>
+                        </div>
+
+                        <div v-if="stateTags(a).length > 0" class="tags">
+                            <span v-for="tag in stateTags(a)" :key="tag.label" class="tag" :class="tag.tone">
+                                {{ tag.label }}
+                            </span>
+                        </div>
+
+                        <p v-if="a.lastError" class="row-error" :title="a.lastError">Last check failed</p>
+
+                        <div class="actions">
+                            <button
+                                class="btn"
+                                :class="{ primary: watchState(a) === 'new' }"
+                                :disabled="isBusy(a.key) || !watchAction(a).url"
+                                :title="watchAction(a).title"
+                                @click="open(watchAction(a).url!)"
+                            >
+                                {{ watchAction(a).label }}
+                            </button>
+                            <span v-if="isBusy(a.key)" class="working">working…</span>
+                            <span class="grow"></span>
+                            <RowMenu :items="menuFor(a)" :label="`Actions for ${titleOf(a)}`" />
+                        </div>
+
+                        <div v-if="episodesFor === a.key" class="episodes-panel">
+                            <div class="panel-head">
+                                <span class="panel-title">{{ a.episodes.length }} episodes</span>
+                                <button class="btn tiny" @click="episodesFor = null">Close</button>
+                            </div>
+                            <div class="episode-grid">
+                                <button
+                                    v-for="ep in episodesOf(a)"
+                                    :key="`${ep.number}-${ep.variant ?? ''}`"
+                                    class="ep"
+                                    :data-state="episodeState(a, ep)"
+                                    :title="`${ep.title ?? `Episode ${ep.number}`}${ep.variant ? ` · ${ep.variant}` : ''} — click to watch`"
+                                    @click="watchEpisode(a, ep.number)"
+                                >
+                                    {{ ep.number }}
+                                </button>
+                            </div>
+                            <label class="set-position">
+                                <span>I'm at episode</span>
+                                <select
+                                    :value="a.lastWatched?.number ?? ''"
+                                    @change="setPosition(a, Number(($event.target as HTMLSelectElement).value))"
+                                >
+                                    <option value="" disabled>not started</option>
+                                    <option v-for="ep in episodesOf(a)" :key="ep.number" :value="ep.number">
+                                        Episode {{ ep.number }}
+                                    </option>
+                                </select>
+                            </label>
+                        </div>
+
+                        <div v-if="scheduleFor === a.key" class="schedule">
+                            <SchedulePicker
+                                allow-inherit
+                                inherited-label="global default"
+                                :model-value="a.overrides.schedule ?? { mode: 'inherit' }"
+                                @update:model-value="value => setSchedule(a, value)"
+                            />
+                        </div>
                     </div>
-                </div>
-            </li>
+                </li>
+            </template>
         </ul>
 
         <TrackerDialog
@@ -794,6 +944,30 @@ h1 {
 
 .row[data-state="paused"] .stripe {
     background: var(--ink-3);
+}
+
+/*
+ * A group header is a row that stands for several. It reads as one thing with
+ * the sources tucked under it, rather than as a heading floating above unrelated
+ * rows — which is what an unindented list of the same entries looked like.
+ */
+.row.group[data-open="true"] {
+    border-bottom-left-radius: 0;
+    border-bottom-right-radius: 0;
+}
+
+.row.nested {
+    margin-left: 22px;
+    box-shadow: none;
+}
+
+.expander {
+    font-size: 10px;
+    color: var(--ink-3);
+}
+
+.caret {
+    margin-left: 3px;
 }
 
 .episodes-panel {
