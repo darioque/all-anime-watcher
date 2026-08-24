@@ -1,5 +1,6 @@
 import { on } from "../router"
 import { getAnime } from "~/model/db"
+import { fetchSkipTimes } from "~/trackers/aniskip"
 import { fetchCtxFor } from "~/library/library"
 import { orderServers } from "~/library/servers"
 import { sourceById, sourceForUrl } from "~/sources/registry"
@@ -26,8 +27,14 @@ export function registerPlaybackHandlers() {
 
         const ctx = await fetchCtxFor(source)
 
-        const embedUrl = server.embedUrl ?? (await source.resolveServer?.(server as Server, ctx))
-        if (!embedUrl) throw new Error(`could not resolve server "${server.name}" to an embed URL`)
+        const resolved = server.embedUrl ?? (await source.resolveServer?.(server as Server, ctx))
+        if (!resolved) throw new Error(`could not resolve server "${server.name}" to an embed URL`)
+
+        // A source may answer with just a URL or with extra detail. Sites that
+        // hand over their own intro/outro offsets are giving better data than any
+        // third party — they measured it against this exact encode.
+        const embedUrl = typeof resolved === "string" ? resolved : resolved.embedUrl
+        const siteSkips = typeof resolved === "string" ? undefined : resolved.skips
 
         const host = new URL(embedUrl).hostname
         const extractor = extractorFor(embedUrl)
@@ -56,8 +63,12 @@ export function registerPlaybackHandlers() {
 
         try {
             const streams = await extractor.extract(embedUrl, extractCtx)
+            // The site's own offsets win over anything the host guessed.
+            const withSkips = siteSkips
+                ? streams.map(stream => ({ ...stream, skips: { ...stream.skips, ...siteSkips } }))
+                : streams
             logger.info(`${server.name} → ${extractor.id} → ${streams.length} stream(s)`)
-            return { embedUrl, extractorId: extractor.id, streams }
+            return { embedUrl, extractorId: extractor.id, streams: withSkips }
         } catch (error) {
             // An extractor that knows the host but couldn't read it — a deleted
             // file, a changed player — still leaves the embed itself playable.
@@ -117,6 +128,18 @@ export function registerPlaybackHandlers() {
         // messages, so a buffer would arrive as `{}`. See shared/binary.ts.
         const buffer = await response.arrayBuffer()
         return { status: response.status, base64: bufferToBase64(buffer), url: response.url }
+    })
+
+    /**
+     * Skip offsets from AniSkip, for sources that don't publish their own.
+     * Needs a MAL id, which arrives with an AniList link — so this quietly
+     * returns nothing for an unmatched series rather than pretending.
+     */
+    on("playback:skipTimes", async ({ key, number, durationSec }) => {
+        if (!key) return null
+        const anime = await getAnime(key)
+        if (!anime?.malId) return null
+        return fetchSkipTimes(anime.malId, number, durationSec ?? 0)
     })
 
     /** Which source, if any, owns an arbitrary URL. Used by the player for embeds. */

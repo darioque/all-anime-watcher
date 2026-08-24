@@ -56,6 +56,13 @@ export interface Server {
     resolve?: unknown
 }
 
+/** A resolved server, when the site tells us more than just the URL. */
+export interface ResolvedServer {
+    embedUrl: string
+    /** Seconds from the start of the episode. */
+    skips?: { intro?: { startSec: number; endSec: number }; outro?: { startSec: number; endSec: number } }
+}
+
 export interface FetchCtx {
     /** Fetch a page as text, following the source's own escalation rules. */
     text(url: string, init?: SourceRequestInit): Promise<string>
@@ -136,8 +143,12 @@ export interface AnimeSource {
     isEpisodePage(html: string, url: string): boolean
     getPageInfo(html: string, url: string, ctx: FetchCtx): Promise<PageInfo>
     getServers(html: string, url: string, ctx: FetchCtx): Promise<Server[]>
-    /** Turn a deferred server into an embed URL. Required if any Server omits embedUrl. */
-    resolveServer?(server: Server, ctx: FetchCtx): Promise<string>
+    /**
+     * Turn a deferred server into an embed URL. Required if any Server omits
+     * embedUrl. May return extra detail — some sites hand over intro/outro
+     * offsets alongside the URL, which is better data than any third party has.
+     */
+    resolveServer?(server: Server, ctx: FetchCtx): Promise<string | ResolvedServer>
 
     netRequest?(): NetRequestConfig | null
     readonly domainSource?: DomainSource

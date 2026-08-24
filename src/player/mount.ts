@@ -16,6 +16,8 @@ export interface PlayerOptions {
     progressTickSec: number
     preferredQuality: string
     autoAdvance: boolean
+    skipIntro: "off" | "button" | "auto"
+    skipOutro: "off" | "button" | "auto"
 }
 
 export function mountPlayer(identity: PageIdentity, options: PlayerOptions): void {

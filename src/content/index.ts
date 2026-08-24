@@ -65,13 +65,21 @@ async function identify() {
     // Defaults keep playback working if the read fails; they are not the source
     // of truth, which is why they mirror settings/schema.ts rather than inventing
     // values.
-    let options: PlayerOptions = { progressTickSec: 5, preferredQuality: "1080p", autoAdvance: true }
+    let options: PlayerOptions = {
+        progressTickSec: 5,
+        preferredQuality: "1080p",
+        autoAdvance: true,
+        skipIntro: "button",
+        skipOutro: "button"
+    }
     try {
         const settings = await send("settings:get", {})
         options = {
             progressTickSec: settings.progressTickSec,
             preferredQuality: settings.preferredQuality,
-            autoAdvance: settings.autoAdvance
+            autoAdvance: settings.autoAdvance,
+            skipIntro: settings.skipIntro,
+            skipOutro: settings.skipOutro
         }
     } catch {
         // A settings read failure shouldn't block playback.

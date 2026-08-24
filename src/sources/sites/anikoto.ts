@@ -1,5 +1,14 @@
 import type { Episode } from "~/model/types"
-import type { AnimeSource, DomainSource, FetchCtx, PageInfo, SearchResult, SeriesInfo, Server } from "~/sources/types"
+import type {
+    AnimeSource,
+    DomainSource,
+    FetchCtx,
+    PageInfo,
+    ResolvedServer,
+    SearchResult,
+    SeriesInfo,
+    Server
+} from "~/sources/types"
 import { attrOf, imageUrlFrom, parse } from "~/sources/html"
 import { rc4ToBase64 } from "~/shared/crypto"
 import { absoluteUrl, pathOf } from "~/shared/url"
@@ -201,8 +210,8 @@ export class Anikoto implements AnimeSource {
         return servers
     }
 
-    async resolveServer(server: Server, ctx: FetchCtx): Promise<string> {
-        if (server.embedUrl) return server.embedUrl
+    async resolveServer(server: Server, ctx: FetchCtx): Promise<ResolvedServer> {
+        if (server.embedUrl) return { embedUrl: server.embedUrl }
 
         const { linkId } = (server.resolve ?? {}) as { linkId?: string }
         if (!linkId) throw new Error(`server "${server.name}" carries no link id`)
@@ -223,10 +232,10 @@ export class Anikoto implements AnimeSource {
         const url = payload.result?.url
         if (!url) throw new Error(`no embed URL for server "${server.name}"`)
 
-        // `result.skip_data` carries intro/outro offsets. Nothing consumes them
-        // yet — these embeds play in an iframe, where we can't seek — so they are
-        // deliberately not plumbed through rather than carried unused.
-        return url
+        // The site's own intro/outro offsets — better than any third party's,
+        // since they were measured against this exact encode.
+        const skips = toSpans(payload.result?.skip_data)
+        return { embedUrl: url, ...(skips ? { skips } : {}) }
     }
 
     // ------------------------------------------------------------ helpers
@@ -316,3 +325,18 @@ interface EpisodeEntry {
 }
 
 export const anikoto = new Anikoto()
+
+/** `[0, 0]` is how the API says "we don't know", not "skip nothing". */
+function toSpans(data?: { intro?: number[]; outro?: number[] }): ResolvedServer["skips"] | null {
+    const span = (pair?: number[]) => {
+        const [startSec, endSec] = pair ?? []
+        if (startSec === undefined || endSec === undefined) return undefined
+        if (endSec <= startSec) return undefined
+        return { startSec, endSec }
+    }
+
+    const intro = span(data?.intro)
+    const outro = span(data?.outro)
+    if (!intro && !outro) return null
+    return { ...(intro ? { intro } : {}), ...(outro ? { outro } : {}) }
+}

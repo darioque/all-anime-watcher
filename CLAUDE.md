@@ -91,6 +91,13 @@ These are load-bearing. Breaking one costs a rewrite later.
    export/import. Don't add merge clocks.
 8. **Register listeners synchronously at the top level** of the service worker. A
    listener added after an `await` misses the event that woke the worker.
+9. **Pure logic never lives in a module that imports transport.** Anything
+   importing `webextension-polyfill`, `~/model/db` or `~/shared/messages` can only
+   run inside an extension, so a scoring function or a date calculation sitting
+   beside one can never be tested. This has bitten three times — `schedule.ts`,
+   `trackers/matching.ts`, `shared/vtt.ts` — each time discovered by trying to
+   write the test. Split first: rules in a pure module, storage and messaging in
+   the caller.
 
 ## Nothing hardcoded
 
@@ -281,18 +288,21 @@ servers), `myanime` (WordPress REST API — series are *tags*, episodes are post
 
 1. **done** — skeleton, detection, settings resolver, IndexedDB, lmanime, popup +
    full library page
-2. **done, pending browser confirmation** — extractor layer, DNR header rules,
-   background playback proxy, in-page player (Vue + hls.js) with server/quality
-   pickers, auto-fallback, resume and progress reporting.
-   - Mp4Upload verified end to end from the CLI (direct MP4, HTTP 206).
-   - Dailymotion resolves to a master playlist but the manifest edge 403s
-     inconsistently from a script; unproven until it plays in the browser.
-   - lmanime sends **no CSP**, so the strip was never needed there. It exists as
-     an opt-in `stripCsp` flag per source rather than a blanket rule.
-3. library and tracking depth, update loop, notifications
-4. the other three sources + an in-extension Lab page
-5. domain resolution, AniList metadata/schedule, per-anime schedule policies
-6. player depth: skips, auto-advance, tracks, shortcuts, PiP
+2. **done** — extractor layer, DNR header rules, background playback proxy,
+   in-page player, auto-fallback, resume and progress. Confirmed playing in the
+   browser. lmanime sends **no CSP**, so the strip was never needed; it survives
+   as an opt-in `stripCsp` flag per source rather than a blanket rule.
+   Dailymotion's HLS path is still the one unproven piece.
+3. **done** — update loop on a nextCheckAt priority queue, notifications,
+   schedule policies with per-series overrides, settings panel
+4. **done** — all four launch sources, plus the iframe fallback for unknown
+   hosts. The in-extension Lab page is the one part not built; `npm run probe`
+   covers it from the CLI.
+5. **done** — domain resolution with health checks and auto-promotion, AniList
+   metadata and air times
+6. **done** — skip intro/outro (site offsets first, AniSkip as fallback),
+   subtitle tracks with SRT→VTT conversion, keyboard shortcuts with a `?`
+   overlay, Picture-in-Picture, quality preference, episode navigation
 7. downloads (OPFS pipeline) and import/export
 8. breadth and library depth: categories with include/exclude filtering and
    bulk actions (AMR's model; `TrackedAnime.categories` already exists and is

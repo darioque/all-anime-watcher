@@ -8,12 +8,15 @@ import type { Server } from "~/sources/types"
 import type { Episode } from "~/model/types"
 import type { Stream } from "~/extractors/types"
 import { BackgroundLoader } from "./backgroundLoader"
+import { loadTrack, releaseTracks, type LoadedTrack } from "./subtitles"
 
 const props = defineProps<{
     identity: PageIdentity
     progressTickSec: number
     preferredQuality: string
     autoAdvance: boolean
+    skipIntro: "off" | "button" | "auto"
+    skipOutro: "off" | "button" | "auto"
 }>()
 
 const video = ref<HTMLVideoElement | null>(null)
@@ -32,6 +35,18 @@ const streamLabel = ref("")
 const embedded = ref<string | null>(null)
 /** Best embed seen while walking servers, used only if nothing extractable works. */
 const embedFallback = ref<{ stream: Stream; index: number } | null>(null)
+
+/** Intro/outro offsets: from the site if it publishes them, else AniSkip. */
+const skips = ref<{ intro?: { startSec: number; endSec: number }; outro?: { startSec: number; endSec: number } }>({})
+/** Which span the playhead is inside right now, if any. */
+const inSkip = ref<"intro" | "outro" | null>(null)
+/** Spans already skipped this episode, so an auto-skip doesn't fight a rewind. */
+const skipped = ref(new Set<string>())
+
+const subtitles = ref<LoadedTrack[]>([])
+const activeSubtitle = ref<number>(-1)
+const pipSupported = typeof document !== "undefined" && "pictureInPictureEnabled" in document
+const showHelp = ref(false)
 
 const info = computed(() => props.identity.pageInfo)
 const title = computed(() => (info.value ? `${info.value.title} — Episode ${info.value.number}` : "Loading…"))
@@ -109,6 +124,8 @@ async function playServer(index: number, auto = false): Promise<void> {
         }
 
         streamLabel.value = `${result.extractorId ?? "embedded"}${stream.label ? ` · ${stream.label}` : ""}`
+        applySkips(stream)
+        void loadSubtitles(stream)
         await attach(stream, index)
     } catch (error) {
         failedServers.value = new Set(failedServers.value).add(index)
@@ -274,6 +291,136 @@ function applyPreferredQuality(instance: Hls) {
     console.debug(`[AAW] quality: wanted ${props.preferredQuality}, picked ${instance.levels[best]?.height}p`)
 }
 
+// ------------------------------------------------------------------ skipping
+
+/**
+ * Take whatever the site gave us, then ask AniSkip to fill the gaps.
+ *
+ * Site-supplied offsets are trusted over the crowd-sourced ones: they were
+ * measured against the encode being served, not against whatever release a
+ * contributor happened to have.
+ */
+function applySkips(stream: Stream) {
+    skipped.value = new Set()
+    skips.value = { ...stream.skips }
+    inSkip.value = null
+
+    if (skips.value.intro && skips.value.outro) return
+    if (!props.identity.key || !info.value) return
+
+    void send("playback:skipTimes", {
+        key: props.identity.key,
+        number: info.value.number,
+        ...(video.value && Number.isFinite(video.value.duration) ? { durationSec: video.value.duration } : {})
+    })
+        .then(times => {
+            if (!times) return
+            skips.value = {
+                intro: skips.value.intro ?? times.intro,
+                outro: skips.value.outro ?? times.outro
+            }
+        })
+        .catch(() => undefined)
+}
+
+/** Called on every timeupdate; keeps the button in sync and runs auto-skip. */
+function checkSkip() {
+    const element = video.value
+    if (!element || embedded.value) return
+
+    const at = element.currentTime
+    const inside = (span?: { startSec: number; endSec: number }) =>
+        Boolean(span && at >= span.startSec && at < span.endSec)
+
+    const which = inside(skips.value.intro) ? "intro" : inside(skips.value.outro) ? "outro" : null
+    inSkip.value = which
+    if (!which) return
+
+    const mode = which === "intro" ? props.skipIntro : props.skipOutro
+    // Auto-skip once per span. Without this, seeking back into the opening on
+    // purpose would be undone the moment the timer fired again.
+    if (mode === "auto" && !skipped.value.has(which)) {
+        doSkip(which)
+    }
+}
+
+function doSkip(which: "intro" | "outro") {
+    const span = skips.value[which]
+    const element = video.value
+    if (!span || !element) return
+    skipped.value = new Set(skipped.value).add(which)
+    element.currentTime = span.endSec
+    inSkip.value = null
+}
+
+// ------------------------------------------------------------------ subtitles
+
+/**
+ * Extractor-supplied tracks. Ones declared inside an HLS manifest are handled by
+ * hls.js itself and appear in its own track list, so they are not duplicated here.
+ */
+async function loadSubtitles(stream: Stream) {
+    releaseTracks(subtitles.value)
+    subtitles.value = []
+    activeSubtitle.value = -1
+    if (!stream.subtitles?.length) return
+
+    const loaded = await Promise.all(stream.subtitles.map(loadTrack))
+    subtitles.value = loaded.filter((track): track is LoadedTrack => track !== null)
+}
+
+function selectSubtitle(index: number) {
+    activeSubtitle.value = index
+    const element = video.value
+    if (!element) return
+    // Vue renders the <track> elements; the text-track mode is what actually
+    // shows or hides them.
+    for (let i = 0; i < element.textTracks.length; i++) {
+        const track = element.textTracks[i]
+        if (track) track.mode = i === index ? "showing" : "disabled"
+    }
+}
+
+// ------------------------------------------------------------------ controls
+
+function togglePlay() {
+    const element = video.value
+    if (!element) return
+    if (element.paused) void element.play()
+    else element.pause()
+}
+
+function seekBy(seconds: number) {
+    const element = video.value
+    if (!element) return
+    element.currentTime = Math.max(0, element.currentTime + seconds)
+}
+
+function nudgeVolume(delta: number) {
+    const element = video.value
+    if (!element) return
+    element.volume = Math.min(1, Math.max(0, element.volume + delta))
+    element.muted = element.volume === 0
+}
+
+async function toggleFullscreen() {
+    const root = document.getElementById("aaw-root")
+    if (!root) return
+    if (document.fullscreenElement) await document.exitFullscreen()
+    else await root.requestFullscreen().catch(() => undefined)
+}
+
+async function togglePip() {
+    const element = video.value
+    if (!element || !pipSupported) return
+    try {
+        if (document.pictureInPictureElement) await document.exitPictureInPicture()
+        else await element.requestPictureInPicture()
+    } catch {
+        // Refused — a stream still buffering, or the browser said no.
+    }
+}
+
 // ------------------------------------------------------------------ progress
 
 /** Resume where the viewer left off, if they were more than a few seconds in. */
@@ -350,30 +497,62 @@ async function loadEpisodeList() {
 }
 
 /**
- * AMR's bindings, so the muscle memory carries over: N and B move between
- * episodes. Ignored while typing, and while a modifier is held so the browser's
- * own shortcuts still work.
+ * Keyboard control.
+ *
+ * N and B are AMR's episode bindings, so that muscle memory carries over; the
+ * rest follow the conventions every web player shares, because those are the
+ * ones already in your fingers. Ignored while typing and while a modifier is
+ * held, so the browser's own shortcuts still work.
  */
+const SHORTCUTS: { keys: string[]; label: string; run: () => void }[] = []
+
 function onKey(event: KeyboardEvent) {
     if (event.ctrlKey || event.altKey || event.metaKey) return
     const target = event.target as HTMLElement | null
     if (target && /^(input|textarea|select)$/i.test(target.tagName)) return
 
-    if (event.key === "n" || event.key === "N") {
-        event.preventDefault()
-        goTo(nextEp.value)
-    }
-    if (event.key === "b" || event.key === "B") {
-        event.preventDefault()
-        goTo(previousEp.value)
-    }
+    const key = event.key.toLowerCase()
+    const match = SHORTCUTS.find(shortcut => shortcut.keys.includes(key))
+    if (!match) return
+
+    event.preventDefault()
+    event.stopPropagation()
+    match.run()
 }
+
+SHORTCUTS.push(
+    { keys: ["n"], label: "Next episode", run: () => goTo(nextEp.value) },
+    { keys: ["b"], label: "Previous episode", run: () => goTo(previousEp.value) },
+    { keys: [" ", "k"], label: "Play / pause", run: togglePlay },
+    { keys: ["arrowright", "l"], label: "Forward 10s", run: () => seekBy(10) },
+    { keys: ["arrowleft", "j"], label: "Back 10s", run: () => seekBy(-10) },
+    { keys: ["arrowup"], label: "Volume up", run: () => nudgeVolume(0.1) },
+    { keys: ["arrowdown"], label: "Volume down", run: () => nudgeVolume(-0.1) },
+    {
+        keys: ["m"],
+        label: "Mute",
+        run: () => {
+            if (video.value) video.value.muted = !video.value.muted
+        }
+    },
+    { keys: ["f"], label: "Fullscreen", run: () => void toggleFullscreen() },
+    { keys: ["p"], label: "Picture-in-picture", run: () => void togglePip() },
+    {
+        keys: ["s"],
+        label: "Skip the intro or ending",
+        run: () => {
+            if (inSkip.value) doSkip(inSkip.value)
+        }
+    },
+    { keys: ["?"], label: "This list", run: () => (showHelp.value = !showHelp.value) }
+)
 
 onBeforeUnmount(() => {
     if (tickTimer) window.clearInterval(tickTimer)
     document.removeEventListener("visibilitychange", reportProgress)
     window.removeEventListener("keydown", onKey)
     reportProgress()
+    releaseTracks(subtitles.value)
     teardown()
 })
 </script>
@@ -429,7 +608,33 @@ onBeforeUnmount(() => {
                 allow="autoplay; fullscreen; encrypted-media; picture-in-picture"
                 referrerpolicy="origin"
             ></iframe>
-            <video v-show="!embedded" ref="video" controls playsinline autoplay @ended="onEnded"></video>
+            <video
+                v-show="!embedded"
+                ref="video"
+                controls
+                playsinline
+                autoplay
+                @ended="onEnded"
+                @timeupdate="checkSkip"
+            >
+                <track
+                    v-for="(track, index) in subtitles"
+                    :key="track.objectUrl"
+                    kind="subtitles"
+                    :src="track.objectUrl"
+                    :label="track.label"
+                    :srclang="track.language ?? 'und'"
+                    :default="index === activeSubtitle"
+                />
+            </video>
+
+            <button
+                v-if="inSkip && (inSkip === 'intro' ? skipIntro : skipOutro) !== 'off'"
+                class="skip"
+                @click="doSkip(inSkip)"
+            >
+                Skip {{ inSkip === "intro" ? "intro" : "ending" }} <span class="key">S</span>
+            </button>
 
             <div v-if="status === 'resolving'" class="overlay">
                 <div class="spinner" aria-hidden="true"></div>
@@ -446,6 +651,23 @@ onBeforeUnmount(() => {
             </div>
         </div>
 
+        <div v-if="showHelp" class="help" @click.self="showHelp = false">
+            <div class="help-card">
+                <h2>Keyboard</h2>
+                <ul>
+                    <li v-for="shortcut in SHORTCUTS" :key="shortcut.label">
+                        <span class="keys">
+                            <span v-for="key in shortcut.keys" :key="key" class="key">{{
+                                key === " " ? "Space" : key
+                            }}</span>
+                        </span>
+                        <span>{{ shortcut.label }}</span>
+                    </li>
+                </ul>
+                <button class="chip" @click="showHelp = false">Close</button>
+            </div>
+        </div>
+
         <div class="controls">
             <div class="group">
                 <span class="label">Server</span>
@@ -459,6 +681,27 @@ onBeforeUnmount(() => {
                 >
                     {{ server.name }}
                 </button>
+            </div>
+
+            <div v-if="subtitles.length > 0 && !embedded" class="group">
+                <span class="label">Subtitles</span>
+                <button class="chip" :class="{ on: activeSubtitle === -1 }" @click="selectSubtitle(-1)">Off</button>
+                <button
+                    v-for="(track, index) in subtitles"
+                    :key="track.objectUrl"
+                    class="chip"
+                    :class="{ on: index === activeSubtitle }"
+                    @click="selectSubtitle(index)"
+                >
+                    {{ track.label }}
+                </button>
+            </div>
+
+            <div class="group right">
+                <button v-if="pipSupported && !embedded" class="chip" title="Picture-in-picture (P)" @click="togglePip">
+                    PiP
+                </button>
+                <button class="chip" title="Keyboard shortcuts (?)" @click="showHelp = !showHelp">?</button>
             </div>
 
             <span v-if="embedded" class="embed-note">
@@ -679,6 +922,97 @@ video,
     .spinner {
         animation-duration: 2s;
     }
+}
+
+.skip {
+    position: absolute;
+    right: 22px;
+    bottom: 74px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 600;
+    color: var(--bg);
+    background: var(--accent);
+    border: 0;
+    border-radius: 5px;
+    padding: 8px 14px;
+    cursor: pointer;
+    box-shadow: 0 6px 18px -6px rgba(0, 0, 0, 0.7);
+}
+
+.skip:hover {
+    filter: brightness(1.08);
+}
+
+.key {
+    font-family: ui-monospace, Menlo, monospace;
+    font-size: 10px;
+    padding: 1px 5px;
+    border-radius: 3px;
+    background: rgba(0, 0, 0, 0.22);
+    text-transform: uppercase;
+}
+
+.help {
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    background: rgba(12, 18, 22, 0.82);
+}
+
+.help-card {
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 8px;
+    padding: 18px 20px;
+    min-width: 300px;
+    max-height: 80%;
+    overflow-y: auto;
+}
+
+.help-card h2 {
+    margin: 0 0 10px;
+    font-size: 14px;
+    font-weight: 600;
+}
+
+.help-card ul {
+    list-style: none;
+    margin: 0 0 14px;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.help-card li {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 12px;
+    color: var(--ink-2);
+}
+
+.keys {
+    display: flex;
+    gap: 3px;
+    flex: 0 0 108px;
+}
+
+.help-card .key {
+    background: var(--bg);
+    border: 1px solid var(--rule);
+    color: var(--ink-2);
+}
+
+.group.right {
+    margin-left: auto;
 }
 
 .controls {

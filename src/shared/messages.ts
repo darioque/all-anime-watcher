@@ -124,6 +124,11 @@ export interface MessageMap {
         }
         res: ProxyResponse
     }
+    /** Intro/outro offsets for an episode, from the tracker when the site has none. */
+    "playback:skipTimes": {
+        req: { key?: string; number: number; durationSec?: number }
+        res: { intro?: { startSec: number; endSec: number }; outro?: { startSec: number; endSec: number } } | null
+    }
     "playback:sourceForUrl": { req: { url: string }; res: string | null }
 
     "progress:update": {

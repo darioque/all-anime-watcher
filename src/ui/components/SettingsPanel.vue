@@ -110,6 +110,27 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
             },
             { key: "autoAdvance", label: "Play the next episode automatically", type: "toggle" },
             {
+                key: "skipIntro",
+                label: "Opening",
+                help: "Timings come from the site when it publishes them, otherwise from AniSkip — which needs the series matched on AniList.",
+                type: "select",
+                options: [
+                    { value: "off", label: "Do nothing" },
+                    { value: "button", label: "Show a skip button" },
+                    { value: "auto", label: "Skip automatically" }
+                ]
+            },
+            {
+                key: "skipOutro",
+                label: "Ending",
+                type: "select",
+                options: [
+                    { value: "off", label: "Do nothing" },
+                    { value: "button", label: "Show a skip button" },
+                    { value: "auto", label: "Skip automatically" }
+                ]
+            },
+            {
                 key: "progressTickSec",
                 label: "Save my position every",
                 help: "Seconds.",
