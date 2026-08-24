@@ -239,7 +239,10 @@ if (html) {
     const servers = await step(
         "getServers",
         () => source.getServers(html, episodeUrl!, ctx),
-        s => `${s.length}: ${s.map(x => x.name).join(" | ") || "none"}`
+        s => `${s.length}: ${s.map(x => x.name).join(" | ")}`,
+        // Zero servers is a defect, not a quiet pass: the player would have
+        // nothing to try, and it reads identically to a selector that broke.
+        s => (s.length === 0 ? "no servers found — the player would have nothing to play" : null)
     )
 
     // PROBE_SERVER picks which of the page's servers to follow. Sites list many

@@ -139,10 +139,20 @@ scripts/probe-source.mts the CLI Lab page
 
 | Site | Shape | Status |
 | --- | --- | --- |
-| lmanime.com | WordPress `animestream` theme | done, all probe checks pass |
-| anikototv.to | AnimeKai/AnimeSuge family; domain list at anikoto.site | phase 4 |
-| mundodonghua.com | custom PHP, `/donghua/` + `/ver/` | phase 4 |
-| myanime.live | WordPress `aamla` blog theme | phase 4 |
+| lmanime.com | WordPress `animestream` theme | done — plays in the browser |
+| mundodonghua.com | custom PHP, packed-JS server tabs | done — probe green |
+| myanime.live | WordPress REST API; series are tags | done — probe green |
+| anikototv.to | AnimeKai/AnimeSuge family, signed AJAX | done — probe green |
+
+All four launch sources are in. The remaining phase-4 item is an **in-extension
+Lab page**; `npm run probe` covers the same ground from the CLI for now.
+
+**Anikoto's signing**, since this family is common: `vrf = base64(rc4("simple-hash", animeId))`.
+The key and algorithm are both in the site's own `main.js`, which uses the same
+routine to decode its `window.__cfg` blob — decoding that to valid JSON is how to
+confirm the scheme on a sibling site rather than guess. Every `ajax/*` endpoint
+answers with a `{status, result}` envelope; parsing the envelope as markup finds
+nothing and looks exactly like a selector that broke, so unwrap first.
 
 ## Editing these files
 
