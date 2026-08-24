@@ -5,10 +5,16 @@ import type { Level } from "hls.js"
 import { send } from "~/shared/messages"
 import type { PageIdentity } from "~/shared/messages"
 import type { Server } from "~/sources/types"
+import type { Episode } from "~/model/types"
 import type { Stream } from "~/extractors/types"
 import { BackgroundLoader } from "./backgroundLoader"
 
-const props = defineProps<{ identity: PageIdentity; progressTickSec: number }>()
+const props = defineProps<{
+    identity: PageIdentity
+    progressTickSec: number
+    preferredQuality: string
+    autoAdvance: boolean
+}>()
 
 const video = ref<HTMLVideoElement | null>(null)
 const hls = shallowRef<Hls | null>(null)
@@ -25,6 +31,36 @@ const streamLabel = ref("")
 
 const info = computed(() => props.identity.pageInfo)
 const title = computed(() => (info.value ? `${info.value.title} — Episode ${info.value.number}` : "Loading…"))
+
+/** The series' episodes, ascending, for the navigator. */
+const episodes = ref<Episode[]>([])
+
+const currentIndex = computed(() => {
+    if (!info.value) return -1
+    return episodes.value.findIndex(ep => ep.number === info.value!.number)
+})
+
+const previousEp = computed(() => (currentIndex.value > 0 ? episodes.value[currentIndex.value - 1] : undefined))
+const nextEp = computed(() =>
+    currentIndex.value >= 0 && currentIndex.value < episodes.value.length - 1
+        ? episodes.value[currentIndex.value + 1]
+        : undefined
+)
+
+/**
+ * Navigate by loading the episode's own page.
+ *
+ * The background re-injects on arrival, so this is a full round trip rather than
+ * AMR's in-place chapter swap. It is the honest version for now: each episode
+ * page carries its own server list, so staying put would mean re-fetching and
+ * re-parsing that page anyway. Loading it in place is an optimisation, not a
+ * shortcut.
+ */
+function goTo(episode: Episode | undefined) {
+    if (!episode) return
+    reportProgress()
+    window.location.href = episode.url
+}
 
 let tickTimer: number | undefined
 let lastReported = -1
@@ -119,6 +155,7 @@ async function attach(stream: Stream, index: number) {
 
     instance.on(Hls.Events.MANIFEST_PARSED, () => {
         levels.value = instance.levels
+        applyPreferredQuality(instance)
         currentLevel.value = instance.currentLevel
         status.value = "ready"
         message.value = ""
@@ -154,6 +191,46 @@ function teardown() {
 function selectLevel(index: number) {
     if (hls.value) hls.value.currentLevel = index
     currentLevel.value = index
+}
+
+// ------------------------------------------------------------------ quality
+
+/**
+ * Honour the preferred quality once hls.js knows what the stream offers.
+ *
+ * Without this hls.js picks a starting level by its own bandwidth heuristic,
+ * which is why a stream carrying two 1080p renditions still opened at 720p. The
+ * preference is a ceiling, not an exact match: asking for 1080p on a stream that
+ * tops out at 720p should give you 720p rather than silently doing nothing.
+ */
+function applyPreferredQuality(instance: Hls) {
+    const wanted = Number.parseInt(props.preferredQuality.replace(/\D/g, ""), 10)
+    if (!Number.isFinite(wanted) || instance.levels.length === 0) return
+
+    let best = -1
+    let bestHeight = -1
+    instance.levels.forEach((level, index) => {
+        const height = level.height ?? 0
+        // Prefer the tallest level that does not exceed the target; among equals,
+        // the higher bitrate wins, which is the better of two 1080p renditions.
+        if (height <= wanted && height >= bestHeight) {
+            if (height > bestHeight || (instance.levels[best]?.bitrate ?? 0) < level.bitrate) {
+                best = index
+                bestHeight = height
+            }
+        }
+    })
+
+    // Everything is above the target — take the smallest rather than nothing.
+    if (best === -1) {
+        best = instance.levels.reduce(
+            (lo, level, index) => ((level.height ?? 0) < (instance.levels[lo]?.height ?? 0) ? index : lo),
+            0
+        )
+    }
+
+    instance.currentLevel = best
+    console.debug(`[AAW] quality: wanted ${props.preferredQuality}, picked ${instance.levels[best]?.height}p`)
 }
 
 // ------------------------------------------------------------------ progress
@@ -204,13 +281,57 @@ onMounted(async () => {
 
     tickTimer = window.setInterval(reportProgress, Math.max(1, props.progressTickSec) * 1000)
     document.addEventListener("visibilitychange", reportProgress)
+    window.addEventListener("keydown", onKey)
 
+    void loadEpisodeList()
     await playServer(0, true)
 })
+
+/**
+ * Reaching the end is the strongest possible signal the episode was watched, so
+ * report it before moving on — the completion threshold might not have been
+ * crossed if the viewer skipped the credits.
+ */
+function onEnded() {
+    reportProgress()
+    if (props.autoAdvance) goTo(nextEp.value)
+}
+
+/** Ascending, so "next" is the following entry rather than the preceding one. */
+async function loadEpisodeList() {
+    if (!props.identity.key) return
+    try {
+        const anime = await send("library:get", { key: props.identity.key })
+        episodes.value = [...(anime?.episodes ?? [])].sort((a, b) => a.number - b.number)
+    } catch {
+        // Navigation is a convenience; failing to build it shouldn't stop playback.
+    }
+}
+
+/**
+ * AMR's bindings, so the muscle memory carries over: N and B move between
+ * episodes. Ignored while typing, and while a modifier is held so the browser's
+ * own shortcuts still work.
+ */
+function onKey(event: KeyboardEvent) {
+    if (event.ctrlKey || event.altKey || event.metaKey) return
+    const target = event.target as HTMLElement | null
+    if (target && /^(input|textarea|select)$/i.test(target.tagName)) return
+
+    if (event.key === "n" || event.key === "N") {
+        event.preventDefault()
+        goTo(nextEp.value)
+    }
+    if (event.key === "b" || event.key === "B") {
+        event.preventDefault()
+        goTo(previousEp.value)
+    }
+}
 
 onBeforeUnmount(() => {
     if (tickTimer) window.clearInterval(tickTimer)
     document.removeEventListener("visibilitychange", reportProgress)
+    window.removeEventListener("keydown", onKey)
     reportProgress()
     teardown()
 })
@@ -223,11 +344,43 @@ onBeforeUnmount(() => {
             <h1 :title="title">{{ title }}</h1>
             <span v-if="streamLabel" class="tag">{{ streamLabel }}</span>
             <span class="spacer"></span>
+
+            <div v-if="episodes.length > 0" class="nav">
+                <button
+                    class="navbtn"
+                    :disabled="!previousEp"
+                    :title="previousEp ? `Previous — episode ${previousEp.number}  (B)` : 'This is the first episode'"
+                    @click="goTo(previousEp)"
+                >
+                    ‹
+                </button>
+
+                <select
+                    class="episodes"
+                    aria-label="Jump to episode"
+                    :value="info?.number"
+                    @change="goTo(episodes.find(e => e.number === Number(($event.target as HTMLSelectElement).value)))"
+                >
+                    <option v-for="ep in episodes" :key="ep.number" :value="ep.number">
+                        Episode {{ ep.number }}{{ ep.title ? ` — ${ep.title}` : "" }}
+                    </option>
+                </select>
+
+                <button
+                    class="navbtn"
+                    :disabled="!nextEp"
+                    :title="nextEp ? `Next — episode ${nextEp.number}  (N)` : 'This is the latest episode'"
+                    @click="goTo(nextEp)"
+                >
+                    ›
+                </button>
+            </div>
+
             <a v-if="info" class="tag link" :href="info.seriesUrl">All episodes</a>
         </header>
 
         <div class="stage">
-            <video ref="video" controls playsinline autoplay></video>
+            <video ref="video" controls playsinline autoplay @ended="onEnded"></video>
 
             <div v-if="status === 'resolving'" class="overlay">
                 <div class="spinner" aria-hidden="true"></div>
@@ -352,6 +505,53 @@ h1 {
 .tag.link {
     color: var(--accent);
     text-decoration: none;
+}
+
+.nav {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    flex: 0 1 auto;
+    min-width: 0;
+}
+
+.navbtn {
+    font: inherit;
+    font-size: 15px;
+    line-height: 1;
+    color: var(--ink-2);
+    background: none;
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 2px 9px;
+    cursor: pointer;
+}
+
+.navbtn:hover:not(:disabled) {
+    color: var(--ink);
+    border-color: var(--accent);
+}
+
+.navbtn:disabled {
+    opacity: 0.35;
+    cursor: default;
+}
+
+.episodes {
+    font: inherit;
+    font-size: 11px;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 4px;
+    padding: 3px 4px;
+    max-width: 220px;
+}
+
+.navbtn:focus-visible,
+.episodes:focus-visible {
+    outline: 2px solid var(--accent);
+    outline-offset: 2px;
 }
 
 .stage {

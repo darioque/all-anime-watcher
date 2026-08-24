@@ -115,10 +115,10 @@ const catchUp = (a: TrackedAnime) =>
         )
     })
 
-const forgetNewest = (a: TrackedAnime) =>
+const resetWatch = (a: TrackedAnime) =>
     withBusy(a.key, async () => {
-        replace(await send("library:forgetNewest", { key: a.key, count: 1 }))
-        flash(`Forgot the newest episode of ${titleOf(a)} — run “Check all now” to rediscover it`)
+        replace(await send("library:resetWatch", { key: a.key }))
+        flash(`${titleOf(a)} is back to unstarted`)
     })
 
 async function confirmRemoval() {
@@ -186,9 +186,10 @@ function menuFor(a: TrackedAnime): MenuItem[] {
         },
         { label: "Open series page", separated: true, action: () => open(a.url) },
         {
-            label: "Forget newest episode",
-            hint: "Developer aid for testing notifications",
-            action: () => void forgetNewest(a)
+            label: "Reset watch status",
+            disabled: !a.lastWatched,
+            hint: "Back to unstarted — keeps the series and its settings",
+            action: () => void resetWatch(a)
         },
         { label: "Remove from library…", danger: true, separated: true, action: () => (pendingRemoval.value = a) }
     ]

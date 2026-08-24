@@ -250,28 +250,23 @@ export async function updateProgress(input: {
 }
 
 /**
- * Drop the newest stored episodes so the next check rediscovers them as new.
+ * Forget where the viewer got to, keeping the series and its episode list.
  *
- * There is otherwise no way to exercise the new-episode path: adding a series
- * records its whole back catalogue as the baseline, and you cannot make a site
- * publish an episode on demand. This forgets the top of the list, so a forced
- * check finds them, counts them as new, and notifies exactly as it would in the
- * wild.
+ * AMR's "reset" — the series goes back to unstarted, so every episode counts as
+ * unwatched again and "watch next" points at the beginning. Deliberately keeps
+ * the entry, its schedule and its settings: this is for starting a rewatch or
+ * repairing a position that drifted, not for getting rid of something.
  */
-export async function forgetNewestEpisodes(key: string, count = 1): Promise<TrackedAnime | null> {
+export async function resetWatchStatus(key: string): Promise<TrackedAnime | null> {
     const anime = await db.getAnime(key)
     if (!anime) return null
 
-    const sorted = [...anime.episodes].sort((a, b) => b.number - a.number)
-    const dropped = sorted.slice(0, Math.max(1, count))
-    anime.episodes = sorted.slice(Math.max(1, count))
-
-    // Due immediately, so the next tick (or a forced run) picks it up.
-    anime.nextCheckAt = 0
+    delete anime.lastWatched
+    anime.progress = {}
     anime.updatedAt = Date.now()
     await db.putAnime(anime)
 
-    logger.info(`${key}: forgot ${dropped.length} episode(s) — ${dropped.map(e => e.number).join(", ")}`)
+    logger.info(`${key}: watch status reset`)
     return anime
 }
 

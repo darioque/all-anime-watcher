@@ -4,11 +4,11 @@ import { refreshBadge } from "../badge"
 import { getAllAnime, getAnime } from "~/model/db"
 import {
     addSeries,
-    forgetNewestEpisodes,
     markWatched,
     refreshSeries,
     remove,
     rename,
+    resetWatchStatus,
     setFlags,
     setSchedule,
     updateProgress
@@ -51,7 +51,11 @@ export function registerLibraryHandlers() {
 
     on("scheduler:status", async () => schedulerStatus())
 
-    on("library:forgetNewest", async ({ key, count }) => forgetNewestEpisodes(key, count ?? 1))
+    on("library:resetWatch", async ({ key }) => {
+        const anime = await resetWatchStatus(key)
+        await refreshBadge()
+        return anime
+    })
 
     on("debug:testNotification", async () => testNotification())
 

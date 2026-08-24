@@ -258,9 +258,8 @@ onMounted(load)
             <div class="group">
                 <h3>Checking it works</h3>
                 <p class="note">
-                    New-episode notifications are hard to try out, since you can't make a site publish an episode. Send
-                    a test one here; to exercise the real path, use “Forget newest episode” in a series' ⋯ menu and then
-                    “Check every series now”.
+                    You can't make a site publish an episode, so this runs the real new-episode notification against a
+                    series you follow, using a pretend episode number. If it appears, the whole path works.
                 </p>
                 <div class="field">
                     <div class="text">

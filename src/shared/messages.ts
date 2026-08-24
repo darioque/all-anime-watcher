@@ -57,8 +57,8 @@ export interface MessageMap {
     "library:rename": { req: { key: string; displayTitle: string }; res: TrackedAnime | null }
     "library:refresh": { req: { key: string }; res: TrackedAnime | null }
     "library:checkAll": { req: { force?: boolean }; res: number }
-    /** Developer aid: rediscover the newest episodes on the next check. */
-    "library:forgetNewest": { req: { key: string; count?: number }; res: TrackedAnime | null }
+    /** Forget the viewer's position, keeping the series. */
+    "library:resetWatch": { req: { key: string }; res: TrackedAnime | null }
     "debug:testNotification": { req: Record<string, never>; res: boolean }
     "library:setSchedule": { req: { key: string; schedule: SchedulePolicy }; res: TrackedAnime | null }
     "scheduler:status": {

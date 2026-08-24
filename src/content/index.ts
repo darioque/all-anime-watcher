@@ -1,6 +1,6 @@
 import { send } from "~/shared/messages"
 import type { PageIdentity } from "~/shared/messages"
-import { isPlayerMounted, mountPlayer, unmountPlayer } from "~/player/mount"
+import { isPlayerMounted, mountPlayer, unmountPlayer, type PlayerOptions } from "~/player/mount"
 
 /**
  * Injected on episode pages only, by the background's navigation matcher.
@@ -62,14 +62,22 @@ async function identify() {
 
     console.debug("[AAW] episode identified", identity.pageInfo, `${identity.servers?.length ?? 0} server(s)`)
 
-    let tickSec = 5
+    // Defaults keep playback working if the read fails; they are not the source
+    // of truth, which is why they mirror settings/schema.ts rather than inventing
+    // values.
+    let options: PlayerOptions = { progressTickSec: 5, preferredQuality: "1080p", autoAdvance: true }
     try {
-        tickSec = (await send("settings:get", {})).progressTickSec
+        const settings = await send("settings:get", {})
+        options = {
+            progressTickSec: settings.progressTickSec,
+            preferredQuality: settings.preferredQuality,
+            autoAdvance: settings.autoAdvance
+        }
     } catch {
-        // Default is fine; a settings read failure shouldn't block playback.
+        // A settings read failure shouldn't block playback.
     }
 
-    mountPlayer(identity, tickSec)
+    mountPlayer(identity, options)
 }
 
 function waitForBody(timeoutMs = 4000): Promise<void> {

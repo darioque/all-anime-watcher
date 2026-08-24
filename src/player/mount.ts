@@ -12,7 +12,13 @@ let host: HTMLElement | null = null
  * mount into a fresh root. Wiping is not just cosmetic — it stops the site's own
  * player, its ad scripts and its keyboard handlers from fighting ours.
  */
-export function mountPlayer(identity: PageIdentity, progressTickSec: number): void {
+export interface PlayerOptions {
+    progressTickSec: number
+    preferredQuality: string
+    autoAdvance: boolean
+}
+
+export function mountPlayer(identity: PageIdentity, options: PlayerOptions): void {
     unmountPlayer()
 
     if (!document.body) {
@@ -37,7 +43,7 @@ export function mountPlayer(identity: PageIdentity, progressTickSec: number): vo
     host.id = "aaw-root"
     document.body.appendChild(host)
 
-    app = createApp(Player, { identity, progressTickSec })
+    app = createApp(Player, { identity, ...options })
     app.mount(host)
 }
 
