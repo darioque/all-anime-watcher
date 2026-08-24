@@ -7,6 +7,8 @@ import { registerSettingsHandlers } from "./handlers/settings"
 import { registerSourceHandlers } from "./handlers/sources"
 import { registerPlaybackHandlers } from "./handlers/playback"
 import { installRules } from "./dnr"
+import { installScheduler } from "./scheduler"
+import { installNotificationListeners } from "./notifications"
 import { refreshBadge } from "./badge"
 import { loadSettings, loadSourceSettings } from "~/settings/storage"
 import { allSources } from "~/sources/registry"
@@ -54,6 +56,8 @@ const ready = initialise().catch(error => {
 
 installRouter(ready)
 installNavigationListeners()
+installNotificationListeners()
+installScheduler()
 
 /**
  * `openInTab` swaps the toolbar button between popup and full library tab. Chrome

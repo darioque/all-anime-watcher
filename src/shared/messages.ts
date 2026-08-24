@@ -2,7 +2,7 @@ import browser from "webextension-polyfill"
 import type { GlobalSettings } from "~/settings/schema"
 import type { PageInfo, Server } from "~/sources/types"
 import type { Stream } from "~/extractors/types"
-import type { TrackedAnime } from "~/model/types"
+import type { SchedulePolicy, TrackedAnime } from "~/model/types"
 
 /** A source as the UI sees it — no functions, safe to structured-clone. */
 export interface SourceDescriptor {
@@ -56,6 +56,13 @@ export interface MessageMap {
     "library:setFlags": { req: { key: string; follow?: boolean; poll?: boolean }; res: TrackedAnime | null }
     "library:rename": { req: { key: string; displayTitle: string }; res: TrackedAnime | null }
     "library:refresh": { req: { key: string }; res: TrackedAnime | null }
+    "library:checkAll": { req: { force?: boolean }; res: number }
+    "library:setSchedule": { req: { key: string; schedule: SchedulePolicy }; res: TrackedAnime | null }
+    "scheduler:status": {
+        req: Record<string, never>
+        res: { running: boolean; lastRunAt: number; lastRunFound: number }
+    }
+
     "library:markWatched": {
         req: { key: string; number: number; variant?: string }
         res: TrackedAnime | null

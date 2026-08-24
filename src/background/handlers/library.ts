@@ -2,7 +2,17 @@ import browser from "webextension-polyfill"
 import { on } from "../router"
 import { refreshBadge } from "../badge"
 import { getAllAnime, getAnime } from "~/model/db"
-import { addSeries, markWatched, refreshSeries, remove, rename, setFlags, updateProgress } from "~/library/library"
+import {
+    addSeries,
+    markWatched,
+    refreshSeries,
+    remove,
+    rename,
+    setFlags,
+    setSchedule,
+    updateProgress
+} from "~/library/library"
+import { runDueChecks, schedulerStatus } from "../scheduler"
 
 export function registerLibraryHandlers() {
     on("library:list", async () => {
@@ -34,6 +44,12 @@ export function registerLibraryHandlers() {
     })
 
     on("library:rename", async ({ key, displayTitle }) => rename(key, displayTitle))
+
+    on("library:checkAll", async ({ force }) => runDueChecks({ force: force ?? true }))
+
+    on("scheduler:status", async () => schedulerStatus())
+
+    on("library:setSchedule", async ({ key, schedule }) => setSchedule(key, schedule))
 
     on("library:markWatched", async ({ key, number, variant }) => {
         const anime = await markWatched(key, number, variant)

@@ -4,6 +4,10 @@ import { send } from "~/shared/messages"
 import type { SourceDescriptor } from "~/shared/messages"
 import type { TrackedAnime } from "~/model/types"
 import { latestEpisode, nextEpisode, titleOf, unwatchedCount, watchState } from "~/model/keys"
+import type { SchedulePolicy } from "~/model/types"
+import { relativeFuture, relativePast } from "~/shared/time"
+import SchedulePicker from "./SchedulePicker.vue"
+import SettingsPanel from "./SettingsPanel.vue"
 
 const props = withDefaults(defineProps<{ variant?: "popup" | "page" }>(), { variant: "popup" })
 
@@ -13,13 +17,33 @@ const loading = ref(true)
 const error = ref<string | null>(null)
 const busy = ref(new Set<string>())
 const filter = ref("")
+const sort = ref<"recent" | "title" | "unwatched" | "next-check">("recent")
+const onlyUnwatched = ref(false)
+const expanded = ref<string | null>(null)
+const showSettings = ref(false)
+const checking = ref(false)
+const checkResult = ref<string | null>(null)
 
 const sourceName = (id: string) => sources.value.find(s => s.id === id)?.name ?? id
 
 const visible = computed(() => {
     const needle = filter.value.trim().toLowerCase()
-    if (needle === "") return library.value
-    return library.value.filter(a => titleOf(a).toLowerCase().includes(needle))
+    let list = library.value
+
+    if (needle !== "") list = list.filter(a => titleOf(a).toLowerCase().includes(needle))
+    if (onlyUnwatched.value) list = list.filter(a => watchState(a) === "new")
+
+    const sorted = [...list]
+    switch (sort.value) {
+        case "title":
+            return sorted.sort((a, b) => titleOf(a).localeCompare(titleOf(b)))
+        case "unwatched":
+            return sorted.sort((a, b) => unwatchedCount(b) - unwatchedCount(a))
+        case "next-check":
+            return sorted.sort((a, b) => a.nextCheckAt - b.nextCheckAt)
+        default:
+            return sorted.sort((a, b) => b.lastEpisodeFoundAt - a.lastEpisodeFoundAt || b.addedAt - a.addedAt)
+    }
 })
 
 const newEpisodes = computed(() => library.value.reduce((n, a) => (a.follow ? n + unwatchedCount(a) : n), 0))
@@ -65,6 +89,25 @@ const toggleFollow = (a: TrackedAnime) =>
 
 const togglePoll = (a: TrackedAnime) =>
     withBusy(a.key, async () => replace(await send("library:setFlags", { key: a.key, poll: !a.poll })))
+
+/** Check every polled series now, ignoring their schedules. */
+async function checkAll() {
+    checking.value = true
+    checkResult.value = null
+    try {
+        const found = await send("library:checkAll", { force: true })
+        checkResult.value = found === 0 ? "No new episodes" : `${found} series updated`
+        await load()
+    } catch (e) {
+        error.value = e instanceof Error ? e.message : String(e)
+    } finally {
+        checking.value = false
+        setTimeout(() => (checkResult.value = null), 6000)
+    }
+}
+
+const setSchedule = (a: TrackedAnime, schedule: SchedulePolicy) =>
+    withBusy(a.key, async () => replace(await send("library:setSchedule", { key: a.key, schedule })))
 
 const remove = (a: TrackedAnime) =>
     withBusy(a.key, async () => {
@@ -115,18 +158,6 @@ function watchAction(a: TrackedAnime): { label: string; title: string; url?: str
     }
 }
 
-function relative(ts: number): string {
-    if (!ts) return "never"
-    const seconds = Math.floor((Date.now() - ts) / 1000)
-    if (seconds < 60) return "just now"
-    const minutes = Math.floor(seconds / 60)
-    if (minutes < 60) return `${minutes}m ago`
-    const hours = Math.floor(minutes / 60)
-    if (hours < 24) return `${hours}h ago`
-    const days = Math.floor(hours / 24)
-    return days < 30 ? `${days}d ago` : `${Math.floor(days / 30)}mo ago`
-}
-
 onMounted(load)
 defineExpose({ load })
 </script>
@@ -153,9 +184,27 @@ defineExpose({ load })
             </div>
         </header>
 
-        <div v-if="library.length > 4" class="filter">
+        <SettingsPanel v-if="showSettings && variant === 'page'" />
+
+        <div v-if="library.length > 1" class="controls-row">
             <input v-model="filter" type="search" placeholder="Filter by title" aria-label="Filter by title" />
+            <select v-model="sort" aria-label="Sort by">
+                <option value="recent">Newest episode</option>
+                <option value="title">Title</option>
+                <option value="unwatched">Most unwatched</option>
+                <option value="next-check">Next check</option>
+            </select>
+            <button
+                class="btn"
+                :class="{ primary: onlyUnwatched }"
+                title="Show only series with something new"
+                @click="onlyUnwatched = !onlyUnwatched"
+            >
+                Unwatched
+            </button>
         </div>
+
+        <p v-if="checkResult" class="banner subtle">{{ checkResult }}</p>
 
         <p v-if="error" class="banner error">{{ error }}</p>
         <p v-if="loading" class="banner">Loading…</p>
@@ -194,7 +243,11 @@ defineExpose({ load })
                         <span v-else class="faint">not started</span>
                         <span class="sep">·</span>
                         <span :title="a.lastCheckedAt ? new Date(a.lastCheckedAt).toLocaleString() : ''">
-                            checked {{ relative(a.lastCheckedAt) }}
+                            checked {{ relativePast(a.lastCheckedAt) }}
+                        </span>
+                        <span class="sep">·</span>
+                        <span :title="a.nextCheckAt ? new Date(a.nextCheckAt).toLocaleString() : ''">
+                            next {{ relativeFuture(a.nextCheckAt) }}
                         </span>
                     </div>
 
@@ -242,9 +295,26 @@ defineExpose({ load })
                         >
                             {{ a.poll ? "Checking" : "Paused" }}
                         </button>
+                        <button
+                            class="btn"
+                            :class="{ primary: expanded === a.key }"
+                            title="When should this be checked?"
+                            @click="expanded = expanded === a.key ? null : a.key"
+                        >
+                            Schedule
+                        </button>
                         <button class="btn danger icon" title="Remove" :disabled="isBusy(a.key)" @click="remove(a)">
                             ✕
                         </button>
+                    </div>
+
+                    <div v-if="expanded === a.key" class="schedule">
+                        <SchedulePicker
+                            allow-inherit
+                            inherited-label="global default"
+                            :model-value="a.overrides.schedule ?? { mode: 'inherit' }"
+                            @update:model-value="value => setSchedule(a, value)"
+                        />
                     </div>
                 </div>
             </li>
@@ -337,16 +407,47 @@ h1 {
     font-weight: 700;
 }
 
-.filter {
+.controls-row {
+    display: flex;
+    gap: 6px;
     padding: 10px 14px 0;
 }
 
-.filter input {
-    width: 100%;
+.controls-row input {
+    flex: 1 1 auto;
+    min-width: 0;
     padding: 6px 9px;
     font: inherit;
     color: var(--ink);
     background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+}
+
+.controls-row select {
+    font: inherit;
+    font-size: 12px;
+    color: var(--ink-2);
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 0 4px;
+}
+
+.controls-row .btn {
+    font-size: 11px;
+}
+
+.banner.subtle {
+    margin: 8px 14px 0;
+    font-size: 11px;
+    color: var(--accent-ink);
+}
+
+.schedule {
+    margin-top: 8px;
+    padding: 10px;
+    background: var(--ground);
     border: 1px solid var(--rule);
     border-radius: var(--radius);
 }

@@ -1,6 +1,7 @@
-import type { Episode, SourceState, TrackedAnime } from "~/model/types"
+import type { Episode, SchedulePolicy, SourceState, TrackedAnime } from "~/model/types"
 import { animeKey, progressKey } from "~/model/keys"
-import { resolve } from "~/settings/resolver"
+import { resolve, resolveSchedule } from "~/settings/resolver"
+import { nextCheckAt } from "~/background/schedule"
 import * as db from "~/model/db"
 import { createFetchCtx } from "~/net/fetcher"
 import { sourceById } from "~/sources/registry"
@@ -131,6 +132,7 @@ export async function addSeries(options: {
         logger.warn(`getEpisodes failed for ${key}`, error)
     }
 
+    anime.nextCheckAt = nextCheckAt(anime, resolveSchedule(anime))
     await db.putAnime(anime)
     logger.info(`added ${key} — ${anime.episodes.length} episodes`)
     await ensureSourceState(source.id)
@@ -160,6 +162,7 @@ export async function refreshSeries(key: string): Promise<{ anime: TrackedAnime;
         anime.failCount = 0
         delete anime.lastError
         if (newEpisodes.length > 0) anime.lastEpisodeFoundAt = Date.now()
+        anime.nextCheckAt = nextCheckAt(anime, resolveSchedule(anime))
 
         await db.putAnime(anime)
         logger.info(`refreshed ${key} — ${episodes.length} episodes, ${newEpisodes.length} new`)
@@ -251,8 +254,28 @@ export async function setFlags(key: string, flags: { follow?: boolean; poll?: bo
     if (!anime) return null
     if (flags.follow !== undefined) anime.follow = flags.follow
     if (flags.poll !== undefined) anime.poll = flags.poll
+    // Turning polling back on should queue a check, not wait for the old slot.
+    if (flags.poll !== undefined) anime.nextCheckAt = flags.poll ? 0 : nextCheckAt(anime, resolveSchedule(anime))
     anime.updatedAt = Date.now()
     await db.putAnime(anime)
+    return anime
+}
+
+/**
+ * Set (or clear) a per-anime schedule override, then re-slot it immediately so
+ * the change takes effect now rather than after the old slot elapses.
+ */
+export async function setSchedule(key: string, schedule: SchedulePolicy): Promise<TrackedAnime | null> {
+    const anime = await db.getAnime(key)
+    if (!anime) return null
+
+    if (schedule.mode === "inherit") delete anime.overrides.schedule
+    else anime.overrides.schedule = schedule
+
+    anime.nextCheckAt = nextCheckAt(anime, resolveSchedule(anime))
+    anime.updatedAt = Date.now()
+    await db.putAnime(anime)
+    logger.info(`${key}: schedule → ${schedule.mode}`)
     return anime
 }
 

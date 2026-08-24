@@ -77,8 +77,14 @@ export type SchedulePolicy =
     | { mode: "interval"; everyHours: number }
     /** Poll around the real air time; falls back to interval when unknown. */
     | { mode: "airing"; padBeforeMin: number; padAfterMin: number; fallbackHours: number }
-    /** "Every Tuesday at 18:00", local time unless a tz is given. */
-    | { mode: "weekly"; weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6; time: string; tz?: string }
+    /**
+     * "Every Tuesday at 18:00", in the browser's local time.
+     *
+     * No timezone field on purpose: honouring one means a genuinely tz-aware
+     * implementation, not an ignored string. Local time is right for a library
+     * that lives on one machine.
+     */
+    | { mode: "weekly"; weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6; time: string }
     /** "Every N days, counting from this date." */
     | { mode: "everyNDays"; days: number; from: number }
     /** Followed, never polled. */
