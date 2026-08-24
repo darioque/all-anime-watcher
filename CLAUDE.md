@@ -14,15 +14,21 @@ Design doc: <https://claude.ai/code/artifact/34d7f865-1d51-40d0-a5d8-7e9f21e024b
 
 ## Commands
 
-The user runs on fish + fish-nvm (there is no `nvm.sh` to source, and `nvm` is
-invisible from bash). Node lives under `~/.local/share/nvm/`.
+The system node (`/usr/bin/node`, v26) runs everything here — build, typecheck
+and probe all verified on it. **No `nvm` dance is needed for this project**, so
+just call npm directly:
 
 ```
-fish -c "nvm use 20.20.1; npm run build"        # both passes + dist validation → dist/
-fish -c "nvm use 20.20.1; npm run check"        # validate dist/ alone
-fish -c "nvm use 20.20.1; npm run typecheck"    # vue-tsc, must stay clean
-fish -c "nvm use 20.20.1; npm run probe -- lmanime"   # run a source against the live site
+npm run build              # both passes + dist validation → dist/
+npm run check              # validate dist/ alone
+npm run check:schedule     # the schedule date maths
+npm run typecheck          # vue-tsc, must stay clean
+npm run probe -- lmanime   # run a source against the live site
+PROBE_SERVER=3 npm run probe -- lmanime   # exercise one video host
 ```
+
+(AMR next door is different: its `engines` field pins node 18/20, so that repo
+still needs `fish -c "nvm use 20.20.1; …"`. Don't carry that habit over here.)
 
 `dist/` is loaded unpacked in the browser. **The user builds and tests; don't run
 builds repeatedly just to re-read output.**

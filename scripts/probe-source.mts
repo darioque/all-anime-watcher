@@ -240,15 +240,23 @@ if (html) {
     const chosen = servers?.[Number.isFinite(wanted) ? wanted : 0]
 
     let embedUrl: string | null = null
-    if (chosen && source.resolveServer) {
+    if (chosen) {
         if (servers && servers.length > 1) {
             console.log(`  \x1b[2m(server ${wanted} of ${servers.length}; set PROBE_SERVER to pick another)\x1b[0m`)
         }
-        embedUrl = await step(
-            "resolveServer",
-            () => source.resolveServer!(chosen, ctx),
-            url => `${chosen.name} → ${url}`
-        )
+        // A source may hand back the embed URL directly or defer it. Either way
+        // the extractor chain below has to run — gating this on `resolveServer`
+        // silently skipped the most valuable check for every source that
+        // resolves eagerly.
+        embedUrl = chosen.embedUrl
+            ? await step("server embed", async () => chosen.embedUrl!, url => `${chosen.name} → ${url}`)
+            : source.resolveServer
+              ? await step("resolveServer", () => source.resolveServer!(chosen, ctx), url => `${chosen.name} → ${url}`)
+              : null
+
+        if (!embedUrl) {
+            fail("server embed", `"${chosen.name}" has no embedUrl and the source has no resolveServer`)
+        }
     }
 
     // ---------------------------------------------------- extractor + playback
