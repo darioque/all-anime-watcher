@@ -8,7 +8,8 @@
         "node": ">=20.19.0"
     },
     "scripts": {
-        "build": "vite build && vite build --config vite.content.config.ts",
+        "build": "vite build && vite build --config vite.content.config.ts && node scripts/check-dist.mjs",
+        "check": "node scripts/check-dist.mjs",
         "watch": "vite build --watch --mode development",
         "watch:content": "vite build --config vite.content.config.ts --watch --mode development",
         "typecheck": "vue-tsc --noEmit",

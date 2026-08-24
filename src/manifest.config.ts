@@ -10,7 +10,6 @@ export const manifest = {
     short_name: "AAW",
     version: pkg.version,
     description: pkg.description,
-    default_locale: "en",
 
     icons: {
         "16": "assets/icons/icon-16.png",

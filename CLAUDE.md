@@ -18,7 +18,8 @@ The user runs on fish + fish-nvm (there is no `nvm.sh` to source, and `nvm` is
 invisible from bash). Node lives under `~/.local/share/nvm/`.
 
 ```
-fish -c "nvm use 20.20.1; npm run build"        # both passes → dist/
+fish -c "nvm use 20.20.1; npm run build"        # both passes + dist validation → dist/
+fish -c "nvm use 20.20.1; npm run check"        # validate dist/ alone
 fish -c "nvm use 20.20.1; npm run typecheck"    # vue-tsc, must stay clean
 fish -c "nvm use 20.20.1; npm run probe -- lmanime"   # run a source against the live site
 ```
@@ -35,8 +36,20 @@ builds repeatedly just to re-read output.**
   `scripting.executeScript({ files })` loads a **classic** script: no `import`,
   no shared chunks. Keep this bundle small.
 
-`npm run build` runs both; the second pass sets `emptyOutDir: false`, so order
-matters.
+`npm run build` runs both, then `scripts/check-dist.mjs`. The second pass sets
+`emptyOutDir: false`, so order matters.
+
+**`check-dist.mjs` exists because Chrome rejects a whole extension for things a
+bundler is happy with.** It asserts every path the manifest references was actually
+emitted, that `default_locale` has a matching `_locales` subtree, that permissions
+are strings Chrome knows, and that `content.js` carries no `import`/`export` (a
+code-split content bundle builds fine and then fails at injection). It exits
+non-zero, so a bad manifest fails the build. Add a check here whenever a load
+error gets past it.
+
+There is no i18n yet — `default_locale` and `_locales/` are deliberately absent
+until strings are extracted. When that happens it needs `_locales/{en,es}`, an
+`i18n()` helper, and the locale directory copied in the vite plugin.
 
 ## Architecture rules
 
