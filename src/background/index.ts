@@ -5,6 +5,8 @@ import { registerPageHandlers } from "./handlers/page"
 import { openLibraryTab, registerLibraryHandlers } from "./handlers/library"
 import { registerSettingsHandlers } from "./handlers/settings"
 import { registerSourceHandlers } from "./handlers/sources"
+import { registerPlaybackHandlers } from "./handlers/playback"
+import { installRules } from "./dnr"
 import { refreshBadge } from "./badge"
 import { loadSettings, loadSourceSettings } from "~/settings/storage"
 import { allSources } from "~/sources/registry"
@@ -30,6 +32,10 @@ async function initialise() {
     await refreshBadge()
     await applyToolbarBehaviour(settings.openInTab)
 
+    // Referer/Origin rewrites for video CDNs, and any opt-in CSP removal.
+    // Dynamic rules persist, so this replaces our own set rather than appending.
+    await installRules().catch(error => logger.error("could not install network rules", error))
+
     logger.info(`ready — ${allSources().length} source(s)`)
     return true
 }
@@ -39,6 +45,7 @@ registerPageHandlers()
 registerLibraryHandlers()
 registerSettingsHandlers()
 registerSourceHandlers()
+registerPlaybackHandlers()
 
 const ready = initialise().catch(error => {
     logger.error("initialisation failed", error)

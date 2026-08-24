@@ -2,7 +2,7 @@ import browser from "webextension-polyfill"
 import { on } from "../router"
 import { refreshBadge } from "../badge"
 import { getAllAnime, getAnime } from "~/model/db"
-import { addSeries, markWatched, refreshSeries, remove, rename, setFlags } from "~/library/library"
+import { addSeries, markWatched, refreshSeries, remove, rename, setFlags, updateProgress } from "~/library/library"
 
 export function registerLibraryHandlers() {
     on("library:list", async () => {
@@ -45,6 +45,13 @@ export function registerLibraryHandlers() {
         const { anime } = await refreshSeries(key)
         await refreshBadge()
         return anime
+    })
+
+    on("progress:update", async payload => {
+        const anime = await updateProgress(payload)
+        // Crossing the completion threshold changes the unwatched count.
+        if (anime) await refreshBadge()
+        return anime !== null
     })
 
     on("tab:open", async ({ url, active }) => {

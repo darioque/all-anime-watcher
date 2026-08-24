@@ -33,6 +33,45 @@ export interface Stream {
     fetchVia?: "page" | "dnr" | "background"
 }
 
+/**
+ * A Referer/Origin rewrite the video host demands.
+ *
+ * Neither header can be set from `fetch()` — both are forbidden header names — so
+ * the only way to send them is a declarativeNetRequest rule scoped to requests
+ * the extension itself initiates. An extractor declares what it needs and
+ * background/dnr.ts installs it. Same mechanism AMR uses to get past hotlink
+ * protection on image CDNs.
+ */
+export interface ExtractorNetRule {
+    /** DNR urlFilter, e.g. "||dmcdn.net". Prefer this over regexFilter. */
+    urlFilter?: string
+    /** Restrict to these request domains (subdomains included). */
+    requestDomains?: string[]
+    referer?: string
+    origin?: string
+    /**
+     * Request headers to strip entirely.
+     *
+     * Chrome always sends `Accept-Encoding`, and `fetch()` cannot remove it —
+     * it is a forbidden header name. Some CDNs reject any request that carries
+     * it: Dailymotion's manifest host 403s on *any* value, including `identity`,
+     * and only succeeds when the header is absent. DNR removal is the only way
+     * to satisfy that.
+     */
+    removeHeaders?: string[]
+    /**
+     * Whose requests to rewrite.
+     *
+     *  - `extension` (default): the background proxy's fetches.
+     *  - `page`: requests the taken-over page makes itself, e.g. a <video src>
+     *    pointing at a direct MP4. Scoped to our sources' own pages.
+     *  - `both`.
+     */
+    appliesTo?: "extension" | "page" | "both"
+    /** Defaults to xmlhttprequest + media + other. */
+    resourceTypes?: ("xmlhttprequest" | "media" | "other" | "image")[]
+}
+
 export interface ExtractCtx {
     /** Page the embed was found on; most hosts want this as Referer. */
     referer: string
@@ -52,4 +91,6 @@ export interface Extractor {
     /** Hostnames handled, or a predicate for hosts with rotating domains. */
     readonly hosts: string[] | ((url: string) => boolean)
     extract(embedUrl: string, ctx: ExtractCtx): Promise<Stream[]>
+    /** Header rewrites this host's CDN requires. Installed once at startup. */
+    readonly netRules?: ExtractorNetRule[]
 }

@@ -1,15 +1,20 @@
-import type { Extractor } from "./types"
+import type { Extractor, ExtractorNetRule } from "./types"
+import { DailymotionExtractor } from "./sites/dailymotion"
+import { Mp4UploadExtractor } from "./sites/mp4upload"
+import { DirectStreamExtractor } from "./sites/directStream"
 import { hostOf } from "~/shared/url"
 import { log } from "~/shared/logger"
 
 const logger = log("extractors")
 
 /**
- * Empty until phase 2, which is where the first real ones land: Mp4Upload,
- * StreamWish/FileLions and Dailymotion cover lmanime; Megacloud covers the
- * ZoroTheme family; a generic HLS/MP4 passthrough covers direct links.
+ * Extractors are keyed by video host, not by site, and shared across every
+ * source — this is the layer that makes adding a site cheap.
+ *
+ * Order matters only in that the URL-shape matcher must come last, so a host
+ * that happens to end in .mp4 still reaches its own extractor first.
  */
-const ALL: Extractor[] = []
+const ALL: Extractor[] = [new DailymotionExtractor(), new Mp4UploadExtractor(), new DirectStreamExtractor()]
 
 export function allExtractors(): readonly Extractor[] {
     return ALL
@@ -27,3 +32,10 @@ export function extractorFor(embedUrl: string): Extractor | undefined {
     logger.warn(`no extractor for ${host || embedUrl}`)
     return undefined
 }
+
+/** Every header rewrite the registered extractors need. */
+export function allNetRules(): ExtractorNetRule[] {
+    return ALL.flatMap(extractor => extractor.netRules ?? [])
+}
+
+logger.info(`${ALL.length} extractor(s) registered: ${ALL.map(e => e.id).join(", ")}`)

@@ -145,12 +145,42 @@ Watch state (`watchState()` in `model/keys.ts`) drives the row stripe: `new`,
 `current`, `unstarted`, `paused`. Colour is never the only signal — the pill and
 the button label say the same thing.
 
+## Extractors and video hosts
+
+An extractor turns one embed URL into playable streams and is shared by every
+source that embeds that host. `Stream.fetchVia` decides how the player fetches:
+
+- `page` — the `<video>` element or hls.js fetches directly. Cheapest. Works when
+  the host tolerates the page's origin. Mp4Upload is this.
+- `background` — every manifest and segment is proxied through the service
+  worker via `playback:fetch`. Required, not preferred, when a CDN sends no
+  usable `access-control-allow-origin` or demands a Referer the page can't forge.
+  Dailymotion is this.
+
+`Referer` and `Origin` are forbidden header names — `fetch()` silently refuses to
+set them — so an extractor declares `netRules` and `background/dnr.ts` installs
+declarativeNetRequest rules. `appliesTo: "page"` scopes a rule to requests our
+taken-over pages make (a `<video src>`), `"extension"` to the proxy's own.
+
+The player falls through to the next server automatically when one fails, so a
+dead host degrades instead of dead-ending.
+
+**lmanime's ten servers resolve to five hosts:** dailymotion, mp4upload, ok.ru,
+morencius.com (packed-JS, StreamWish family) and rumble. Only the first two have
+extractors. `PROBE_SERVER=<n> npm run probe -- lmanime` exercises one at a time.
+
 ## Phase status
 
 1. **done** — skeleton, detection, settings resolver, IndexedDB, lmanime, popup +
    full library page
-2. next — one episode end to end: servers → extractor → hls.js in the page.
-   Settles the CSP strip and the fetch ladder. Highest-risk phase, deliberately early.
+2. **done, pending browser confirmation** — extractor layer, DNR header rules,
+   background playback proxy, in-page player (Vue + hls.js) with server/quality
+   pickers, auto-fallback, resume and progress reporting.
+   - Mp4Upload verified end to end from the CLI (direct MP4, HTTP 206).
+   - Dailymotion resolves to a master playlist but the manifest edge 403s
+     inconsistently from a script; unproven until it plays in the browser.
+   - lmanime sends **no CSP**, so the strip was never needed there. It exists as
+     an opt-in `stripCsp` flag per source rather than a blanket rule.
 3. library and tracking depth, update loop, notifications
 4. the other three sources + an in-extension Lab page
 5. domain resolution, AniList metadata/schedule, per-anime schedule policies

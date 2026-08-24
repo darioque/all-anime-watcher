@@ -4,6 +4,8 @@ import { getAnime } from "~/model/db"
 import { animeKey } from "~/model/keys"
 import { addSeries, fetchCtxFor, markWatched } from "~/library/library"
 import { matchEpisodeUrl, sourceForUrl } from "~/sources/registry"
+import { orderServers } from "~/library/servers"
+import type { Server } from "~/sources/types"
 import { cachedSettings } from "~/settings/storage"
 import { resolve } from "~/settings/resolver"
 import { log } from "~/shared/logger"
@@ -55,10 +57,23 @@ export function registerPageHandlers() {
 
             if (entry) await refreshBadge()
 
+            // Servers come from the HTML we already have, ordered by preference
+            // here so the player never has to know about the settings chain.
+            let servers: Server[] = []
+            try {
+                const found = await source.getServers(html, url, ctx)
+                const preferred = resolve("preferredServers", { anime: entry, sourceId: source.id })
+                const variant = resolve("variantPref", { anime: entry, sourceId: source.id })
+                servers = orderServers(found, preferred, variant)
+            } catch (error) {
+                logger.warn(`${source.id}: could not read the server list`, error)
+            }
+
             return {
                 sourceId: source.id,
                 isEpisode: true,
                 pageInfo,
+                servers,
                 ...(entry ? { key: entry.key } : {})
             }
         } catch (error) {

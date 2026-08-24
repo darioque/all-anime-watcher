@@ -1,5 +1,6 @@
 import type { Episode, SourceState, TrackedAnime } from "~/model/types"
 import { animeKey, progressKey } from "~/model/keys"
+import { resolve } from "~/settings/resolver"
 import * as db from "~/model/db"
 import { createFetchCtx } from "~/net/fetcher"
 import { sourceById } from "~/sources/registry"
@@ -192,6 +193,56 @@ export async function markWatched(key: string, number: number, variant?: string)
     anime.updatedAt = Date.now()
     await db.putAnime(anime)
     logger.info(`${key}: position → episode ${number}${variant ? ` (${variant})` : ""}`)
+    return anime
+}
+
+/**
+ * Record how far into an episode the viewer is, and promote it to "watched" once
+ * the completion threshold is crossed.
+ *
+ * Called on a timer while playing, so it must stay cheap: one read, one write,
+ * and no work at all when the position has not meaningfully moved.
+ */
+export async function updateProgress(input: {
+    key: string
+    number: number
+    variant?: string
+    positionSec: number
+    durationSec?: number
+}): Promise<TrackedAnime | null> {
+    const anime = await db.getAnime(input.key)
+    if (!anime) return null
+
+    const pk = progressKey(input.number, input.variant)
+    const previous = anime.progress[pk]
+
+    // Ignore jitter, but always let a completion through.
+    const moved = !previous || Math.abs(previous.positionSec - input.positionSec) >= 1
+    const threshold = resolve("completionThreshold", { anime, sourceId: anime.sourceId })
+    const ratio = input.durationSec && input.durationSec > 0 ? input.positionSec / input.durationSec : 0
+    const completed = previous?.completed === true || ratio >= threshold
+
+    if (!moved && completed === (previous?.completed ?? false)) return anime
+
+    anime.progress[pk] = {
+        positionSec: input.positionSec,
+        ...(input.durationSec ? { durationSec: input.durationSec } : {}),
+        completed,
+        updatedAt: Date.now()
+    }
+
+    // Completing an episode advances the pointer, but never drags it backwards:
+    // re-watching episode 3 should not undo being caught up at 47.
+    if (completed && (!anime.lastWatched || anime.lastWatched.number < input.number)) {
+        anime.lastWatched = {
+            number: input.number,
+            ...(input.variant ? { variant: input.variant } : {}),
+            at: Date.now()
+        }
+    }
+
+    anime.updatedAt = Date.now()
+    await db.putAnime(anime)
     return anime
 }
 

@@ -1,13 +1,15 @@
 import { send } from "~/shared/messages"
 import type { PageIdentity } from "~/shared/messages"
+import { isPlayerMounted, mountPlayer, unmountPlayer } from "~/player/mount"
 
 /**
- * Phase 1 content script: identify the page and confirm tracking. The player
- * replaces this toast in phase 2, but the identification handshake stays exactly
- * as it is — the background does all parsing, this script only supplies the DOM.
+ * Injected on episode pages only, by the background's navigation matcher.
  *
- * Deliberately dependency-free and tiny: it is injected via
- * scripting.executeScript, which loads a classic script with no module support.
+ * Its two jobs: hand the page's HTML to the background (which owns every parser)
+ * and, if this really is a watchable episode, replace the page with our player.
+ *
+ * Built as a standalone IIFE — scripting.executeScript loads a classic script and
+ * cannot resolve `import`.
  */
 
 const MARKER = "__AAW__"
@@ -21,45 +23,53 @@ interface Globals {
 const globals = globalThis as unknown as Globals
 
 if (globals[MARKER]) {
-    // Already injected. considerUrl() normally catches this, but a race is
-    // possible; re-running identification is the correct response either way.
     globals[ROUTE_HOOK]?.()
 } else {
-    globals[MARKER] = { version: "0.1.0", url: location.href }
+    globals[MARKER] = { version: "0.2.0", url: location.href }
     globals[ROUTE_HOOK] = () => void identify()
     void identify()
 }
 
+let lastHandledUrl = ""
+
 async function identify() {
     const url = location.href
+    if (url === lastHandledUrl && isPlayerMounted()) return
+    lastHandledUrl = url
 
-    // Give a client-rendered player a moment to put its server list in the DOM
-    // before we read it. Cheap because we only ever get here on an episode URL.
     await waitForBody()
+
+    // Read the DOM before taking it over — the server list is in the page.
+    const html = document.documentElement.outerHTML
 
     let identity: PageIdentity
     try {
-        identity = await send("page:identify", { url, html: document.documentElement.outerHTML })
+        identity = await send("page:identify", { url, html })
     } catch (error) {
         console.warn("[AAW] identification failed", error)
         return
     }
 
     if (!identity.isEpisode) {
-        console.debug("[AAW] not an episode page")
+        console.debug("[AAW] not an episode page, leaving it alone")
         return
     }
 
-    if (identity.error) {
-        toast(`Couldn't read this page: ${identity.error}`, "warn")
+    if (identity.error || !identity.pageInfo) {
+        toast(`Couldn't read this page: ${identity.error ?? "no episode info"}`, "warn")
         return
     }
 
-    const info = identity.pageInfo
-    if (!info) return
+    console.debug("[AAW] episode identified", identity.pageInfo, `${identity.servers?.length ?? 0} server(s)`)
 
-    console.debug("[AAW] episode identified", info)
-    toast(`${info.title} — Episode ${info.number}`, identity.key ? "tracked" : "info")
+    let tickSec = 5
+    try {
+        tickSec = (await send("settings:get", {})).progressTickSec
+    } catch {
+        // Default is fine; a settings read failure shouldn't block playback.
+    }
+
+    mountPlayer(identity, tickSec)
 }
 
 function waitForBody(timeoutMs = 4000): Promise<void> {
@@ -74,44 +84,31 @@ function waitForBody(timeoutMs = 4000): Promise<void> {
     })
 }
 
-/**
- * A shadow root keeps the site's CSS from reaching in — several themes set
- * `div { all: unset }`-grade rules that would otherwise erase this.
- */
-function toast(message: string, kind: "tracked" | "info" | "warn") {
+window.addEventListener("pagehide", () => unmountPlayer())
+
+/** Shadow root so the site's CSS can't erase the message. */
+function toast(message: string, kind: "info" | "warn") {
     const host = document.createElement("div")
-    host.id = "aaw-toast-host"
     host.style.cssText = "position:fixed;inset:auto 16px 16px auto;z-index:2147483647;"
     const shadow = host.attachShadow({ mode: "closed" })
+    const accent = kind === "warn" ? "#e0a34a" : "#45cddb"
 
-    const accent = kind === "warn" ? "#e0a34a" : kind === "tracked" ? "#45cddb" : "#8e9ba2"
     shadow.innerHTML = `
         <style>
             .card {
-                display: flex; align-items: center; gap: 10px;
+                display: flex; align-items: center; gap: 10px; max-width: 340px;
                 font: 500 13px/1.4 system-ui, -apple-system, "Segoe UI", sans-serif;
                 color: #e3ecef; background: #131c21;
                 border: 1px solid #253239; border-left: 3px solid ${accent};
-                border-radius: 6px; padding: 10px 14px; max-width: 340px;
+                border-radius: 6px; padding: 10px 14px;
                 box-shadow: 0 8px 24px -8px rgba(0,0,0,.6);
-                opacity: 0; transform: translateY(6px);
-                transition: opacity .18s ease, transform .18s ease;
             }
-            .card.in { opacity: 1; transform: none; }
             .dot { width: 7px; height: 7px; border-radius: 50%; background: ${accent}; flex: 0 0 auto; }
-            .txt { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-            @media (prefers-reduced-motion: reduce) { .card { transition: none; } }
         </style>
         <div class="card"><span class="dot"></span><span class="txt"></span></div>
     `
-
-    const card = shadow.querySelector(".card") as HTMLElement
     ;(shadow.querySelector(".txt") as HTMLElement).textContent = message
 
     document.documentElement.appendChild(host)
-    requestAnimationFrame(() => card.classList.add("in"))
-    setTimeout(() => {
-        card.classList.remove("in")
-        setTimeout(() => host.remove(), 250)
-    }, 3200)
+    setTimeout(() => host.remove(), 6000)
 }

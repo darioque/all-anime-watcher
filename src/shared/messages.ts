@@ -1,6 +1,7 @@
 import browser from "webextension-polyfill"
 import type { GlobalSettings } from "~/settings/schema"
-import type { PageInfo } from "~/sources/types"
+import type { PageInfo, Server } from "~/sources/types"
+import type { Stream } from "~/extractors/types"
 import type { TrackedAnime } from "~/model/types"
 
 /** A source as the UI sees it — no functions, safe to structured-clone. */
@@ -20,6 +21,17 @@ export interface PageIdentity {
     pageInfo?: PageInfo
     /** Library key, once the entry exists. */
     key?: string
+    /** Servers the page offers, already ordered by preference. */
+    servers?: Server[]
+    error?: string
+}
+
+/** Response of the playback proxy. Exactly one of text/buffer is set. */
+export interface ProxyResponse {
+    status: number
+    url?: string
+    text?: string
+    buffer?: ArrayBuffer
     error?: string
 }
 
@@ -51,6 +63,31 @@ export interface MessageMap {
     "sources:search": {
         req: { sourceId: string; query: string }
         res: { title: string; url: string; seriesId: string; poster?: string }[]
+    }
+
+    "playback:streams": {
+        req: { sourceId: string; server: Server; episodeUrl: string }
+        res: { embedUrl: string; extractorId: string; streams: Stream[] }
+    }
+    "playback:orderServers": {
+        req: { sourceId: string; animeKey?: string; servers: Server[] }
+        res: Server[]
+    }
+    "playback:fetch": {
+        req: {
+            url: string
+            rangeStart?: number
+            rangeEnd?: number
+            responseType: "text" | "arraybuffer"
+            headers?: Record<string, string>
+        }
+        res: ProxyResponse
+    }
+    "playback:sourceForUrl": { req: { url: string }; res: string | null }
+
+    "progress:update": {
+        req: { key: string; number: number; variant?: string; positionSec: number; durationSec?: number }
+        res: boolean
     }
 
     "tab:open": { req: { url: string; active?: boolean }; res: boolean }

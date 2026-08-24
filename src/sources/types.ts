@@ -141,4 +141,14 @@ export interface AnimeSource {
 
     netRequest?(): NetRequestConfig | null
     readonly domainSource?: DomainSource
+
+    /**
+     * Remove this site's Content-Security-Policy on episode pages.
+     *
+     * Only set it where a CSP actually blocks the injected player's use of Media
+     * Source Extensions — it is a real security relaxation on the site's own
+     * pages. Most sites send no CSP at all, so leave it off until playback is
+     * observed to fail with a CSP violation in the console.
+     */
+    readonly stripCsp?: boolean
 }
