@@ -26,6 +26,13 @@ export interface AniListMedia {
     status?: string
     format?: string
     seasonYear?: number
+    /**
+     * "CN" for a donghua, "JP" for anime, "KR" for aeni. The single most useful
+     * fact AniList carries for a library that is mostly Chinese: no site says
+     * so, and the genres do not distinguish them.
+     */
+    countryOfOrigin?: string
+    genres: string[]
     coverImage?: string
     /** Epoch ms of the next episode's air time, when the series is running. */
     nextAiringAt?: number
@@ -41,6 +48,8 @@ const MEDIA_FIELDS = `
     status
     format
     seasonYear
+    countryOfOrigin
+    genres
     coverImage { large }
     nextAiringEpisode { episode airingAt }
 `
@@ -102,6 +111,8 @@ function toMedia(raw: RawMedia): AniListMedia {
         ...(raw.status ? { status: raw.status } : {}),
         ...(raw.format ? { format: raw.format } : {}),
         ...(raw.seasonYear ? { seasonYear: raw.seasonYear } : {}),
+        ...(raw.countryOfOrigin ? { countryOfOrigin: raw.countryOfOrigin } : {}),
+        genres: raw.genres ?? [],
         ...(raw.coverImage?.large ? { coverImage: raw.coverImage.large } : {}),
         ...(raw.nextAiringEpisode
             ? {
@@ -149,6 +160,8 @@ interface RawMedia {
     status?: string
     format?: string
     seasonYear?: number
+    countryOfOrigin?: string
+    genres?: string[]
     coverImage?: { large?: string }
     nextAiringEpisode?: { episode: number; airingAt: number }
 }

@@ -1,4 +1,4 @@
-import type { TrackedAnime } from "~/model/types"
+import type { SeriesMeta, TrackedAnime } from "~/model/types"
 import { titleOf } from "~/model/keys"
 import { getAnime, putAnime } from "~/model/db"
 import { resolve } from "~/settings/resolver"
@@ -104,6 +104,21 @@ function applyMedia(anime: TrackedAnime, media: AniListMedia, wantMetadata: bool
             anime.title = media.titleEnglish ?? media.titleRomaji ?? anime.title
         }
     }
+
+    /*
+     * Stored whatever `wantMetadata` says. It is not metadata in the sense that
+     * switch controls — that one is about overwriting the *site's* title and
+     * poster with AniList's. This is data no site provides at all, and turning
+     * it off would silently empty every automatic category.
+     */
+    const meta: SeriesMeta = {
+        ...(media.countryOfOrigin ? { countryOfOrigin: media.countryOfOrigin } : {}),
+        ...(media.genres.length > 0 ? { genres: media.genres } : {}),
+        ...(media.format ? { format: media.format } : {}),
+        ...(media.status ? { status: media.status } : {}),
+        ...(media.seasonYear ? { seasonYear: media.seasonYear } : {})
+    }
+    if (Object.keys(meta).length > 0) anime.meta = meta
 
     if (media.nextAiringAt && media.nextAiringEpisode) {
         anime.airing = {

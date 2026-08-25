@@ -123,6 +123,16 @@ export interface TrackedAnime {
     /** Last tracker lookup, so an unmatchable series isn't re-searched every cycle. */
     trackerCheckedAt?: number
     /**
+     * What the tracker knows about the series itself, as opposed to our copy of
+     * it. Kept together in one field so it round-trips through a backup as one
+     * thing, and so "we have no tracker data" is a single check.
+     *
+     * Read by categories: no site says whether a show is a donghua or an anime,
+     * and the genres do not distinguish them — `countryOfOrigin` does.
+     */
+    meta?: SeriesMeta
+
+    /**
      * Next episode's air time, from the tracker. Feeds the `airing` schedule
      * policy; absent for a finished series, which makes that policy fall back to
      * its interval rather than never checking.
@@ -155,6 +165,18 @@ export interface TrackedAnime {
     /** Consecutive failed checks. Surfaces a broken source instead of silence. */
     failCount: number
     lastError?: string
+}
+
+/** Facts about the series, from the tracker rather than from a site. */
+export interface SeriesMeta {
+    /** ISO 3166 alpha-2 as AniList reports it: CN, JP, KR. */
+    countryOfOrigin?: string
+    genres?: string[]
+    /** TV, TV_SHORT, MOVIE, SPECIAL, OVA, ONA, MUSIC. */
+    format?: string
+    /** RELEASING, FINISHED, NOT_YET_RELEASED, CANCELLED, HIATUS. */
+    status?: string
+    seasonYear?: number
 }
 
 /** Per-source runtime state, kept out of TrackedAnime so it isn't duplicated. */

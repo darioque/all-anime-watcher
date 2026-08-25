@@ -124,6 +124,16 @@ export interface AnimeSource {
     /** Data-URI or bundled icon. */
     readonly icon?: string
 
+    /**
+     * What this site carries, categorically, whatever the series is.
+     *
+     * A site that only ever publishes donghua knows something the tracker would
+     * also tell us — but sooner, without a round trip, and for the many series
+     * AniList has never heard of it is the only thing that ever will. Matched
+     * against category *names*, so declaring "Donghua" fills the built-in shelf.
+     */
+    readonly categories?: string[]
+
     /** Matched against `pathname`. Must not carry the `g` flag. */
     readonly episodeUrl: RegExp
     /** Optional: lets the user follow a series from its own page. */

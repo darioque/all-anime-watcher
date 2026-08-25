@@ -20,6 +20,8 @@ export interface SourceDescriptor {
     knownDomains?: string[]
     /** Whether the site announces its live domains somewhere. */
     hasDomainSource?: boolean
+    /** Categories the site claims for everything it carries, by name. */
+    categories?: string[]
     lastDomainCheckAt?: number
     lastDomainCheckResult?: "ok" | "moved" | "unreachable"
 }
@@ -73,6 +75,13 @@ export interface MessageMap {
     "library:remove": { req: { key: string }; res: boolean }
     "library:setFlags": { req: { key: string; follow?: boolean; poll?: boolean }; res: TrackedAnime | null }
     "library:rename": { req: { key: string; displayTitle: string }; res: TrackedAnime | null }
+    /** Manual shelf membership. Automatic categories are derived, never stored. */
+    "library:setCategories": { req: { key: string; categories: string[] }; res: TrackedAnime | null }
+    /** One shelf, many series — the bulk action behind the category bar. */
+    "library:bulkCategory": {
+        req: { keys: string[]; categoryId: string; action: "add" | "remove" }
+        res: number
+    }
     "library:refresh": { req: { key: string }; res: TrackedAnime | null }
     "library:checkAll": { req: { force?: boolean }; res: number }
     /** Forget the viewer's position, keeping the series. */

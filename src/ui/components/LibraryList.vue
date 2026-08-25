@@ -25,6 +25,9 @@ import RowMenu, { type MenuItem } from "./RowMenu.vue"
 import ConfirmDialog from "./ConfirmDialog.vue"
 import SearchPanel from "./SearchPanel.vue"
 import DownloadsPanel from "./DownloadsPanel.vue"
+import CategoryBar from "./CategoryBar.vue"
+import { categoriesOf, matchesCategories, pruneFilter } from "~/library/categories"
+import type { Category, CategoryFilter } from "~/library/categories"
 import { groupSeries, groupLatest, groupPosition, groupUnwatched, preferredEntry } from "~/library/grouping"
 import type { SeriesGroup } from "~/library/grouping"
 
@@ -48,6 +51,10 @@ const filter = ref("")
 const sort = ref<Sort>("recent")
 const onlyUnwatched = ref(false)
 const sourceFilter = ref("")
+const categories = ref<Category[]>([])
+const categoryFilter = ref<CategoryFilter>({})
+/** Which row's shelf editor is open, mirroring the episode picker. */
+const categoriesFor = ref<string | null>(null)
 /** False until settings have loaded, so restoring them doesn't look like a change. */
 const controlsReady = ref(false)
 
@@ -82,6 +89,9 @@ const visible = computed(() => {
     if (needle !== "") list = list.filter(a => titleOf(a).toLowerCase().includes(needle))
     if (onlyUnwatched.value) list = list.filter(a => watchState(a) === "new")
     if (sourceFilter.value !== "") list = list.filter(a => a.sourceId === sourceFilter.value)
+    if (Object.keys(categoryFilter.value).length > 0) {
+        list = list.filter(a => matchesCategories(membershipOf(a), categoryFilter.value))
+    }
 
     const sorted = [...list]
     switch (sort.value) {
@@ -200,6 +210,58 @@ function driftNote(a: TrackedAnime): string | null {
     return `You are at E${a.lastWatched?.number}, past everything this source lists (newest is E${latestEpisodeNumber(a)}).`
 }
 
+/** What a source claims about everything it carries, keyed by source id. */
+const sourceClaims = computed(() => Object.fromEntries(sources.value.map(source => [source.id, source.categories])))
+
+/**
+ * Automatic membership is recomputed rather than stored, so a shelf whose rule
+ * changes takes effect at once. Cheap enough to do per row: it is a handful of
+ * string comparisons against data already in memory.
+ */
+function membershipOf(a: TrackedAnime): string[] {
+    return categoriesOf(a, categories.value, sourceClaims.value)
+}
+
+/** Only manual shelves can be ticked by hand; the rest fill themselves. */
+const manualCategories = computed(() => categories.value.filter(category => category.rule.kind === "manual"))
+
+function automaticFor(a: TrackedAnime): Category[] {
+    const mine = new Set(membershipOf(a))
+    return categories.value.filter(category => category.rule.kind !== "manual" && mine.has(category.id))
+}
+
+async function toggleCategory(a: TrackedAnime, categoryId: string) {
+    const current = new Set(a.categories ?? [])
+    if (current.has(categoryId)) current.delete(categoryId)
+    else current.add(categoryId)
+
+    const updated = await send("library:setCategories", { key: a.key, categories: [...current] })
+    if (updated) replaceRow(updated)
+}
+
+async function saveCategories(next: Category[]) {
+    categories.value = next
+    // A filter pointing at a deleted shelf would silently hide everything.
+    categoryFilter.value = pruneFilter(categoryFilter.value, next)
+    await send("settings:patch", { patch: { categories: next, listCategoryFilter: categoryFilter.value } })
+}
+
+async function bulkCategory(event: { action: "add" | "remove"; categoryId: string }) {
+    const keys = visible.value.map(a => a.key)
+    const changed = await send("library:bulkCategory", { keys, categoryId: event.categoryId, action: event.action })
+    const shelf = categories.value.find(category => category.id === event.categoryId)?.name ?? "that shelf"
+    flash(
+        changed === 0
+            ? `Nothing to change on ${shelf}`
+            : `${event.action === "add" ? "Added" : "Removed"} ${changed} series ${event.action === "add" ? "to" : "from"} ${shelf}`
+    )
+    await reload()
+}
+
+function replaceRow(updated: TrackedAnime) {
+    library.value = library.value.map(a => (a.key === updated.key ? updated : a))
+}
+
 const newEpisodes = computed(() => library.value.reduce((n, a) => (a.follow ? n + unwatchedCount(a) : n), 0))
 const seriesWithNew = computed(() => library.value.filter(a => watchState(a) === "new").length)
 
@@ -242,6 +304,8 @@ async function restoreControls() {
         sort.value = settings.listSort
         onlyUnwatched.value = settings.listOnlyUnwatched
         sourceFilter.value = settings.listSourceFilter
+        categories.value = settings.categories ?? []
+        categoryFilter.value = pruneFilter(settings.listCategoryFilter ?? {}, categories.value)
         grouping.value = settings.groupBySeries
     } catch {
         // Defaults are fine; this is a convenience, not state that matters.
@@ -250,13 +314,14 @@ async function restoreControls() {
     }
 }
 
-watch([sort, onlyUnwatched, sourceFilter, grouping], () => {
+watch([sort, onlyUnwatched, sourceFilter, grouping, categoryFilter], () => {
     if (!controlsReady.value) return
     void send("settings:patch", {
         patch: {
             listSort: sort.value,
             listOnlyUnwatched: onlyUnwatched.value,
             listSourceFilter: sourceFilter.value,
+            listCategoryFilter: categoryFilter.value,
             groupBySeries: grouping.value
         }
     }).catch(() => undefined)
@@ -468,6 +533,12 @@ function menuFor(a: TrackedAnime): MenuItem[] {
             action: () => (episodesFor.value = episodesFor.value === a.key ? null : a.key)
         },
         {
+            label: "Shelves…",
+            checked: (a.categories ?? []).length > 0,
+            hint: "Which categories this sits on",
+            action: () => (categoriesFor.value = categoriesFor.value === a.key ? null : a.key)
+        },
+        {
             label: "Schedule…",
             checked: Boolean(a.overrides.schedule),
             action: () => (scheduleFor.value = scheduleFor.value === a.key ? null : a.key)
@@ -611,6 +682,18 @@ defineExpose({ load })
 
         <SettingsPanel v-if="showSettings && variant === 'page'" />
         <SourcesPanel v-if="showSettings && variant === 'page'" />
+
+        <CategoryBar
+            v-if="variant === 'page' && library.length > 0"
+            :library="library"
+            :shown="visible"
+            :categories="categories"
+            :filter="categoryFilter"
+            :sources="sources"
+            @update:filter="value => (categoryFilter = value)"
+            @update:categories="saveCategories"
+            @bulk="bulkCategory"
+        />
 
         <div v-if="library.length > 1" class="controls-row">
             <input v-model="filter" type="search" placeholder="Filter by title" aria-label="Filter by title" />
@@ -810,6 +893,35 @@ defineExpose({ load })
                                     </option>
                                 </select>
                             </label>
+                        </div>
+
+                        <div v-if="categoriesFor === a.key" class="episodes-panel">
+                            <div class="panel-head">
+                                <span class="panel-title">Shelves</span>
+                                <button class="btn tiny" @click="categoriesFor = null">Close</button>
+                            </div>
+
+                            <div v-if="manualCategories.length > 0" class="shelf-picks">
+                                <label v-for="category in manualCategories" :key="category.id" class="shelf-pick">
+                                    <input
+                                        type="checkbox"
+                                        :checked="(a.categories ?? []).includes(category.id)"
+                                        @change="toggleCategory(a, category.id)"
+                                    />
+                                    <span>{{ category.name }}</span>
+                                </label>
+                            </div>
+                            <p v-else class="shelf-note">
+                                No shelves of your own yet — make one under “Shelves…” above the list.
+                            </p>
+
+                            <p v-if="automaticFor(a).length > 0" class="shelf-note">
+                                Also on
+                                <span v-for="(category, index) in automaticFor(a)" :key="category.id">
+                                    <strong>{{ category.name }}</strong
+                                    ><span v-if="index < automaticFor(a).length - 1">, </span> </span
+                                >, which fill themselves.
+                            </p>
                         </div>
 
                         <div v-if="scheduleFor === a.key" class="schedule">
@@ -1280,6 +1392,27 @@ h1 {
     margin: 2px 0 0;
     font-size: 11px;
     color: var(--danger);
+}
+
+.shelf-picks {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 4px 14px;
+}
+
+.shelf-pick {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    color: var(--ink-2);
+    cursor: pointer;
+}
+
+.shelf-note {
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: var(--ink-3);
 }
 
 .panel-head .modes {

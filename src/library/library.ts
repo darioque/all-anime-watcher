@@ -364,6 +364,50 @@ export async function rename(key: string, displayTitle: string): Promise<Tracked
     return anime
 }
 
+/**
+ * Put a series on shelves, or take it off.
+ *
+ * Only manual categories are stored. Automatic membership is recomputed from
+ * tracker data on every read, so a category whose rule changes takes effect at
+ * once and nothing is ever left tagged by a rule that no longer exists.
+ */
+export async function setCategories(key: string, categories: string[]): Promise<TrackedAnime | null> {
+    const anime = await db.getAnime(key)
+    if (!anime) return null
+    anime.categories = [...new Set(categories)].sort()
+    anime.updatedAt = Date.now()
+    await db.putAnime(anime)
+    return anime
+}
+
+/** The same, across a selection. Returns how many entries actually changed. */
+export async function bulkCategory(
+    keys: string[],
+    categoryId: string,
+    action: "add" | "remove"
+): Promise<number> {
+    const changed: TrackedAnime[] = []
+
+    for (const key of keys) {
+        const anime = await db.getAnime(key)
+        if (!anime) continue
+
+        const current = new Set(anime.categories ?? [])
+        const before = current.size
+        if (action === "add") current.add(categoryId)
+        else current.delete(categoryId)
+        if (current.size === before) continue
+
+        anime.categories = [...current].sort()
+        anime.updatedAt = Date.now()
+        changed.push(anime)
+    }
+
+    if (changed.length > 0) await db.putManyAnime(changed)
+    logger.info(`${action === "add" ? "added" : "removed"} ${changed.length} series ${action === "add" ? "to" : "from"} ${categoryId}`)
+    return changed.length
+}
+
 export async function remove(key: string): Promise<boolean> {
     const anime = await db.getAnime(key)
     if (!anime) return false

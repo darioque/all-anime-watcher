@@ -25,6 +25,8 @@ const HOME = "https://www.mundodonghua.com/"
 export class MundoDonghua implements AnimeSource {
     readonly id = "mundodonghua"
     readonly name = "Mundo Donghua"
+    /** The whole catalogue is donghua; the site is named after it. */
+    readonly categories = ["Donghua"]
     readonly languages = ["es"]
     readonly domains = ["mundodonghua.com"]
     readonly home = HOME

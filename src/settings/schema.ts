@@ -1,4 +1,5 @@
 import type { SchedulePolicy, Variant } from "~/model/types"
+import { defaultCategories, type Category, type CategoryFilter } from "~/library/categories"
 
 /**
  * Global defaults. Every key here that also appears in AnimeOverrides or
@@ -106,6 +107,15 @@ export interface GlobalSettings {
     listOnlyUnwatched: boolean
     /** Source id, or "" for all of them. */
     listSourceFilter: string
+    /**
+     * The shelves themselves. In settings rather than the database because they
+     * are configuration, and because settings already round-trip through a
+     * backup — a library restored without its categories would have every entry
+     * pointing at shelves that no longer exist.
+     */
+    categories: Category[]
+    /** Ticked and crossed chips, persisted like every other list control. */
+    listCategoryFilter: CategoryFilter
     groupBySeries: boolean
     perPage: number
     /** Clicking the toolbar icon opens the full library tab instead of the popup. */
@@ -184,6 +194,8 @@ export function defaultSettings(): GlobalSettings {
         listSortAscending: false,
         listOnlyUnwatched: false,
         listSourceFilter: "",
+        categories: defaultCategories(),
+        listCategoryFilter: {},
         groupBySeries: true,
         perPage: 25,
         openInTab: false

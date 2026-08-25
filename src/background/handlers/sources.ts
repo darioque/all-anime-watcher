@@ -19,6 +19,7 @@ export function registerSourceHandlers() {
                 home: source.home,
                 enabled: state?.enabled ?? true,
                 hasDomainSource: Boolean(source.domainSource),
+                ...(source.categories?.length ? { categories: [...source.categories] } : {}),
                 knownDomains: state?.knownDomains ?? [...source.domains],
                 lastDomainCheckAt: state?.lastDomainCheckAt ?? 0,
                 ...(preferred ? { preferredDomain: preferred } : {}),

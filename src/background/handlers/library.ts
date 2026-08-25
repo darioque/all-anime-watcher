@@ -9,6 +9,8 @@ import {
     refreshSeries,
     remove,
     rename,
+    setCategories,
+    bulkCategory,
     resetWatchStatus,
     setFlags,
     setSchedule,
@@ -53,6 +55,18 @@ export function registerLibraryHandlers() {
         await refreshBadge()
         libraryChanged("flags", key)
         return anime
+    })
+
+    on("library:setCategories", async ({ key, categories }) => {
+        const anime = await setCategories(key, categories)
+        libraryChanged("categories", key)
+        return anime
+    })
+
+    on("library:bulkCategory", async ({ keys, categoryId, action }) => {
+        const changed = await bulkCategory(keys, categoryId, action)
+        if (changed > 0) libraryChanged("categories")
+        return changed
     })
 
     on("library:rename", async ({ key, displayTitle }) => {
