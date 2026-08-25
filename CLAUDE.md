@@ -357,7 +357,8 @@ exercises one at a time.
 | --- | --- | --- |
 | mp4upload.com | `mp4upload` | works — direct MP4, played in the browser |
 | ok.ru | `okru` | works — direct MP4 at several renditions |
-| streamwish family | `streamwish` | works — covers embedwish, vidhidepro, bysekoze, morencius, FileLions, VidHide |
+| streamwish family | `streamwish` | works — covers embedwish, vidhidepro, morencius, FileLions, VidHide |
+| bysekoze.com | `byse` | works — AES-256-GCM player config from `/api/videos/<code>`; pinned by `npm run check:extractors` |
 | megaplay family | `megaplay` | works — HLS + subtitles; covers megaplay.buzz, vidtube.site and the rest of the white-labelled engine |
 | dailymotion.com | `dailymotion` | resolves to a master playlist; the manifest 403s intermittently — see below |
 | voe.sx, rumble.com, youtube.com | — | embedded via the iframe fallback |

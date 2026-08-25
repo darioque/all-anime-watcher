@@ -10,7 +10,7 @@
  * it. A check that only ever runs against a live site is a check nobody can
  * trust — and these are the ones that decide whether a source is healthy.
  */
-import { checkAttributes, checkFetch, checkPage, checkSearch, checkSeries, checkStreams } from "~/lab/checks"
+import { checkAttributes, checkFetch, checkPage, checkSearch, checkSeries, checkServers, checkStreams } from "~/lab/checks"
 import type { SourceFacts } from "~/lab/checks"
 import type { LabFetchReport, LabSeriesReport } from "~/lab/types"
 import type { SearchResult } from "~/sources/types"
@@ -183,6 +183,49 @@ const fallback = checkStreams({
 })
 eq("an iframe fallback is a failure, not a pass", fallback.ok, false)
 says("naming the host nothing claims", fallback.note, "unknown.host")
+
+console.log("\n\x1b[1mall the servers, not the first one\x1b[0m\n")
+
+const dead = {
+    embedUrl: "https://bysekoze.com/e/afl6vo7sypot",
+    extractorId: null,
+    streams: [{ url: "https://bysekoze.com/e/afl6vo7sypot", kind: "iframe" as const }],
+    error: "streamwish: no playlist in the player"
+}
+
+/*
+ * The case that prompted this. mundodonghua lists "Fm" first and "Vh" second;
+ * Fm was falling back to an iframe while Vh played perfectly. Stopping at the
+ * first server called a working source broken — and said nothing about the one
+ * that worked.
+ */
+const mixed = checkServers([
+    { server: "Fm", resolved: dead },
+    { server: "Vh", resolved: resolved }
+])
+eq("one working server is a pass", mixed.ok, true)
+says("naming the server that works and its extractor", mixed.note, "Vh → megaplay")
+eq("with the dead one kept as a warning", mixed.warnings?.length, 1)
+says("carrying the reason it died", mixed.warnings?.[0] ?? "", "no playlist in the player")
+
+/*
+ * And the reverse, which is the failure that had gone unnoticed: every server
+ * falls back to an iframe, so the episode still plays and nothing looks wrong,
+ * while progress, the quality picker and downloads are all quietly gone.
+ */
+const allIframes = checkServers([
+    { server: "Fm", resolved: dead },
+    { server: "Vh", resolved: { ...dead, embedUrl: "https://other.host/e/2" } }
+])
+eq("every server on an iframe is a failure", allIframes.ok, false)
+says("said as a count rather than one host", allIframes.note, "2")
+
+eq(
+    "a probe that threw is a dead server too",
+    checkServers([{ server: "Fm", thrown: "unknown source" }]).ok,
+    false
+)
+eq("and no servers at all cannot pass", checkServers([]).ok, false)
 
 console.log("\n\x1b[1mthe fetch the CLI cannot make\x1b[0m\n")
 

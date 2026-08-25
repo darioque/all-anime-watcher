@@ -238,7 +238,7 @@ export interface MessageMap {
     "lab:page": { req: { url: string }; res: { ms: number; result: { htmlBytes: number; identity: PageIdentity } } }
     "lab:streams": {
         req: { sourceId: string; episodeUrl: string; server: Server }
-        res: { ms: number; result: { embedUrl: string; extractorId: string | null; streams: Stream[] } }
+        res: { ms: number; result: { embedUrl: string; extractorId: string | null; streams: Stream[]; error?: string } }
     }
     "lab:extract": {
         req: { embedUrl: string; referer?: string }

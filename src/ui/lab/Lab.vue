@@ -4,8 +4,8 @@ import { send } from "~/shared/messages"
 import type { SourceDescriptor } from "~/shared/messages"
 import type { Episode } from "~/model/types"
 import type { SearchResult, Server } from "~/sources/types"
-import { checkAttributes, checkFetch, checkPage, checkSearch, checkSeries, checkStreams } from "~/lab/checks"
-import type { Verdict } from "~/lab/checks"
+import { checkAttributes, checkFetch, checkPage, checkSearch, checkSeries, checkServers } from "~/lab/checks"
+import type { ServerAttempt, Verdict } from "~/lab/checks"
 import Outcome from "./Outcome.vue"
 
 /**
@@ -44,7 +44,7 @@ const PLAN: { id: StepId; name: string; hint: string }[] = [
     { id: "search", name: "Search", hint: "Results, and whether each could become a library entry." },
     { id: "series", name: "Series and episodes", hint: "Order, numbering, and whether the URLs route back here." },
     { id: "page", name: "Episode page", hint: "Read as the content script reads it, but never as a watch signal." },
-    { id: "streams", name: "Server → stream", hint: "The extractor, and the header rules it needs installed." },
+    { id: "streams", name: "Servers → streams", hint: "Every server the page offers, each through its extractor." },
     { id: "fetch", name: "Stream reachable", hint: "The fetch a browser makes, with the rules the step above set." }
 ]
 
@@ -63,7 +63,6 @@ const chosenHit = ref("")
 const episodes = ref<Episode[]>([])
 const chosenEpisode = ref("")
 const servers = ref<Server[]>([])
-const chosenServer = ref("")
 const seriesId = ref("")
 
 const currentSource = computed(() => sources.value.find(source => source.id === sourceId.value))
@@ -207,38 +206,66 @@ async function fromPage() {
     if (!page) return
 
     servers.value = page.identity.servers ?? []
-    chosenServer.value = servers.value[0]?.name ?? ""
     await fromStreams()
 }
 
-/** Steps 5–6, against whichever server is selected. */
+/**
+ * Steps 5–6, against *every* server the page offered.
+ *
+ * A page lists several servers because any one of them can be down, and the
+ * viewer only needs one. Stopping at the first would report a healthy source as
+ * broken on the strength of a server nobody was going to use — and would say
+ * nothing about the ones that work.
+ */
 async function fromStreams() {
     resetFrom("streams")
-    const server = servers.value.find(candidate => candidate.name === chosenServer.value)
     const episode = episodes.value.find(candidate => candidate.url === chosenEpisode.value)
-    if (!server || !episode) return
+    if (!episode || servers.value.length === 0) return
 
-    const resolved = await attempt(
-        "streams",
-        () => send("lab:streams", { sourceId: sourceId.value, episodeUrl: episode.url, server }),
-        checkStreams
-    )
-    if (!resolved) return
+    const step = stepAt("streams")
+    step.state = "running"
+    const attempts: ServerAttempt[] = []
+    const started = Date.now()
 
-    const stream = resolved.streams.find(candidate => candidate.kind !== "iframe")
-    if (!stream) return
+    for (const server of servers.value) {
+        step.note = `trying ${server.name} (${attempts.length + 1} of ${servers.value.length})…`
+        try {
+            const answer = await send("lab:streams", { sourceId: sourceId.value, episodeUrl: episode.url, server })
+            attempts.push({ server: server.name, resolved: answer.result })
+        } catch (error) {
+            attempts.push({ server: server.name, thrown: error instanceof Error ? error.message : String(error) })
+        }
+    }
+
+    const verdict = checkServers(attempts)
+    Object.assign(step, {
+        ms: Date.now() - started,
+        note: verdict.note,
+        warnings: verdict.warnings,
+        detail: attempts,
+        state: verdict.ok ? "ok" : "bad"
+    })
+    if (!verdict.ok) return
+
+    // The first server that actually extracted something is the one worth
+    // fetching: the last step tests the header rules that resolving it installed.
+    const winner = attempts.find(entry => entry.resolved?.extractorId)
+    const stream = winner?.resolved?.streams.find(candidate => candidate.kind !== "iframe")
+    if (!winner || !stream) return
 
     const playlist = stream.kind === "hls" || stream.kind === "dash"
     await attempt(
         "fetch",
         () => send("lab:fetch", { url: stream.url }),
-        report => checkFetch(report, { playlist })
+        report => {
+            const verdict = checkFetch(report, { playlist })
+            return { ...verdict, note: `${winner.server} — ${verdict.note}` }
+        }
     )
 }
 
 const runFromSeries = () => guard(fromSeries)
 const runFromPage = () => guard(fromPage)
-const runFromStreams = () => guard(fromStreams)
 
 // ------------------------------------------------------- manual instruments
 
@@ -376,15 +403,6 @@ onMounted(async () => {
                         </option>
                     </select>
                     <button class="btn tiny" :disabled="running" @click="runFromPage">Run from here</button>
-                </div>
-
-                <div v-if="step.id === 'page' && servers.length > 0" class="fork">
-                    <select v-model="chosenServer" aria-label="Server">
-                        <option v-for="server in servers" :key="server.name" :value="server.name">
-                            {{ server.name }}
-                        </option>
-                    </select>
-                    <button class="btn tiny" :disabled="running" @click="runFromStreams">Run from here</button>
                 </div>
 
                 <details v-if="step.detail !== undefined" class="detail">

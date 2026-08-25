@@ -11,8 +11,19 @@ const logger = log("streams")
 
 export interface ResolvedStreams {
     embedUrl: string
+    /** The extractor that produced these streams. Null means the iframe fallback. */
     extractorId: string | null
     streams: Stream[]
+    /**
+     * Why the fallback happened, when it did.
+     *
+     * `extractorId: null` used to be the whole story, which conflated "no
+     * extractor claims this host" with "the extractor claimed it and failed" —
+     * two very different repairs. The reason was written to the log and nowhere
+     * a caller could reach it, so the Lab reported a dead server with no more
+     * detail than the player shows.
+     */
+    error?: string
 }
 
 /**
@@ -104,8 +115,9 @@ async function resolveInner(options: {
      * queue says so by name rather than silently skipping it.
      */
     if (!extractor) {
-        logger.info(`${options.server.name}: no extractor for ${host}, offering the embed itself`)
-        return { embedUrl, extractorId: null, streams: [iframeStream(embedUrl, host)] }
+        const reason = `no extractor claims ${host}`
+        logger.info(`${options.server.name}: ${reason}, offering the embed itself`)
+        return { embedUrl, extractorId: null, streams: [iframeStream(embedUrl, host)], error: reason }
     }
 
     const extractCtx: ExtractCtx = {
@@ -138,7 +150,12 @@ async function resolveInner(options: {
         // a changed player — still leaves the embed itself playable.
         const detail = error instanceof Error ? error.message : String(error)
         logger.info(`${options.server.name}: ${extractor.id} failed (${detail}), offering the embed itself`)
-        return { embedUrl, extractorId: null, streams: [iframeStream(embedUrl, host)] }
+        return {
+            embedUrl,
+            extractorId: null,
+            streams: [iframeStream(embedUrl, host)],
+            error: `${extractor.id}: ${detail}`
+        }
     }
 }
 

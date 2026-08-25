@@ -12,8 +12,7 @@ const logger = log("extractor:streamwish")
  * domains all ship the same page: a `p,a,c,k,e,d` block holding a `links` object
  * whose `hls2` entry is a master playlist. One extractor covers all of them,
  * which is the whole argument for keying extractors by host rather than by site
- * — this single class serves lmanime's `morencius` and three of
- * mundodonghua's four servers.
+ * — this single class serves lmanime's `morencius` and mundodonghua's `Vh`.
  *
  * The CDN sets `Access-Control-Allow-Origin: *` and needs no Referer, so hls.js
  * fetches it straight from the page. No proxy, no header rules.
@@ -28,7 +27,10 @@ export class StreamWishExtractor implements Extractor {
     /**
      * These domains rotate constantly, so this list will go stale. Adding one is
      * a one-line change; the alternative — matching on URL shape — would swallow
-     * unrelated hosts and fail confusingly.
+     * unrelated hosts and fail confusingly. `bysekoze.com` was listed here on
+     * exactly that mistake: it serves `/e/<id>` like this family does and is not
+     * this family at all, so every episode on it fell back to an iframe while
+     * this extractor reported "no playlist in the player". It has its own now.
      */
     private static readonly KNOWN = [
         "streamwish.com",
@@ -46,8 +48,7 @@ export class StreamWishExtractor implements Extractor {
         "vidhide.com",
         "vidhidevip.com",
         "vidhidepre.com",
-        "morencius.com",
-        "bysekoze.com"
+        "morencius.com"
     ]
 
     readonly hosts = (url: string): boolean => {

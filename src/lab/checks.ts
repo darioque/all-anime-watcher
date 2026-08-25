@@ -220,7 +220,22 @@ export function checkPage(page: PageFacts, expect: { seriesId: string; number: n
 
 // ----------------------------------------------------------------- 5. streams
 
-export function checkStreams(resolved: { extractorId: string | null; embedUrl: string; streams: Stream[] }): Verdict {
+export interface Resolved {
+    embedUrl: string
+    extractorId: string | null
+    streams: Stream[]
+    /** Why the iframe fallback happened, when it did. */
+    error?: string
+}
+
+/** One server's attempt. `thrown` is the probe itself failing, not the host. */
+export interface ServerAttempt {
+    server: string
+    resolved?: Resolved
+    thrown?: string
+}
+
+export function checkStreams(resolved: Resolved): Verdict {
     if (resolved.streams.length === 0) {
         return fail(`nothing came back for ${resolved.embedUrl}`)
     }
@@ -231,8 +246,8 @@ export function checkStreams(resolved: { extractorId: string | null; embedUrl: s
      * progress, quality and downloads are all silently gone.
      */
     if (!resolved.extractorId) {
-        const host = hostOf(resolved.embedUrl)
-        return fail(`no extractor claims ${host || resolved.embedUrl}; falling back to an iframe`)
+        const host = hostOf(resolved.embedUrl) || resolved.embedUrl
+        return fail(resolved.error ? `${host} — ${resolved.error}` : `${host}: fell back to an iframe`)
     }
 
     const playable = resolved.streams.filter(stream => stream.kind !== "iframe")
@@ -246,6 +261,47 @@ export function checkStreams(resolved: { extractorId: string | null; embedUrl: s
 
     const kinds = unique(playable.map(stream => stream.kind))
     return pass(`${resolved.extractorId} → ${playable.length} stream(s) (${kinds.join(", ")})`, warnings)
+}
+
+/**
+ * Every server the page offered, judged together.
+ *
+ * A page lists several servers precisely because any one of them can be down,
+ * and the viewer only needs one. Testing the first and stopping would call a
+ * source broken on the strength of a server nobody was going to use — and,
+ * worse, would say nothing at all about the ones that work. So all of them run,
+ * and one working server is a pass with the dead ones named.
+ *
+ * The reverse matters too: a source where every server falls back to an iframe
+ * still *plays*, which is why this failure had gone unnoticed. Progress
+ * tracking, the quality picker and downloads are all quietly gone, and nothing
+ * in normal use says so.
+ */
+export function checkServers(attempts: ServerAttempt[]): Verdict {
+    if (attempts.length === 0) return fail("no servers to try")
+
+    const judged = attempts.map(attempt => ({
+        server: attempt.server,
+        verdict: attempt.thrown ? fail(attempt.thrown) : checkStreams(attempt.resolved!),
+        extractorId: attempt.resolved?.extractorId ?? null
+    }))
+
+    const working = judged.filter(entry => entry.verdict.ok)
+    const broken = judged.filter(entry => !entry.verdict.ok)
+    const warnings = broken.map(entry => `${entry.server} — ${entry.verdict.note}`)
+
+    if (working.length === 0) {
+        const iframes = attempts.filter(attempt => (attempt.resolved?.streams.length ?? 0) > 0).length
+        return fail(
+            iframes > 0
+                ? `no server extracts; ${iframes} of ${attempts.length} would only play in an iframe`
+                : `all ${attempts.length} server(s) failed`,
+            warnings
+        )
+    }
+
+    const named = working.map(entry => `${entry.server} → ${entry.extractorId}`).join(", ")
+    return pass(`${working.length} of ${attempts.length} server(s) extract: ${named}`, warnings)
 }
 
 // ------------------------------------------------------------------- 6. fetch

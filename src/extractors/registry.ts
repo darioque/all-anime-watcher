@@ -4,6 +4,7 @@ import { Mp4UploadExtractor } from "./sites/mp4upload"
 import { OkRuExtractor } from "./sites/okru"
 import { MegaPlayExtractor } from "./sites/megaplay"
 import { StreamWishExtractor } from "./sites/streamwish"
+import { ByseExtractor } from "./sites/byse"
 import { DirectStreamExtractor } from "./sites/directStream"
 import { hostOf } from "~/shared/url"
 import { log } from "~/shared/logger"
@@ -22,6 +23,7 @@ const ALL: Extractor[] = [
     new Mp4UploadExtractor(),
     new OkRuExtractor(),
     new MegaPlayExtractor(),
+    new ByseExtractor(),
     new StreamWishExtractor(),
     new DirectStreamExtractor()
 ]
