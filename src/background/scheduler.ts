@@ -127,18 +127,22 @@ async function checkSource(sourceId: string, list: TrackedAnime[]): Promise<numb
         if (index > 0 && delayMs > 0) await sleep(delayMs)
 
         try {
-            const { anime: updated, newEpisodes } = await withTimeout(
+            const { anime: updated, releases } = await withTimeout(
                 refreshSeries(anime.key),
                 cachedSettings().checkTimeoutSec * 1000,
                 `checking ${anime.key}`
             )
 
+            // `releases`, not every episode that appeared: a source whose list
+            // grew because we can finally see its older posts has not released
+            // anything, and saying so woke people up for two-year-old episodes.
+            //
             // A first successful check on a series that had none establishes the
             // baseline; announcing its whole back catalogue as "new" would be noise.
             const isBaseline = anime.episodes.length === 0
-            if (newEpisodes.length > 0 && !isBaseline) {
+            if (releases.length > 0 && !isBaseline) {
                 found++
-                await notifyNewEpisodes(updated, newEpisodes)
+                await notifyNewEpisodes(updated, releases)
             }
 
             await refreshTrackerIfStale(updated)

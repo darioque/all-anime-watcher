@@ -82,3 +82,45 @@ export function watchState(anime: Pick<TrackedAnime, "episodes" | "lastWatched" 
     if (unwatchedCount(anime) > 0) return "new"
     return "current"
 }
+
+/**
+ * Which of the episodes just added to a list are actually *releases*.
+ *
+ * "Not in the list we stored last time" and "just came out" are different
+ * things, and conflating them is how a library ends up announcing episodes from
+ * two years ago. A source's list grows for two unrelated reasons:
+ *
+ *  - the show aired a new episode, which is worth interrupting someone for;
+ *  - we can suddenly see episodes that were always there — pagination that used
+ *    to stop at 100, a tag that got applied retroactively, a slug the site
+ *    renamed. This is a *backfill*, and the viewer has very often already
+ *    watched every one of them.
+ *
+ * The two are told apart by number, not by date: a backfilled post carries its
+ * original publication date, so `airedAt` says "two years ago" for exactly the
+ * episodes a date test would need to catch, and says nothing at all for the
+ * sources that don't report one.
+ *
+ * The floor is the higher of the newest episode the source previously listed and
+ * the furthest the viewer has watched. The first keeps a backfill quiet; the
+ * second keeps a *reset* list quiet — re-adding a series you are caught up on
+ * should not announce its whole run.
+ */
+export function newReleases(options: {
+    added: Episode[]
+    /** Highest number the stored list held before this refresh, or null if empty. */
+    previousHighest: number | null
+    /** `lastWatched.number`, when there is one. */
+    watchedUpTo?: number
+}): Episode[] {
+    const floor = Math.max(
+        options.previousHighest ?? Number.NEGATIVE_INFINITY,
+        options.watchedUpTo ?? Number.NEGATIVE_INFINITY
+    )
+
+    // Nothing to compare against — a series being seen for the first time. The
+    // caller decides whether that is worth announcing; here everything counts.
+    if (!Number.isFinite(floor)) return options.added
+
+    return options.added.filter(episode => episode.number > floor)
+}

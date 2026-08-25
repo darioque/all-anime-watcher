@@ -1,5 +1,5 @@
 import type { Episode, SchedulePolicy, SourceState, TrackedAnime } from "~/model/types"
-import { animeKey, progressKey } from "~/model/keys"
+import { animeKey, latestEpisodeNumber, newReleases, progressKey } from "~/model/keys"
 import { resolve, resolveSchedule } from "~/settings/resolver"
 import { nextCheckAt } from "~/background/schedule"
 import { enrich } from "~/trackers/match"
@@ -144,8 +144,19 @@ export async function addSeries(options: {
     return anime
 }
 
-/** Re-fetch the episode list for one entry. Returns the number of new episodes. */
-export async function refreshSeries(key: string): Promise<{ anime: TrackedAnime; newEpisodes: Episode[] }> {
+/**
+ * Re-fetch the episode list for one entry.
+ *
+ * Two different answers come back, and callers want different ones. `added` is
+ * every episode that was not in the stored list — the honest diff, which is what
+ * the list itself has to be rebuilt from. `releases` is the subset that actually
+ * came *out* since last time; see `newReleases` for why those are not the same
+ * thing. Anything that interrupts the user, or decides how active a series is,
+ * has to read `releases`.
+ */
+export async function refreshSeries(
+    key: string
+): Promise<{ anime: TrackedAnime; added: Episode[]; releases: Episode[] }> {
     const anime = await db.getAnime(key)
     if (!anime) throw new Error(`not tracking "${key}"`)
 
@@ -158,7 +169,16 @@ export async function refreshSeries(key: string): Promise<{ anime: TrackedAnime;
     try {
         const episodes = await source.getEpisodes(url, ctx)
         const known = new Set(anime.episodes.map(e => progressKey(e.number, e.variant)))
-        const newEpisodes = episodes.filter(e => !known.has(progressKey(e.number, e.variant)))
+        const added = episodes.filter(e => !known.has(progressKey(e.number, e.variant)))
+
+        // Read before the list is replaced: it is the whole basis for telling a
+        // release apart from a backfill.
+        const previousHighest = latestEpisodeNumber(anime)
+        const releases = newReleases({
+            added,
+            previousHighest,
+            ...(anime.lastWatched ? { watchedUpTo: anime.lastWatched.number } : {})
+        })
 
         anime.episodes = episodes
         anime.url = url
@@ -166,12 +186,22 @@ export async function refreshSeries(key: string): Promise<{ anime: TrackedAnime;
         anime.updatedAt = Date.now()
         anime.failCount = 0
         delete anime.lastError
-        if (newEpisodes.length > 0) anime.lastEpisodeFoundAt = Date.now()
+        // "When did this series last put out an episode" drives the smart
+        // schedule. Backfilling two-year-old posts must not make it look active.
+        if (releases.length > 0) anime.lastEpisodeFoundAt = Date.now()
         anime.nextCheckAt = nextCheckAt(anime, resolveSchedule(anime))
 
         await db.putAnime(anime)
-        logger.info(`refreshed ${key} — ${episodes.length} episodes, ${newEpisodes.length} new`)
-        return { anime, newEpisodes }
+
+        const backfilled = added.length - releases.length
+        logger.info(
+            `refreshed ${key} — ${episodes.length} episodes, ${releases.length} new` +
+                (backfilled > 0
+                    ? ` (${backfilled} older episode(s) appeared too, at or below E${previousHighest ?? 0}` +
+                      `${anime.lastWatched ? `/E${anime.lastWatched.number} watched` : ""} — not announced)`
+                    : "")
+        )
+        return { anime, added, releases }
     } catch (error) {
         anime.failCount += 1
         anime.lastError = String(error)

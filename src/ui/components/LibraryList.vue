@@ -4,7 +4,15 @@ import { onLibraryChanged, send } from "~/shared/messages"
 import type { SourceDescriptor } from "~/shared/messages"
 import type { Episode, SchedulePolicy, TrackedAnime } from "~/model/types"
 import type { GlobalSettings } from "~/settings/schema"
-import { episodeProgressKey, latestEpisode, nextEpisode, titleOf, unwatchedCount, watchState } from "~/model/keys"
+import {
+    episodeProgressKey,
+    latestEpisode,
+    latestEpisodeNumber,
+    nextEpisode,
+    titleOf,
+    unwatchedCount,
+    watchState
+} from "~/model/keys"
 import { relativeFuture, relativePast } from "~/shared/time"
 import SchedulePicker from "./SchedulePicker.vue"
 import SettingsPanel from "./SettingsPanel.vue"
@@ -138,6 +146,44 @@ function episodeState(anime: TrackedAnime, episode: Episode): "watched" | "curre
     if (from === undefined) return "new"
     if (episode.number === from) return "current"
     return episode.number > from ? "new" : "watched"
+}
+
+/**
+ * How much of a series this source carries, said so it cannot be misread.
+ *
+ * "121 ep" sitting next to "at E476" reads as a contradiction, and it is the
+ * kind that makes you distrust the whole row. Both numbers are correct and they
+ * are answers to different questions: myanime.live publishes episodes 356 to 476
+ * of Wan Jie Du Zun and nothing earlier, so the count is 121 and the newest is
+ * 476. A row showing only the count looks like it lost four hundred episodes.
+ *
+ * When the list really does run 1..n the two agree and the short form is used,
+ * which is the common case and stays short.
+ */
+function episodeSpan(anime: TrackedAnime): { label: string; heading: string; title: string } {
+    const newest = latestEpisodeNumber(anime)
+    if (newest === null) {
+        return {
+            label: "no episodes",
+            heading: "No episodes",
+            title: "This source has not returned an episode list yet"
+        }
+    }
+
+    const count = anime.episodes.length
+    const earliest = anime.episodes.reduce((lo, ep) => Math.min(lo, ep.number), newest)
+
+    if (count === newest && earliest === 1) {
+        return { label: `${count} ep`, heading: `${count} episodes`, title: `Episodes 1 to ${newest}` }
+    }
+
+    return {
+        label: `${count} ep, newest E${newest}`,
+        heading: `${count} episodes, E${earliest} to E${newest}`,
+        title:
+            `${count} episodes listed, E${earliest} to E${newest}. That is everything this source ` +
+            `carries for the series — the missing ones are not published here.`
+    }
 }
 
 const newEpisodes = computed(() => library.value.reduce((n, a) => (a.follow ? n + unwatchedCount(a) : n), 0))
@@ -615,7 +661,7 @@ defineExpose({ load })
                         <div class="meta">
                             <span>{{ sourceName(a.sourceId) }}</span>
                             <span class="sep">·</span>
-                            <span>{{ a.episodes.length }} ep</span>
+                            <span :title="episodeSpan(a).title">{{ episodeSpan(a).label }}</span>
                             <span class="sep">·</span>
                             <span v-if="a.lastWatched">at E{{ a.lastWatched.number }}</span>
                             <span v-else class="faint">not started</span>
@@ -654,7 +700,7 @@ defineExpose({ load })
 
                         <div v-if="episodesFor === a.key" class="episodes-panel">
                             <div class="panel-head">
-                                <span class="panel-title">{{ a.episodes.length }} episodes</span>
+                                <span class="panel-title" :title="episodeSpan(a).title">{{ episodeSpan(a).heading }}</span>
                                 <button class="btn tiny" @click="episodesFor = null">Close</button>
                             </div>
                             <div class="episode-grid">
