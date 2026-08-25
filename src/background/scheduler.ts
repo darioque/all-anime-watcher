@@ -25,6 +25,16 @@ let running = false
 let lastRunAt = 0
 let lastRunFound = 0
 
+/**
+ * Held while the library is being rewritten wholesale.
+ *
+ * An import in `replace` mode clears both stores and refills them. A check run
+ * that happened to be walking a series at that moment would write its own copy
+ * back afterwards, quietly resurrecting an entry the import had just removed.
+ * Cheap to prevent and impossible to notice if it goes wrong.
+ */
+let paused = false
+
 export function installScheduler() {
     browser.alarms.create(TICK_ALARM, { periodInMinutes: TICK_MINUTES, delayInMinutes: 0.2 })
 
@@ -40,7 +50,25 @@ export function installScheduler() {
 }
 
 export function schedulerStatus() {
-    return { running, lastRunAt, lastRunFound }
+    return { running, lastRunAt, lastRunFound, paused }
+}
+
+/**
+ * Run something with the update loop held off, waiting out a run already in
+ * flight. The wait is bounded: a check that has hung must not make importing a
+ * backup impossible, and the worst case if it really is still running is the
+ * interleaving described above rather than a lost file.
+ */
+export async function withChecksPaused<T>(what: string, fn: () => Promise<T>): Promise<T> {
+    paused = true
+    try {
+        const until = Date.now() + 30_000
+        while (running && Date.now() < until) await sleep(250)
+        if (running) logger.warn(`${what}: a check run is still going after 30s; going ahead anyway`)
+        return await fn()
+    } finally {
+        paused = false
+    }
 }
 
 /**
@@ -54,6 +82,10 @@ export function schedulerStatus() {
 export async function runDueChecks(options: { force?: boolean } = {}): Promise<number> {
     if (running) {
         logger.debug("a check run is already in progress")
+        return 0
+    }
+    if (paused) {
+        logger.debug("checks are paused")
         return 0
     }
     if (!navigator.onLine) {

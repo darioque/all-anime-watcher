@@ -3,6 +3,7 @@ import { onMounted, ref } from "vue"
 import { send } from "~/shared/messages"
 import type { GlobalSettings } from "~/settings/schema"
 import SchedulePicker from "./SchedulePicker.vue"
+import BackupPanel from "./BackupPanel.vue"
 
 const settings = ref<GlobalSettings | null>(null)
 const saving = ref(false)
@@ -351,6 +352,8 @@ onMounted(load)
                     </div>
                 </div>
             </div>
+
+            <BackupPanel />
 
             <div class="group">
                 <h3>Default schedule</h3>

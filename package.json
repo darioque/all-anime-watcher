@@ -19,6 +19,7 @@
         "probe": "esbuild scripts/probe-source.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/probe.mjs --log-level=warning && node .probe/probe.mjs",
         "check:myanime": "esbuild scripts/check-myanime.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/myanime.mjs --log-level=warning && node .probe/myanime.mjs",
         "check:grouping": "esbuild scripts/check-grouping.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/grouping.mjs --log-level=warning && node .probe/grouping.mjs",
+        "check:backup": "esbuild scripts/check-backup.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/backup.mjs --log-level=warning && node .probe/backup.mjs",
         "check:episodes": "esbuild scripts/check-episodes.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/episodes.mjs --log-level=warning && node .probe/episodes.mjs",
         "check:m3u8": "esbuild scripts/check-m3u8.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/m3u8.mjs --log-level=warning && node .probe/m3u8.mjs"
     },

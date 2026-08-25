@@ -4,6 +4,7 @@ import type { PageInfo, Server } from "~/sources/types"
 import type { Stream } from "~/extractors/types"
 import type { DomainResolution } from "~/background/domains"
 import type { SchedulePolicy, TrackedAnime } from "~/model/types"
+import type { ImportMode, ImportSummary } from "~/model/backup"
 
 /** A source as the UI sees it — no functions, safe to structured-clone. */
 export interface SourceDescriptor {
@@ -79,7 +80,18 @@ export interface MessageMap {
     "library:setSchedule": { req: { key: string; schedule: SchedulePolicy }; res: TrackedAnime | null }
     "scheduler:status": {
         req: Record<string, never>
-        res: { running: boolean; lastRunAt: number; lastRunFound: number }
+        res: { running: boolean; lastRunAt: number; lastRunFound: number; paused: boolean }
+    }
+
+    /** The whole library as a file. Text rather than a Blob: messages are JSON. */
+    "backup:export": { req: Record<string, never>; res: { filename: string; text: string } }
+    /**
+     * Apply a backup file, or — with `dryRun` — work out what it would do and
+     * report that without writing anything.
+     */
+    "backup:import": {
+        req: { text: string; mode: ImportMode; settings: boolean; dryRun?: boolean }
+        res: ImportSummary & { mode: ImportMode; exportedAt: number; appVersion?: string; applied: boolean }
     }
 
     "library:markWatched": {

@@ -7,6 +7,7 @@ import { registerSettingsHandlers } from "./handlers/settings"
 import { registerSourceHandlers } from "./handlers/sources"
 import { registerPlaybackHandlers } from "./handlers/playback"
 import { registerTrackerHandlers } from "./handlers/tracker"
+import { registerBackupHandlers } from "./handlers/backup"
 import { installRules } from "./dnr"
 import { installScheduler } from "./scheduler"
 import { installNotificationListeners } from "./notifications"
@@ -50,6 +51,7 @@ registerSettingsHandlers()
 registerSourceHandlers()
 registerPlaybackHandlers()
 registerTrackerHandlers()
+registerBackupHandlers()
 
 const ready = initialise().catch(error => {
     logger.error("initialisation failed", error)
