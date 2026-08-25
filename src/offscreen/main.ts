@@ -154,7 +154,17 @@ async function download(plan: FetchPlan): Promise<{ url: string; bytes: number }
         announce(true)
 
         const file = await handle.getFile()
-        const url = URL.createObjectURL(file)
+        /*
+         * `slice` with a content type, rather than `new Blob([file], { type })`:
+         * both produce a typed blob, but only this one avoids reading a
+         * several-hundred-megabyte file into memory to do it.
+         *
+         * The type has to be right. Chrome derives a download's extension from
+         * the blob's MIME in preference to the filename it was handed, so an
+         * untyped blob saves as `.txt` no matter what the name says — which is
+         * exactly what the scratch file's `.part` extension produced.
+         */
+        const url = URL.createObjectURL(file.slice(0, file.size, plan.mime))
         running.set(plan.id, { controller, scratch, objectUrl: url })
 
         logger.info(`${plan.id}: assembled ${plan.parts.length} segments, ${Math.round(bytes / 1024 / 1024)} MB`)

@@ -62,6 +62,16 @@ export interface DownloadPart {
 export interface FetchPlan {
     id: string
     filename: string
+    /**
+     * Content type of the finished file.
+     *
+     * Not cosmetic. Chrome picks a download's extension from the blob's MIME
+     * type in preference to the filename it was given, so a blob with no type
+     * gets saved as `.txt` however carefully the name says `.ts`. The scratch
+     * file is `<id>.part`, which OPFS cannot guess a type from, so it has to be
+     * stated here.
+     */
+    mime: string
     /** `#EXT-X-MAP`, written before everything else. */
     initUrl?: string
     parts: DownloadPart[]

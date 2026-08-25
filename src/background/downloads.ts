@@ -387,6 +387,7 @@ async function planFromStream(
             plan: {
                 id: job.id,
                 filename: nameFor(job, anime, "mp4", stream.quality),
+                mime: MIME.mp4,
                 parts: [{ url: stream.url, index: 0 }]
             },
             detail: `${serverName} · direct file`
@@ -436,6 +437,7 @@ async function planFromStream(
         plan: {
             id: job.id,
             filename: nameFor(job, anime, container, chosen),
+            mime: MIME[container],
             ...(playlist.initUrl ? { initUrl: new URL(playlist.initUrl, playlistUrl).toString() } : {}),
             parts
         },
@@ -445,6 +447,13 @@ async function planFromStream(
             (playlist.encryption === "aes-128" ? " · encrypted" : "")
     }
 }
+
+/**
+ * Extension → content type, which Chrome trusts over the filename when deciding
+ * what to call a download. `video/mp2t` is the registered type for the transport
+ * stream that HLS segments actually are.
+ */
+const MIME = { ts: "video/mp2t", mp4: "video/mp4" } as const
 
 function nameFor(job: DownloadJob, anime: TrackedAnime, ext: string, quality?: string): string {
     return fileNameFor(resolve("downloadFilenameTemplate", { anime, sourceId: job.sourceId }), {
