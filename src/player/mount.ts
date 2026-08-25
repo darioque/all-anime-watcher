@@ -18,6 +18,12 @@ export interface PlayerOptions {
     autoAdvance: boolean
     skipIntro: "off" | "button" | "auto"
     skipOutro: "off" | "button" | "auto"
+    /**
+     * Called when the player changes the URL itself, moving to the next episode
+     * without a page load. The content script needs to know so it does not try
+     * to re-read a page the player has already replaced.
+     */
+    onAdoptUrl?: (url: string) => void
 }
 
 export function mountPlayer(identity: PageIdentity, options: PlayerOptions): void {

@@ -33,6 +33,19 @@ if (globals[MARKER]) {
 
 let lastHandledUrl = ""
 
+/**
+ * The player moved to another episode in place.
+ *
+ * It pushes the new URL so the address bar is honest, which the background sees
+ * as a history event and answers by asking us to re-identify. There is nothing
+ * to re-identify: the site's markup was replaced by the player long ago, and
+ * reading it now would find no episode and tear down a working player. Recording
+ * the URL as already handled is what makes that hook a no-op.
+ */
+function adoptUrl(url: string) {
+    lastHandledUrl = url
+}
+
 async function identify() {
     const url = location.href
     if (url === lastHandledUrl && isPlayerMounted()) return
@@ -71,7 +84,8 @@ async function identify() {
         preferredQuality: "1080p",
         autoAdvance: true,
         skipIntro: "button",
-        skipOutro: "button"
+        skipOutro: "button",
+        onAdoptUrl: adoptUrl
     }
     let takeOver = true
     try {
@@ -81,7 +95,8 @@ async function identify() {
             preferredQuality: settings.preferredQuality,
             autoAdvance: settings.autoAdvance,
             skipIntro: settings.skipIntro,
-            skipOutro: settings.skipOutro
+            skipOutro: settings.skipOutro,
+            onAdoptUrl: adoptUrl
         }
         takeOver = settings.takeOverPage
     } catch {

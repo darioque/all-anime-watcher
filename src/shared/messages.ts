@@ -40,6 +40,14 @@ export interface PageIdentity {
      * threshold can ever be reached, because nothing can see inside the frame.
      */
     markOnEmbed?: boolean
+    /**
+     * Whether opening the episode counts as watching it.
+     *
+     * Resolved in the background like `markOnEmbed`. It matters for the in-place
+     * episode swap in particular: nothing navigates, so nothing re-runs the
+     * tracking that a page load would have done.
+     */
+    markOnOpen?: boolean
     error?: string
 }
 
@@ -147,6 +155,18 @@ export interface MessageMap {
         req: { sourceId: string; server: Server; episodeUrl: string }
         res: { embedUrl: string; extractorId: string | null; streams: Stream[] }
     }
+    /**
+     * Read the next episode's page while the current one is still playing.
+     *
+     * Never a tracking signal — see `identifyEpisode`. With `warm`, the first
+     * server's stream is resolved too, so arriving at the episode costs nothing
+     * but attaching it.
+     */
+    "playback:prepare": {
+        req: { sourceId: string; episodeUrl: string; warm?: boolean }
+        res: PageIdentity
+    }
+
     "playback:orderServers": {
         req: { sourceId: string; animeKey?: string; servers: Server[] }
         res: Server[]

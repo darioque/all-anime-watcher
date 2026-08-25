@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from "vue"
+import { computed, onBeforeUnmount, onMounted, ref, shallowRef, watch } from "vue"
 import Hls from "hls.js"
 import type { Level } from "hls.js"
 import { send } from "~/shared/messages"
@@ -17,6 +17,14 @@ const props = defineProps<{
     autoAdvance: boolean
     skipIntro: "off" | "button" | "auto"
     skipOutro: "off" | "button" | "auto"
+    /**
+     * Tell the content script we changed the URL ourselves.
+     *
+     * Without it the background sees a history event, calls the route hook, and
+     * the content script re-identifies the page — reading the DOM we have already
+     * replaced with the player, and finding no episode in it.
+     */
+    onAdoptUrl?: (url: string) => void
 }>()
 
 const video = ref<HTMLVideoElement | null>(null)
@@ -24,6 +32,14 @@ const hls = shallowRef<Hls | null>(null)
 
 const status = ref<"idle" | "resolving" | "ready" | "error">("idle")
 const message = ref("")
+/**
+ * The episode being played *now*.
+ *
+ * A ref rather than the prop, because moving to the next episode no longer means
+ * loading a page — the player swaps identity in place and everything downstream
+ * has to follow it. The prop is only the starting point.
+ */
+const current = ref<PageIdentity>(props.identity)
 const servers = ref<Server[]>(props.identity.servers ?? [])
 const activeServer = ref<number>(-1)
 /** Servers that already failed this session, so fallback doesn't loop over them. */
@@ -57,9 +73,14 @@ const showHelp = ref(false)
  * start working without a reload.
  */
 const trackedKey = ref<string | undefined>(props.identity.key)
+/** The next episode's page, read ahead so switching costs no navigation. */
+const prepared = ref<{ url: string; identity: PageIdentity } | null>(null)
+/** Which episode the look-ahead has already been asked for, so it runs once. */
+let preparedFor = ""
+let warmedFor = ""
 const adding = ref(false)
 
-const info = computed(() => props.identity.pageInfo)
+const info = computed(() => current.value.pageInfo)
 const title = computed(() => (info.value ? `${info.value.title} — Episode ${info.value.number}` : "Loading…"))
 
 /** The series' episodes, ascending, for the navigator. */
@@ -78,19 +99,128 @@ const nextEp = computed(() =>
 )
 
 /**
- * Navigate by loading the episode's own page.
+ * Move to another episode.
  *
- * The background re-injects on arrival, so this is a full round trip rather than
- * AMR's in-place chapter swap. It is the honest version for now: each episode
- * page carries its own server list, so staying put would mean re-fetching and
- * re-parsing that page anyway. Loading it in place is an optimisation, not a
- * shortcut.
+ * In place when the page has already been read ahead, which is the common case
+ * for "next" — nothing navigates, nothing reloads, and the switch costs only
+ * whatever attaching the video costs. Otherwise the old way: load the episode's
+ * own page and let the background re-inject on arrival.
+ *
+ * Going *back* is deliberately not prefetched. It is rare, and reading a page
+ * per direction would double the look-ahead traffic on every site for a button
+ * most people press by accident.
  */
 function goTo(episode: Episode | undefined) {
     if (!episode) return
     reportProgress()
+
+    if (prepared.value?.url === episode.url && prepared.value.identity.isEpisode) {
+        void swapTo(episode, prepared.value.identity)
+        return
+    }
+
     window.location.href = episode.url
 }
+
+/**
+ * Switch episode without leaving the page.
+ *
+ * Everything the previous episode accumulated has to go, and forgetting one of
+ * them is the kind of bug that only shows up three episodes in: a dead server
+ * still marked failed, the last episode's subtitles still attached, an intro
+ * marked as already skipped. Hence resetting the whole set in one place rather
+ * than where each is set.
+ */
+async function swapTo(episode: Episode, identity: PageIdentity) {
+    teardown()
+    releaseTracks(subtitles.value)
+
+    current.value = identity
+    servers.value = identity.servers ?? []
+    failedServers.value = new Set()
+    activeServer.value = -1
+    embedded.value = null
+    embedFallback.value = null
+    streamLabel.value = ""
+    subtitles.value = []
+    activeSubtitle.value = -1
+    skips.value = {}
+    skipped.value = new Set()
+    inSkip.value = null
+    lastReported = -1
+    prepared.value = null
+    status.value = "resolving"
+    message.value = ""
+
+    /*
+     * The address bar has to follow, or the page is lying about what it shows and
+     * a reload or a shared link lands somewhere else. The content script is told
+     * first: the background sees the history event and asks it to re-identify,
+     * which would read the DOM the player has already replaced.
+     */
+    props.onAdoptUrl?.(episode.url)
+    try {
+        history.pushState(null, "", episode.url)
+    } catch {
+        // Cross-origin or a sandboxed frame. Playback still works; only the URL
+        // is stale, which is worth far less than the reload it would cost.
+    }
+
+    document.title = title.value
+
+    /*
+     * Nothing navigated, so nothing re-ran the tracking a page load would have
+     * done. The background resolved whether opening counts as watching when it
+     * read the page; honouring it here is what keeps the watch position moving.
+     */
+    if (identity.markOnOpen !== false) markWatchedHere()
+
+    if (servers.value.length === 0) {
+        status.value = "error"
+        message.value = "That episode's page didn't offer any video servers."
+        return
+    }
+
+    await playServer(0, true)
+}
+
+/**
+ * Read the next episode's page while this one is still playing.
+ *
+ * The page read is cheap and never goes stale, so it happens as soon as there is
+ * something to read. The *stream* behind it is signed and short-lived, so it is
+ * only warmed once the episode is well along — close enough to when it would
+ * actually be used.
+ */
+function prepareNext(warm: boolean) {
+    const episode = nextEp.value
+    const sourceId = current.value.sourceId
+    if (!episode || !sourceId) return
+
+    if (warm ? warmedFor === episode.url : preparedFor === episode.url) return
+    if (warm) warmedFor = episode.url
+    else preparedFor = episode.url
+
+    void send("playback:prepare", { sourceId, episodeUrl: episode.url, warm })
+        .then(identity => {
+            if (nextEp.value?.url !== episode.url) return
+            if (identity.isEpisode) prepared.value = { url: episode.url, identity }
+        })
+        .catch(error => console.debug("[AAW] look-ahead failed", error))
+}
+
+/** How far in before the next episode's stream is worth resolving. */
+const WARM_AT = 0.6
+
+/*
+ * One trigger for every way the next episode can become known: the episode list
+ * arriving after mount, a swap moving the pointer along, the list being reloaded
+ * when the series is followed from the player. Watching the value itself beats
+ * calling this from each of those and eventually missing one.
+ */
+watch(nextEp, episode => {
+    if (episode) prepareNext(false)
+})
 
 /** Bare hostname, for labelling an embed the viewer is being handed. */
 function hostLabel(url: string): string {
@@ -117,7 +247,7 @@ let lastReported = -1
  */
 async function playServer(index: number, auto = false): Promise<void> {
     const server = servers.value[index]
-    if (!server || !info.value || !props.identity.sourceId) return
+    if (!server || !info.value || !current.value.sourceId) return
 
     activeServer.value = index
     status.value = "resolving"
@@ -126,7 +256,7 @@ async function playServer(index: number, auto = false): Promise<void> {
 
     try {
         const result = await send("playback:streams", {
-            sourceId: props.identity.sourceId,
+            sourceId: current.value.sourceId,
             server,
             episodeUrl: info.value.episodeUrl
         })
@@ -216,7 +346,7 @@ async function attach(stream: Stream, index: number, viaProxy = false) {
         embedded.value = stream.url
         status.value = "ready"
         message.value = ""
-        if (props.identity.markOnEmbed !== false) markWatchedHere()
+        if (current.value.markOnEmbed !== false) markWatchedHere()
         return
     }
 
@@ -510,11 +640,11 @@ function markWatchedHere() {
  * different answer, or none.
  */
 async function addToLibrary() {
-    if (!info.value || !props.identity.sourceId || adding.value) return
+    if (!info.value || !current.value.sourceId || adding.value) return
     adding.value = true
     try {
         const anime = await send("library:add", {
-            sourceId: props.identity.sourceId,
+            sourceId: current.value.sourceId,
             seriesUrl: info.value.seriesUrl,
             seriesId: info.value.seriesId,
             title: info.value.title
@@ -522,7 +652,7 @@ async function addToLibrary() {
         if (!anime) return
         trackedKey.value = anime.key
         await loadEpisodeList()
-        if (embedded.value && props.identity.markOnEmbed !== false) markWatchedHere()
+        if (embedded.value && current.value.markOnEmbed !== false) markWatchedHere()
     } catch (error) {
         message.value = error instanceof Error ? error.message : String(error)
     } finally {
@@ -563,6 +693,12 @@ function reportProgress() {
         positionSec,
         ...(Number.isFinite(element.duration) ? { durationSec: Math.floor(element.duration) } : {})
     }).catch(() => undefined)
+
+    // Riding the progress tick rather than its own timer: it already runs at a
+    // sensible cadence and only while something is actually playing.
+    if (Number.isFinite(element.duration) && element.duration > 0) {
+        if (element.currentTime / element.duration >= WARM_AT) prepareNext(true)
+    }
 }
 
 // ------------------------------------------------------------------ lifecycle

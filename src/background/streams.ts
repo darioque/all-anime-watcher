@@ -23,7 +23,58 @@ export interface ResolvedStreams {
  * would drift: the Referer rules below took three attempts to get right, and
  * only one of the two copies would have received the fixes.
  */
+/**
+ * Recently resolved streams, so a warmed one is ready when the viewer arrives.
+ *
+ * Short-lived on purpose. Extracted URLs are routinely signed with a token that
+ * expires, and a cache that outlives one produces a dead stream that looks like
+ * a dead server. Three minutes is long enough to cover "warm it near the end of
+ * an episode, use it at the start of the next" and short enough that a stale
+ * entry is not something you can sit on.
+ */
+const CACHE_TTL_MS = 3 * 60 * 1000
+const cache = new Map<string, { at: number; value: ResolvedStreams }>()
+
+function cacheKey(sourceId: string, episodeUrl: string, server: Server): string {
+    return `${sourceId}|${episodeUrl}|${server.name}|${server.embedUrl ?? ""}`
+}
+
 export async function resolveServerStreams(options: {
+    sourceId: string
+    server: Server
+    episodeUrl: string
+    /** Read from the warm cache when something is there. */
+    allowCached?: boolean
+}): Promise<ResolvedStreams> {
+    const key = cacheKey(options.sourceId, options.episodeUrl, options.server)
+
+    if (options.allowCached) {
+        const hit = cache.get(key)
+        if (hit && Date.now() - hit.at < CACHE_TTL_MS) {
+            logger.debug(`${options.server.name}: served from the warm cache`)
+            return hit.value
+        }
+        cache.delete(key)
+    }
+
+    const resolved = await resolveInner(options)
+
+    // Only a real stream is worth keeping. An `iframe` result means extraction
+    // failed, and caching that would make one bad moment stick for three minutes.
+    if (resolved.extractorId) {
+        cache.set(key, { at: Date.now(), value: resolved })
+        // Unbounded growth would be a slow leak in a worker that can live for
+        // hours; the oldest entries are the ones already past their TTL.
+        if (cache.size > 24) {
+            const oldest = [...cache.entries()].sort((a, b) => a[1].at - b[1].at)[0]
+            if (oldest) cache.delete(oldest[0])
+        }
+    }
+
+    return resolved
+}
+
+async function resolveInner(options: {
     sourceId: string
     server: Server
     episodeUrl: string

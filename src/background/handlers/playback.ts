@@ -7,12 +7,43 @@ import type { Stream } from "~/extractors/types"
 import type { Server } from "~/sources/types"
 import { resolve } from "~/settings/resolver"
 import { resolveServerStreams } from "../streams"
+import { episodeSourceFor, identifyEpisode } from "../identify"
+import { fetchCtxFor } from "~/library/library"
+import { sourceById } from "~/sources/registry"
+import { swapOrigin } from "~/shared/url"
+import type { PageIdentity } from "~/shared/messages"
 import { log } from "~/shared/logger"
 import { bufferToBase64 } from "~/shared/binary"
 
 const logger = log("handler:playback")
 
 const PROXY_TIMEOUT_MS = 30_000
+
+/**
+ * A parsed episode page stays useful much longer than an extracted stream does:
+ * the markup does not expire, only the signed URLs inside it. Ten minutes keeps
+ * a look-ahead alive across a long episode without holding a stale server list
+ * from an earlier session.
+ */
+const PREPARE_TTL_MS = 10 * 60 * 1000
+const prepared = new Map<string, { at: number; identity: PageIdentity }>()
+
+/**
+ * Resolve the server the player would pick, so arriving costs only the attach.
+ *
+ * Fire-and-forget on purpose: a warm-up that fails has cost nothing, and making
+ * the caller wait for it would turn an optimisation into a delay.
+ */
+async function warmFirstServer(sourceId: string, episodeUrl: string, identity: PageIdentity): Promise<void> {
+    const server = identity.servers?.[0]
+    if (!server) return
+    try {
+        await resolveServerStreams({ sourceId, server, episodeUrl })
+        logger.debug(`warmed ${server.name} for ${episodeUrl}`)
+    } catch (error) {
+        logger.debug(`could not warm ${server.name}`, error)
+    }
+}
 
 export function registerPlaybackHandlers() {
     /**
@@ -24,8 +55,46 @@ export function registerPlaybackHandlers() {
      * last step.
      */
     on("playback:streams", async ({ sourceId, server, episodeUrl }) =>
-        resolveServerStreams({ sourceId, server: server as Server, episodeUrl })
+        // `allowCached`: the prefetcher may already have resolved this exact
+        // server for this exact episode moments ago.
+        resolveServerStreams({ sourceId, server: server as Server, episodeUrl, allowCached: true })
     )
+
+    /**
+     * Read the next episode's page ahead of time.
+     *
+     * The expensive part of moving to the next episode was never the video — it
+     * was loading a whole site page, running its scripts, and only then having
+     * something to parse. Fetching and parsing it here while the current episode
+     * is still playing lets the player swap in place, with no navigation at all.
+     *
+     * Deliberately not a tracking signal: looking ahead at episode 48 must not
+     * mark it watched.
+     */
+    on("playback:prepare", async ({ sourceId, episodeUrl, warm }) => {
+        const cached = prepared.get(episodeUrl)
+        if (cached && Date.now() - cached.at < PREPARE_TTL_MS) {
+            if (warm) void warmFirstServer(sourceId, episodeUrl, cached.identity)
+            return cached.identity
+        }
+
+        const source = episodeSourceFor(episodeUrl) ?? sourceById(sourceId)
+        if (!source) throw new Error(`unknown source "${sourceId}"`)
+
+        const ctx = await fetchCtxFor(source)
+        const url = swapOrigin(episodeUrl, ctx.baseUrl)
+        const html = await ctx.text(url)
+
+        const identity = await identifyEpisode({ source, url, html, track: false })
+        prepared.set(episodeUrl, { at: Date.now(), identity })
+        if (prepared.size > 8) prepared.delete([...prepared.keys()][0]!)
+
+        logger.info(
+            `prepared ${url} — ${identity.isEpisode ? `${identity.servers?.length ?? 0} server(s)` : "not an episode"}`
+        )
+        if (warm) void warmFirstServer(sourceId, url, identity)
+        return identity
+    })
 
     /**
      * Order the page's servers by preference so the player can try them in turn
