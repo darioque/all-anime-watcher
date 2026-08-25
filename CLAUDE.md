@@ -462,7 +462,23 @@ family, signed AJAX, embeds on the MegaPlay engine).
    file and the UI says so, since calling it `.mp4` produces something that
    fails to open with no explanation. AES-128 is decrypted; SAMPLE-AES is
    refused by name rather than written out as noise.
-9. breadth and library depth: categories with include/exclude filtering and
-   bulk actions (AMR's model; `TrackedAnime.categories` already exists and is
-   unused) — a source that only carries donghua should seed one — plus the
-   ZoroTheme family, Spanish sources, AniList write-back, stats
+9. **partly done** — categories are in, and so is the next-episode look-ahead.
+
+   *Categories* are two kinds because neither alone is enough: a manual shelf
+   is something only the user can fill, and hand-tagging four hundred series
+   with facts a tracker already knows is how such a feature goes unused. The
+   useful automatic split here is AniList's `countryOfOrigin` — no site says
+   whether it is showing anime or donghua, and the genres do not distinguish
+   them. A source can also declare what it carries (`AnimeSource.categories`);
+   mundodonghua says `["Donghua"]`, which works with no tracker match at all.
+   Chips have three states: ticking narrows (all must match), crossing removes
+   (any is enough).
+
+   *Look-ahead*: the background reads the next episode's page while the current
+   one plays, and the player swaps identity in place with `pushState` instead of
+   navigating. The read is never a tracking signal. Page markup is fetched as
+   soon as it is known; the stream is warmed only at 60% through, because
+   extracted URLs are signed and short-lived.
+
+   Still open: the ZoroTheme family, Spanish sources beyond mundodonghua,
+   AniList write-back (needs OAuth), and stats.
