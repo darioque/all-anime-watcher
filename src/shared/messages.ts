@@ -6,6 +6,8 @@ import type { DomainResolution } from "~/background/domains"
 import type { SchedulePolicy, TrackedAnime } from "~/model/types"
 import type { ImportMode, ImportSummary } from "~/model/backup"
 import type { DownloadJob, DownloadProgress, FetchPlan } from "~/downloads/types"
+import type { LabFetchReport, LabSeriesReport } from "~/lab/types"
+import type { SearchResult } from "~/sources/types"
 
 /** A source as the UI sees it — no functions, safe to structured-clone. */
 export interface SourceDescriptor {
@@ -231,14 +233,19 @@ export interface MessageMap {
      * under the CLI and fails here, which is precisely the class of bug that has
      * cost the most time.
      */
-    "lab:search": { req: { sourceId: string; query: string }; res: { ms: number; result: unknown } }
-    "lab:series": { req: { sourceId: string; url: string }; res: { ms: number; result: unknown } }
+    "lab:search": { req: { sourceId: string; query: string }; res: { ms: number; result: SearchResult[] } }
+    "lab:series": { req: { sourceId: string; url: string }; res: { ms: number; result: LabSeriesReport } }
     "lab:page": { req: { url: string }; res: { ms: number; result: { htmlBytes: number; identity: PageIdentity } } }
     "lab:streams": {
         req: { sourceId: string; episodeUrl: string; server: Server }
-        res: { ms: number; result: unknown }
+        res: { ms: number; result: { embedUrl: string; extractorId: string | null; streams: Stream[] } }
     }
-    "lab:extract": { req: { embedUrl: string; referer?: string }; res: { ms: number; result: unknown } }
+    "lab:extract": {
+        req: { embedUrl: string; referer?: string }
+        res: { ms: number; result: { extractorId: string; streams: Stream[] } }
+    }
+    /** One URL, fetched from in here, with whatever rules are installed. */
+    "lab:fetch": { req: { url: string }; res: { ms: number; result: LabFetchReport } }
     "lab:rules": {
         req: Record<string, never>
         res: {

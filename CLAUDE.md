@@ -162,8 +162,14 @@ scripts/probe-source.mts the CLI Lab page
 | myanime.live | WordPress REST API; no series pages at all | done — probe green |
 | anikototv.to | AnimeKai/AnimeSuge family, signed AJAX | done — probe green |
 
-All four launch sources are in. The remaining phase-4 item is an **in-extension
-Lab page**; `npm run probe` covers the same ground from the CLI for now.
+All four launch sources are in, and the **Lab page** (Settings → Lab) tests one
+end to end: pick a source, press Run, and six chained steps go from its declared
+attributes through search, the episode list, an episode page, a server and the
+extractor to a real fetch of the resulting stream. Each step hands its result to
+the next, so nothing has to be pasted in; where there is a choice — which hit,
+which episode, which server — it takes the obvious one and offers a picker to run
+again from there. The judgements are pure (`src/lab/checks.ts`, `npm run
+check:lab`); only the probes touch the network.
 
 **myanime.live has no series identity to read**, which makes it the hardest of
 the four and a useful template for sites like it. Each post is one episode, and
@@ -424,11 +430,14 @@ family, signed AJAX, embeds on the MegaPlay engine).
 3. **done** — update loop on a nextCheckAt priority queue, notifications,
    schedule policies with per-series overrides, settings panel
 4. **done** — all four launch sources, plus the iframe fallback for unknown
-   hosts. The Lab page is in (`src/ui/lab`, reachable from Settings): it runs a
-   source or extractor step through the real fetch context and the real DNR
-   rules. `npm run probe` is still faster to iterate with, but it cannot
-   reproduce a site that demands a `Referer` — Node can set that header and a
-   browser cannot, which is exactly how the MegaPlay failure hid.
+   hosts. The Lab page is in (`src/ui/lab`, reachable from Settings): a source
+   picker and a Run button drive six chained steps through the real fetch
+   context and the real DNR rules, ending in a fetch of the stream itself.
+   `npm run probe` is still faster to iterate with, but it cannot reproduce a
+   site that demands a `Referer` — Node can set that header and a browser
+   cannot, which is exactly how the MegaPlay failure hid, and which is why the
+   Lab's last step exists. What each step asserts is pure and tested
+   (`src/lab/checks.ts`, `npm run check:lab`).
 5. **done** — domain resolution with health checks and auto-promotion, AniList
    metadata and air times
 6. **done** — skip intro/outro (site offsets first, AniSkip as fallback),

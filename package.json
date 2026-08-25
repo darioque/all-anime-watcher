@@ -10,7 +10,7 @@
     "scripts": {
         "build": "vite build && vite build --config vite.content.config.ts && node scripts/check-dist.mjs",
         "check": "node scripts/check-dist.mjs",
-        "check:all": "npm run --silent check:schedule && npm run --silent check:matching && npm run --silent check:myanime && npm run --silent check:grouping && npm run --silent check:m3u8 && npm run --silent check:episodes && npm run --silent check:backup && npm run --silent check:downloads && npm run --silent check:categories",
+        "check:all": "npm run --silent check:schedule && npm run --silent check:matching && npm run --silent check:myanime && npm run --silent check:grouping && npm run --silent check:m3u8 && npm run --silent check:episodes && npm run --silent check:backup && npm run --silent check:downloads && npm run --silent check:categories && npm run --silent check:lab",
         "check:schedule": "esbuild scripts/check-schedule.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/schedule.mjs --log-level=warning && node .probe/schedule.mjs",
         "check:matching": "esbuild scripts/check-matching.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/matching.mjs --log-level=warning && node .probe/matching.mjs",
         "watch": "vite build --watch --mode development",
@@ -20,6 +20,7 @@
         "probe": "esbuild scripts/probe-source.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/probe.mjs --log-level=warning && node .probe/probe.mjs",
         "check:myanime": "esbuild scripts/check-myanime.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/myanime.mjs --log-level=warning && node .probe/myanime.mjs",
         "check:grouping": "esbuild scripts/check-grouping.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/grouping.mjs --log-level=warning && node .probe/grouping.mjs",
+        "check:lab": "esbuild scripts/check-lab.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/lab.mjs --log-level=warning && node .probe/lab.mjs",
         "check:categories": "esbuild scripts/check-categories.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/categories.mjs --log-level=warning && node .probe/categories.mjs",
         "check:backup": "esbuild scripts/check-backup.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/backup.mjs --log-level=warning && node .probe/backup.mjs",
         "check:downloads": "esbuild scripts/check-downloads.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/downloads.mjs --log-level=warning && node .probe/downloads.mjs",

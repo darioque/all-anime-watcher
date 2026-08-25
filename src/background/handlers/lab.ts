@@ -8,6 +8,8 @@ import type { ExtractCtx } from "~/extractors/types"
 import type { Server } from "~/sources/types"
 import { createFetchCtx } from "~/net/fetcher"
 import { ensureTrailingSlash, swapOrigin } from "~/shared/url"
+import { isMasterPlaylist, playlistVariants, readMediaPlaylist } from "~/shared/m3u8"
+import type { LabFetchReport, LabSeriesReport } from "~/lab/types"
 import { log } from "~/shared/logger"
 
 const logger = log("lab")
@@ -37,17 +39,20 @@ export function registerLabHandlers() {
         const ctx = await fetchCtxFor(source)
         const seriesUrl = swapOrigin(url, ctx.baseUrl)
 
-        return timed(async () => {
+        return timed<LabSeriesReport>(async () => {
             const info = await source.getSeries(seriesUrl, ctx)
             const episodes = await source.getEpisodes(seriesUrl, ctx)
             return {
                 seriesId: source.seriesIdFromUrl(seriesUrl),
                 info,
                 episodeCount: episodes.length,
-                // The whole list is rarely what you need and often hundreds of
-                // entries; the ends are what tells you the numbering is right.
+                // Numbers for all of them, entries for the ends only. Ordering
+                // faults live in the middle of a list; everything else worth
+                // looking at — titles, URLs, variants — is visible at the ends.
+                numbers: episodes.map(episode => episode.number),
                 first: episodes.slice(0, 3),
-                last: episodes.slice(-3)
+                last: episodes.slice(-3),
+                episodePattern: source.episodeUrl.source
             }
         })
     })
@@ -113,7 +118,61 @@ export function registerLabHandlers() {
             json: (url, init) => ctx.json(url, { headers: init?.headers ?? {} })
         }
 
-        return timed(async () => ({ extractorId: extractor.id, streams: await extractor.extract(embedUrl, extractCtx) }))
+        return timed(async () => ({
+            extractorId: extractor.id,
+            streams: await extractor.extract(embedUrl, extractCtx)
+        }))
+    })
+
+    /**
+     * Fetch one URL exactly as playback would, and say what came back.
+     *
+     * The step the CLI probe cannot have. Node's fetch can set Referer and
+     * Origin and a browser's cannot, so a host that demands either answers the
+     * terminal happily and answers the extension with an error page — under a
+     * 200, with a plausible length. Running the same request from in here, after
+     * the stream step has installed that host's rules, is the only way to see it.
+     */
+    on("lab:fetch", async ({ url }) => {
+        return timed<LabFetchReport>(async () => {
+            // Bare fetch on purpose: Referer and Origin are forbidden header
+            // names, so whatever arrives at the host came from a DNR rule. Adding
+            // headers here would test something that never happens.
+            const response = await fetch(url, {
+                credentials: "omit",
+                // A playlist is a few kilobytes and arrives whole regardless; a
+                // progressive file is the episode, and asking for all of it to
+                // find out whether the host answers would download it.
+                headers: { Range: "bytes=0-262143" }
+            })
+            const body = await response.text()
+
+            const master = isMasterPlaylist(body)
+            const playlist = body.trimStart().startsWith("#EXTM3U")
+
+            const kind: LabFetchReport["kind"] = !playlist
+                ? "not a playlist"
+                : master
+                  ? "master playlist"
+                  : "media playlist"
+
+            const entries = !playlist
+                ? 0
+                : master
+                  ? playlistVariants(body).length
+                  : readMediaPlaylist(body).segments.length
+
+            return {
+                url,
+                status: response.status,
+                ok: response.ok,
+                bytes: body.length,
+                contentType: response.headers.get("content-type") ?? "",
+                kind,
+                entries,
+                head: body.slice(0, 400)
+            }
+        })
     })
 
     /**
