@@ -224,6 +224,33 @@ export interface MessageMap {
     "offscreen:cancel": { req: { id: string }; res: boolean }
     "offscreen:release": { req: { id: string }; res: boolean }
 
+    /*
+     * The Lab: run one piece of a source or extractor on demand, inside the
+     * extension. `npm run probe` covers most of this faster, but Node's fetch
+     * can set Referer and a browser's cannot — so a site that demands one works
+     * under the CLI and fails here, which is precisely the class of bug that has
+     * cost the most time.
+     */
+    "lab:search": { req: { sourceId: string; query: string }; res: { ms: number; result: unknown } }
+    "lab:series": { req: { sourceId: string; url: string }; res: { ms: number; result: unknown } }
+    "lab:page": { req: { url: string }; res: { ms: number; result: { htmlBytes: number; identity: PageIdentity } } }
+    "lab:streams": {
+        req: { sourceId: string; episodeUrl: string; server: Server }
+        res: { ms: number; result: unknown }
+    }
+    "lab:extract": { req: { embedUrl: string; referer?: string }; res: { ms: number; result: unknown } }
+    "lab:rules": {
+        req: Record<string, never>
+        res: {
+            id: number
+            requestDomains: string[]
+            initiatorDomains: string[]
+            resourceTypes: string[]
+            setHeaders: string[]
+            removeHeaders: string[]
+        }[]
+    }
+
     "tab:open": { req: { url: string; active?: boolean }; res: boolean }
     "tab:openLibrary": { req: Record<string, never>; res: boolean }
 }

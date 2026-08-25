@@ -1,9 +1,15 @@
 <script setup lang="ts">
+import browser from "webextension-polyfill"
 import { onMounted, ref } from "vue"
 import { send } from "~/shared/messages"
 import type { GlobalSettings } from "~/settings/schema"
 import SchedulePicker from "./SchedulePicker.vue"
 import BackupPanel from "./BackupPanel.vue"
+
+/** Its own tab: probing a source is a sit-down job, not a settings toggle. */
+function openLab() {
+    void send("tab:open", { url: browser.runtime.getURL("src/ui/lab/index.html"), active: true })
+}
 
 const settings = ref<GlobalSettings | null>(null)
 const saving = ref(false)
@@ -349,6 +355,22 @@ onMounted(load)
                     </div>
                     <div class="control">
                         <button id="test-notification" class="btn" @click="testNotification">Send</button>
+                    </div>
+                </div>
+            </div>
+
+            <div class="group">
+                <h3>Lab</h3>
+                <p class="note">
+                    Run one piece of a source or extractor on demand, inside the extension — same fetch context, same
+                    header rules, same registry as real playback. Where a source has broken, this says which step.
+                </p>
+                <div class="field">
+                    <div class="text">
+                        <label for="open-lab">Open the Lab</label>
+                    </div>
+                    <div class="control">
+                        <button id="open-lab" class="btn" @click="openLab">Open</button>
                     </div>
                 </div>
             </div>

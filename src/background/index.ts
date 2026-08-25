@@ -9,6 +9,7 @@ import { registerPlaybackHandlers } from "./handlers/playback"
 import { registerTrackerHandlers } from "./handlers/tracker"
 import { registerBackupHandlers } from "./handlers/backup"
 import { registerDownloadHandlers, resumeInterruptedDownloads } from "./downloads"
+import { registerLabHandlers } from "./handlers/lab"
 import { installRules } from "./dnr"
 import { installScheduler } from "./scheduler"
 import { installNotificationListeners } from "./notifications"
@@ -61,6 +62,7 @@ registerPlaybackHandlers()
 registerTrackerHandlers()
 registerBackupHandlers()
 registerDownloadHandlers()
+registerLabHandlers()
 
 /**
  * Offer built-in shelves added since this profile was set up.

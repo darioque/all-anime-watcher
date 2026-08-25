@@ -424,8 +424,11 @@ family, signed AJAX, embeds on the MegaPlay engine).
 3. **done** — update loop on a nextCheckAt priority queue, notifications,
    schedule policies with per-series overrides, settings panel
 4. **done** — all four launch sources, plus the iframe fallback for unknown
-   hosts. The in-extension Lab page is the one part not built; `npm run probe`
-   covers it from the CLI.
+   hosts. The Lab page is in (`src/ui/lab`, reachable from Settings): it runs a
+   source or extractor step through the real fetch context and the real DNR
+   rules. `npm run probe` is still faster to iterate with, but it cannot
+   reproduce a site that demands a `Referer` — Node can set that header and a
+   browser cannot, which is exactly how the MegaPlay failure hid.
 5. **done** — domain resolution with health checks and auto-promotion, AniList
    metadata and air times
 6. **done** — skip intro/outro (site offsets first, AniSkip as fallback),
