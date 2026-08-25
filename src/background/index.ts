@@ -8,6 +8,7 @@ import { registerSourceHandlers } from "./handlers/sources"
 import { registerPlaybackHandlers } from "./handlers/playback"
 import { registerTrackerHandlers } from "./handlers/tracker"
 import { registerBackupHandlers } from "./handlers/backup"
+import { registerDownloadHandlers, resumeInterruptedDownloads } from "./downloads"
 import { installRules } from "./dnr"
 import { installScheduler } from "./scheduler"
 import { installNotificationListeners } from "./notifications"
@@ -40,6 +41,10 @@ async function initialise() {
     // Dynamic rules persist, so this replaces our own set rather than appending.
     await installRules().catch(error => logger.error("could not install network rules", error))
 
+    // After the router is reachable: a re-queued job pumps immediately, and the
+    // offscreen document it talks to answers on the same channel.
+    await resumeInterruptedDownloads().catch(error => logger.error("could not resume downloads", error))
+
     logger.info(`ready — ${allSources().length} source(s)`)
     return true
 }
@@ -52,6 +57,7 @@ registerSourceHandlers()
 registerPlaybackHandlers()
 registerTrackerHandlers()
 registerBackupHandlers()
+registerDownloadHandlers()
 
 const ready = initialise().catch(error => {
     logger.error("initialisation failed", error)

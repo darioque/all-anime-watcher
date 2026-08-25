@@ -55,7 +55,8 @@ export default defineConfig({
             input: {
                 background: resolve(root, "src/background/index.ts"),
                 popup: resolve(root, "src/ui/popup/index.html"),
-                library: resolve(root, "src/ui/library/index.html")
+                library: resolve(root, "src/ui/library/index.html"),
+                offscreen: resolve(root, "src/offscreen/index.html")
             },
             output: {
                 entryFileNames: "[name].js",

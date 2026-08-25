@@ -1,18 +1,14 @@
 import { on } from "../router"
 import { getAnime } from "~/model/db"
-import { ensureRefererRule } from "../dnr"
 import { fetchSkipTimes } from "~/trackers/aniskip"
-import { fetchCtxFor } from "~/library/library"
 import { orderServers } from "~/library/servers"
-import { sourceById, sourceForUrl } from "~/sources/registry"
-import { extractorFor } from "~/extractors/registry"
-import type { ExtractCtx, Stream } from "~/extractors/types"
+import { sourceForUrl } from "~/sources/registry"
+import type { Stream } from "~/extractors/types"
 import type { Server } from "~/sources/types"
 import { resolve } from "~/settings/resolver"
+import { resolveServerStreams } from "../streams"
 import { log } from "~/shared/logger"
 import { bufferToBase64 } from "~/shared/binary"
-import { isMasterPlaylist, playlistUrls } from "~/shared/m3u8"
-import { ExpectedError } from "~/shared/errors"
 
 const logger = log("handler:playback")
 
@@ -22,99 +18,14 @@ export function registerPlaybackHandlers() {
     /**
      * Turn one server into playable streams. Deferred until the user picks a
      * server, because a page can list ten and only one gets watched.
+     *
+     * The work itself lives in `../streams`, shared with the download queue —
+     * downloading an episode is the same problem as playing it right up to the
+     * last step.
      */
-    on("playback:streams", async ({ sourceId, server, episodeUrl }) => {
-        const source = sourceById(sourceId)
-        if (!source) throw new Error(`unknown source "${sourceId}"`)
-
-        const ctx = await fetchCtxFor(source)
-
-        const resolved = server.embedUrl ?? (await source.resolveServer?.(server as Server, ctx))
-        if (!resolved) throw new Error(`could not resolve server "${server.name}" to an embed URL`)
-
-        // A source may answer with just a URL or with extra detail. Sites that
-        // hand over their own intro/outro offsets are giving better data than any
-        // third party — they measured it against this exact encode.
-        const embedUrl = typeof resolved === "string" ? resolved : resolved.embedUrl
-        const siteSkips = typeof resolved === "string" ? undefined : resolved.skips
-
-        const host = new URL(embedUrl).hostname
-        const extractor = extractorFor(embedUrl)
-
-        /**
-         * No extractor is not a failure any more. Hand back an `iframe` stream so
-         * the host's own player can run inside our chrome — the viewer keeps
-         * episode navigation, the server picker and tracking, and only loses
-         * in-video progress. The player prefers a real stream and only settles
-         * for this once every server has been tried.
-         */
-        if (!extractor) {
-            logger.info(`${server.name}: no extractor for ${host}, offering the embed itself`)
-            return {
-                embedUrl,
-                extractorId: null,
-                streams: [{ url: embedUrl, kind: "iframe" as const, label: host.replace(/^(www|geo)\./, "") }]
-            }
-        }
-
-        const extractCtx: ExtractCtx = {
-            referer: episodeUrl,
-            text: (url, init) => ctx.text(url, { headers: init?.headers ?? {} }),
-            json: (url, init) => ctx.json(url, { headers: init?.headers ?? {} })
-        }
-
-        /*
-         * The embed page itself needs a Referer, and `fetch()` cannot set one —
-         * it is a forbidden header, so the proxy's request arrives bare however
-         * carefully the extractor spells it out. MegaPlay answers such a request
-         * with HTTP 200 and an error page, which reads downstream as "the markup
-         * changed" rather than "the request was rejected".
-         *
-         * The value barely matters — MegaPlay only checks that one is present —
-         * so the source's own origin is used, which is what the site's iframe
-         * would have sent.
-         */
-        await ensureRefererRule(embedUrl, `${ctx.baseUrl}/`)
-
-        try {
-            const streams = await extractor.extract(embedUrl, extractCtx)
-            // The site's own offsets win over anything the host guessed.
-            const withSkips = siteSkips
-                ? streams.map(stream => ({ ...stream, skips: { ...stream.skips, ...siteSkips } }))
-                : streams
-
-            /*
-             * A stream may name a Referer its CDN insists on. Neither the proxy
-             * nor the page can set that header, so it becomes a DNR rule scoped
-             * to the host this particular file came from.
-             *
-             * Subtitle tracks get the same treatment and often need it more:
-             * MegaPlay serves video and captions from two unrelated hosts that
-             * both refuse a request without the embed's Referer.
-             */
-            for (const stream of withSkips) {
-                const referer = stream.headers?.Referer ?? stream.headers?.referer
-                if (!referer) continue
-                for (const target of [stream.url, ...(stream.subtitles ?? []).map(track => track.url)]) {
-                    await ensureRefererRule(target, referer)
-                }
-                if (stream.kind === "hls") await coverPlaylistHosts(stream.url, referer)
-            }
-
-            logger.info(`${server.name} → ${extractor.id} → ${streams.length} stream(s)`)
-            return { embedUrl, extractorId: extractor.id, streams: withSkips }
-        } catch (error) {
-            // An extractor that knows the host but couldn't read it — a deleted
-            // file, a changed player — still leaves the embed itself playable.
-            const detail = error instanceof Error ? error.message : String(error)
-            logger.info(`${server.name}: ${extractor.id} failed (${detail}), offering the embed itself`)
-            return {
-                embedUrl,
-                extractorId: null,
-                streams: [{ url: embedUrl, kind: "iframe" as const, label: host.replace(/^(www|geo)\./, "") }]
-            }
-        }
-    })
+    on("playback:streams", async ({ sourceId, server, episodeUrl }) =>
+        resolveServerStreams({ sourceId, server: server as Server, episodeUrl })
+    )
 
     /**
      * Order the page's servers by preference so the player can try them in turn
@@ -181,57 +92,3 @@ export function registerPlaybackHandlers() {
 }
 
 export type { Stream }
-
-/**
- * Extend a stream's Referer rewrite to the hosts named inside its playlist.
- *
- * An HLS manifest is not one host. MegaPlay serves the manifest from
- * `cdn.watching.onl` and every segment from `cr0x1.cloudvideo.lat`, and both
- * reject a request without the embed's Referer — so a rule covering only the URL
- * the extractor handed back gets the manifest and none of the video. The symptom
- * is not an error: hls.js retries a failing segment for a long time, so it looks
- * like buffering that never ends.
- *
- * Two levels, because that is how deep HLS goes: a master playlist names variant
- * playlists, and a variant names segments. Best-effort throughout — this is
- * insurance, and failing to take it out must not stop playback that might have
- * worked anyway.
- */
-async function coverPlaylistHosts(url: string, referer: string, depth = 0): Promise<void> {
-    if (depth > 1) return
-
-    let text: string
-    try {
-        const response = await fetch(url, {
-            credentials: "include",
-            redirect: "follow",
-            signal: AbortSignal.timeout(15_000)
-        })
-        if (!response.ok) return
-        text = await response.text()
-    } catch (error) {
-        logger.debug(`could not read ${url} to find its other hosts`, error)
-        return
-    }
-
-    const seen = new Set<string>()
-    let firstChild: string | null = null
-
-    for (const raw of playlistUrls(text)) {
-        const absolute = new URL(raw, url).toString()
-        if (firstChild === null) firstChild = absolute
-
-        const host = new URL(absolute).hostname
-        if (host === new URL(url).hostname || seen.has(host)) continue
-        seen.add(host)
-        await ensureRefererRule(absolute, referer)
-    }
-
-    if (seen.size > 0) logger.info(`${new URL(url).hostname} playlist also uses ${[...seen].join(", ")}`)
-
-    // A master playlist's variants sit on its own host, so the segment hosts only
-    // show up one level down.
-    if (firstChild && isMasterPlaylist(text)) {
-        await coverPlaylistHosts(firstChild, referer, depth + 1)
-    }
-}

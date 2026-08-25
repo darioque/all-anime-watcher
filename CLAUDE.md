@@ -440,9 +440,28 @@ family, signed AJAX, embeds on the MegaPlay engine).
 7. **done** — a search page that asks every source at once and groups the
    results by show, and one row per *show* in the library with an expander.
    See "Grouping" below.
-8. downloads (OPFS pipeline) and import/export. Import/export is the only
-   data-transfer path there is, since sync was dropped on purpose, so it has to
-   round-trip losslessly.
+8. **done** — export/import and downloads.
+
+   *Backup* is the only data-transfer path there is, since sync was dropped on
+   purpose. The rule throughout `model/backup.ts` is that records are moved,
+   never rebuilt field by field: a file written by a later version carries keys
+   this build cannot name, and enumerating them would make an older build
+   destroy the newer one's data on any round trip. Two modes — `replace` (the
+   library becomes the file, and the UI says how many series that removes first)
+   and `merge` (the more recently touched record wins each field, except watch
+   history, which is never lost). Merging is symmetric, which is what lets
+   `planImport` tell "changed" from "already identical".
+
+   *Downloads* run in an offscreen document, for two reasons that are both
+   fatal on their own: a service worker has no `URL.createObjectURL`, and it is
+   torn down after thirty seconds while an episode takes minutes. The document
+   is handed a flat list of URLs — every site-specific decision is already made —
+   fetches them in a window of six, writes them to OPFS in playlist order, and
+   *sends* the outcome back rather than replying, because there may be no worker
+   left to receive a reply. Nothing is re-encoded: MPEG-TS segments make a `.ts`
+   file and the UI says so, since calling it `.mp4` produces something that
+   fails to open with no explanation. AES-128 is decrypted; SAMPLE-AES is
+   refused by name rather than written out as noise.
 9. breadth and library depth: categories with include/exclude filtering and
    bulk actions (AMR's model; `TrackedAnime.categories` already exists and is
    unused) — a source that only carries donghua should seed one — plus the

@@ -24,6 +24,7 @@ import TrackerDialog from "./TrackerDialog.vue"
 import RowMenu, { type MenuItem } from "./RowMenu.vue"
 import ConfirmDialog from "./ConfirmDialog.vue"
 import SearchPanel from "./SearchPanel.vue"
+import DownloadsPanel from "./DownloadsPanel.vue"
 import { groupSeries, groupLatest, groupPosition, groupUnwatched, preferredEntry } from "~/library/grouping"
 import type { SeriesGroup } from "~/library/grouping"
 
@@ -54,6 +55,12 @@ const scheduleFor = ref<string | null>(null)
 const episodesFor = ref<string | null>(null)
 const showSettings = ref(false)
 const showSearch = ref(false)
+const showDownloads = ref(false)
+/**
+ * What clicking an episode tile does. Watching is what the panel is usually
+ * open for, so downloading is a deliberate switch rather than a second grid.
+ */
+const pickerMode = ref<"watch" | "download">("watch")
 /** Groups the viewer has opened. Collapsed is the default — the point is fewer rows. */
 const expanded = ref(new Set<string>())
 const grouping = ref(true)
@@ -378,6 +385,33 @@ function openSearch() {
     }
 }
 
+/** Same rule as search and settings: the popup is too narrow, so it defers. */
+function openDownloads() {
+    if (props.variant !== "page") {
+        void send("tab:openLibrary", {})
+        return
+    }
+    showDownloads.value = !showDownloads.value
+    if (showDownloads.value) {
+        showSearch.value = false
+        showSettings.value = false
+        window.scrollTo({ top: 0, behavior: "smooth" })
+    }
+}
+
+async function queueDownload(a: TrackedAnime, number: number) {
+    await withBusy(a.key, async () => {
+        const job = await send("downloads:add", { key: a.key, number, ...(episodeVariant(a, number) ?? {}) })
+        flash(job ? `Queued ${titleOf(a)} E${number}` : `${titleOf(a)} E${number} is already queued`)
+    })
+}
+
+/** The variant the list holds for that number, so sub and dub download apart. */
+function episodeVariant(a: TrackedAnime, number: number): { variant: string } | null {
+    const variant = a.episodes.find(episode => episode.number === number)?.variant
+    return variant ? { variant } : null
+}
+
 function onAdded(anime: TrackedAnime) {
     // Insert rather than reload: a search result added while three sources are
     // still returning should not take the results away.
@@ -548,6 +582,14 @@ defineExpose({ load })
                 </button>
                 <button
                     class="btn icon"
+                    :class="{ primary: showDownloads }"
+                    :title="variant === 'page' ? 'Downloads' : 'Downloads (opens the full library)'"
+                    @click="openDownloads"
+                >
+                    ⇩
+                </button>
+                <button
+                    class="btn icon"
                     :class="{ primary: showSettings }"
                     :title="variant === 'page' ? 'Settings' : 'Settings (opens the full library)'"
                     @click="openSettings"
@@ -564,6 +606,8 @@ defineExpose({ load })
             @added="onAdded"
             @close="showSearch = false"
         />
+
+        <DownloadsPanel v-if="showDownloads && variant === 'page'" @close="showDownloads = false" />
 
         <SettingsPanel v-if="showSettings && variant === 'page'" />
         <SourcesPanel v-if="showSettings && variant === 'page'" />
@@ -724,6 +768,22 @@ defineExpose({ load })
                         <div v-if="episodesFor === a.key" class="episodes-panel">
                             <div class="panel-head">
                                 <span class="panel-title">{{ episodeSpan(a).heading }}</span>
+                                <div class="modes">
+                                    <button
+                                        class="btn tiny"
+                                        :class="{ primary: pickerMode === 'watch' }"
+                                        @click="pickerMode = 'watch'"
+                                    >
+                                        Watch
+                                    </button>
+                                    <button
+                                        class="btn tiny"
+                                        :class="{ primary: pickerMode === 'download' }"
+                                        @click="pickerMode = 'download'"
+                                    >
+                                        Download
+                                    </button>
+                                </div>
                                 <button class="btn tiny" @click="episodesFor = null">Close</button>
                             </div>
                             <div class="episode-grid">
@@ -732,8 +792,8 @@ defineExpose({ load })
                                     :key="`${ep.number}-${ep.variant ?? ''}`"
                                     class="ep"
                                     :data-state="episodeState(a, ep)"
-                                    :title="`${ep.title ?? `Episode ${ep.number}`}${ep.variant ? ` · ${ep.variant}` : ''} — click to watch`"
-                                    @click="watchEpisode(a, ep.number)"
+                                    :title="`${ep.title ?? `Episode ${ep.number}`}${ep.variant ? ` · ${ep.variant}` : ''} — click to ${pickerMode}`"
+                                    @click="pickerMode === 'download' ? queueDownload(a, ep.number) : watchEpisode(a, ep.number)"
                                 >
                                     {{ ep.number }}
                                 </button>
@@ -1220,6 +1280,13 @@ h1 {
     margin: 2px 0 0;
     font-size: 11px;
     color: var(--danger);
+}
+
+.panel-head .modes {
+    display: flex;
+    gap: 4px;
+    margin-left: auto;
+    margin-right: 8px;
 }
 
 .row-note {

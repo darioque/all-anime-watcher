@@ -5,6 +5,7 @@ import type { Stream } from "~/extractors/types"
 import type { DomainResolution } from "~/background/domains"
 import type { SchedulePolicy, TrackedAnime } from "~/model/types"
 import type { ImportMode, ImportSummary } from "~/model/backup"
+import type { DownloadJob, DownloadProgress, FetchPlan } from "~/downloads/types"
 
 /** A source as the UI sees it — no functions, safe to structured-clone. */
 export interface SourceDescriptor {
@@ -163,6 +164,37 @@ export interface MessageMap {
         res: boolean
     }
 
+    "downloads:list": { req: Record<string, never>; res: DownloadJob[] }
+    /** Queue one episode. Returns the job, or null if it is already queued. */
+    "downloads:add": { req: { key: string; number: number; variant?: string }; res: DownloadJob | null }
+    "downloads:cancel": { req: { id: string }; res: boolean }
+    /** Forget finished, failed and cancelled jobs. */
+    "downloads:clearFinished": { req: Record<string, never>; res: number }
+    "downloads:retry": { req: { id: string }; res: DownloadJob | null }
+    /** Offscreen → background, while a job runs. */
+    "downloads:progress": { req: DownloadProgress; res: boolean }
+    /**
+     * Offscreen → background, once the file exists.
+     *
+     * The completion travels this way rather than as the reply to
+     * `offscreen:download` because an episode takes minutes and a service worker
+     * is torn down after thirty seconds of quiet. A reply awaited across that is
+     * a reply nobody is left to receive; a message *sent* to the worker wakes it.
+     */
+    "downloads:assembled": { req: { id: string; url: string; bytes: number }; res: boolean }
+    "downloads:failed": { req: { id: string; error: string }; res: boolean }
+
+    /*
+     * Background → offscreen document. Namespaced so the offscreen listener can
+     * tell at a glance what is addressed to it: every context receives every
+     * runtime message, and a listener that answered one meant for the router
+     * would race it and win about half the time.
+     */
+    /** Acknowledged immediately; the result arrives later as `downloads:assembled`. */
+    "offscreen:download": { req: FetchPlan; res: { started: true } }
+    "offscreen:cancel": { req: { id: string }; res: boolean }
+    "offscreen:release": { req: { id: string }; res: boolean }
+
     "tab:open": { req: { url: string; active?: boolean }; res: boolean }
     "tab:openLibrary": { req: Record<string, never>; res: boolean }
 }
@@ -191,6 +223,31 @@ export type Reply<T> = { ok: true; data: T } | { ok: false; error: string }
  * own router never sees these.
  */
 export const LIBRARY_CHANGED = "ui:libraryChanged"
+
+/**
+ * Background → open pages: "the download queue moved".
+ *
+ * Its own channel rather than a `libraryChanged` reason, because progress ticks
+ * arrive several times a second and the library list re-reads the whole database
+ * when it hears one. A downloads panel wants every tick; the library wants none
+ * of them.
+ */
+export const DOWNLOADS_CHANGED = "aaw:downloadsChanged"
+
+export interface DownloadsChanged {
+    action: typeof DOWNLOADS_CHANGED
+    jobs: DownloadJob[]
+}
+
+export function onDownloadsChanged(handler: (event: DownloadsChanged) => void): () => void {
+    const listener = (message: unknown) => {
+        const event = message as Partial<DownloadsChanged> | undefined
+        if (event?.action === DOWNLOADS_CHANGED) handler(event as DownloadsChanged)
+        return undefined
+    }
+    browser.runtime.onMessage.addListener(listener)
+    return () => browser.runtime.onMessage.removeListener(listener)
+}
 
 export interface LibraryChanged {
     action: typeof LIBRARY_CHANGED
