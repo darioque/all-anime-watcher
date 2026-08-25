@@ -116,9 +116,7 @@ onBeforeUnmount(() => unsubscribe?.())
                 </div>
 
                 <div class="controls">
-                    <span v-if="job.status === 'downloading'" class="pct">
-                        {{ Math.round(job.progress * 100) }}%
-                    </span>
+                    <span v-if="job.status === 'downloading'" class="pct"> {{ Math.round(job.progress * 100) }}% </span>
                     <button v-if="!finished(job)" class="btn tiny" @click="cancel(job)">Cancel</button>
                     <button v-else-if="job.status !== 'done'" class="btn tiny" @click="retry(job)">Retry</button>
                 </div>

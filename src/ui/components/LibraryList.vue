@@ -879,7 +879,11 @@ defineExpose({ load })
                                     class="ep"
                                     :data-state="episodeState(a, ep)"
                                     :title="`${ep.title ?? `Episode ${ep.number}`}${ep.variant ? ` · ${ep.variant}` : ''} — click to ${pickerMode}`"
-                                    @click="pickerMode === 'download' ? queueDownload(a, ep.number) : watchEpisode(a, ep.number)"
+                                    @click="
+                                        pickerMode === 'download'
+                                            ? queueDownload(a, ep.number)
+                                            : watchEpisode(a, ep.number)
+                                    "
                                 >
                                     {{ ep.number }}
                                 </button>
@@ -1212,7 +1216,6 @@ h1 {
 .row[data-state="paused"] .poster {
     opacity: 0.5;
 }
-
 
 .row[data-state="paused"] .stripe {
     background: var(--ink-3);

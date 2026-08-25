@@ -39,9 +39,7 @@ const draft = ref("")
 const genreDraft = ref("")
 const bulkTarget = ref("")
 
-const sourceClaims = computed(() =>
-    Object.fromEntries(props.sources.map(source => [source.id, source.categories]))
-)
+const sourceClaims = computed(() => Object.fromEntries(props.sources.map(source => [source.id, source.categories])))
 
 const counts = computed(() => categoryCounts(props.library, props.categories, sourceClaims.value))
 

@@ -380,7 +380,8 @@ async function planFromStream(
     serverName: string
 ): Promise<{ plan: FetchPlan; detail: string }> {
     const wanted = resolve("downloadQuality", { anime, sourceId: job.sourceId })
-    const preference = wanted === "same-as-playback" ? resolve("preferredQuality", { anime, sourceId: job.sourceId }) : wanted
+    const preference =
+        wanted === "same-as-playback" ? resolve("preferredQuality", { anime, sourceId: job.sourceId }) : wanted
 
     if (stream.kind === "mp4") {
         return {

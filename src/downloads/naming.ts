@@ -58,15 +58,18 @@ export function fileNameFor(template: string, fields: NameFields): string {
      * dash looks like the title was cut off rather than like a field being
      * absent. Separators only — "E{ep}" keeps its E.
      */
-    const filled = template.replace(/([ \t]*[-_–—]?[ \t]*)?\{(\w+)\}/g, (whole, lead: string | undefined, name: string) => {
-        const value = values[name]
-        // An unknown placeholder is left as written rather than blanked: seeing
-        // "{titel}" in the filename says what is wrong, an empty gap does not.
-        if (value === undefined) return whole
-        const safe = name === "ext" ? value.replace(ILLEGAL, "-") : segmentSafe(value)
-        if (safe === "") return ""
-        return `${lead ?? ""}${safe}`
-    })
+    const filled = template.replace(
+        /([ \t]*[-_–—]?[ \t]*)?\{(\w+)\}/g,
+        (whole, lead: string | undefined, name: string) => {
+            const value = values[name]
+            // An unknown placeholder is left as written rather than blanked: seeing
+            // "{titel}" in the filename says what is wrong, an empty gap does not.
+            if (value === undefined) return whole
+            const safe = name === "ext" ? value.replace(ILLEGAL, "-") : segmentSafe(value)
+            if (safe === "") return ""
+            return `${lead ?? ""}${safe}`
+        }
+    )
 
     const segments = filled
         .split("/")

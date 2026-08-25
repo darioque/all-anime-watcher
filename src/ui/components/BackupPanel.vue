@@ -202,9 +202,15 @@ function message(error: unknown): string {
             <p v-if="busy === 'preview'" class="faint">Reading…</p>
             <template v-else-if="preview">
                 <ul class="summary">
-                    <li><strong>{{ preview.added }}</strong> series would be added</li>
-                    <li><strong>{{ preview.updated }}</strong> already here would be updated</li>
-                    <li v-if="preview.unchanged > 0"><strong>{{ preview.unchanged }}</strong> are already identical</li>
+                    <li>
+                        <strong>{{ preview.added }}</strong> series would be added
+                    </li>
+                    <li>
+                        <strong>{{ preview.updated }}</strong> already here would be updated
+                    </li>
+                    <li v-if="preview.unchanged > 0">
+                        <strong>{{ preview.unchanged }}</strong> are already identical
+                    </li>
                     <li v-if="mode === 'merge' && preview.localOnly > 0">
                         <strong>{{ preview.localOnly }}</strong> here but not in the file would be left alone
                     </li>
@@ -217,12 +223,10 @@ function message(error: unknown): string {
             </template>
 
             <div class="actions">
-                <button
-                    class="btn primary"
-                    :disabled="busy !== null || !preview"
-                    @click="apply"
-                >
-                    {{ busy === "import" ? "Importing…" : willRemove > 0 ? `Replace, removing ${willRemove}` : "Import" }}
+                <button class="btn primary" :disabled="busy !== null || !preview" @click="apply">
+                    {{
+                        busy === "import" ? "Importing…" : willRemove > 0 ? `Replace, removing ${willRemove}` : "Import"
+                    }}
                 </button>
                 <button class="btn" :disabled="busy !== null" @click="cancel">Cancel</button>
             </div>

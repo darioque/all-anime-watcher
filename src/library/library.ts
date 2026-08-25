@@ -381,11 +381,7 @@ export async function setCategories(key: string, categories: string[]): Promise<
 }
 
 /** The same, across a selection. Returns how many entries actually changed. */
-export async function bulkCategory(
-    keys: string[],
-    categoryId: string,
-    action: "add" | "remove"
-): Promise<number> {
+export async function bulkCategory(keys: string[], categoryId: string, action: "add" | "remove"): Promise<number> {
     const changed: TrackedAnime[] = []
 
     for (const key of keys) {
@@ -404,7 +400,9 @@ export async function bulkCategory(
     }
 
     if (changed.length > 0) await db.putManyAnime(changed)
-    logger.info(`${action === "add" ? "added" : "removed"} ${changed.length} series ${action === "add" ? "to" : "from"} ${categoryId}`)
+    logger.info(
+        `${action === "add" ? "added" : "removed"} ${changed.length} series ${action === "add" ? "to" : "from"} ${categoryId}`
+    )
     return changed.length
 }
 

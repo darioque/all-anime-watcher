@@ -37,7 +37,9 @@ async function create(): Promise<void> {
 }
 
 export async function hasDocument(): Promise<boolean> {
-    const contexts = await chrome.runtime.getContexts({ contextTypes: ["OFFSCREEN_DOCUMENT" as chrome.runtime.ContextType] })
+    const contexts = await chrome.runtime.getContexts({
+        contextTypes: ["OFFSCREEN_DOCUMENT" as chrome.runtime.ContextType]
+    })
     return contexts.length > 0
 }
 
