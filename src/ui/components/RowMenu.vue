@@ -87,6 +87,23 @@ onBeforeUnmount(() => {
     display: inline-block;
 }
 
+/*
+ * Lifted only while it is open, so the dropdown paints above the rows that
+ * follow it rather than behind them.
+ *
+ * The z-index has to sit here rather than on `.menu`, because `.menu` is
+ * absolutely positioned *inside* this element: raising it only reorders it
+ * against its own siblings. This element is what competes with the other rows.
+ *
+ * A row that establishes a stacking context of its own — anything with an
+ * opacity, transform or filter — defeats this, which is exactly how the bug
+ * appeared: unfollowed rows were dimmed with `opacity`, so their menus were
+ * trapped and unclickable while every other row's worked.
+ */
+.menu-root:has(.menu) {
+    z-index: 40;
+}
+
 .trigger {
     font-size: 13px;
     line-height: 1;

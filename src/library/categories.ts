@@ -32,6 +32,25 @@ export type CategoryRule =
     | { kind: "status"; value: string }
     /** Everything from one site. */
     | { kind: "source"; value: string }
+    /**
+     * How the entry is doing, rather than what it is.
+     *
+     * These are the shelves you want to see a *count* on. "Failing" sitting at
+     * zero is the normal state and reads as reassurance; the moment it does not,
+     * one click shows which series stopped working — which beats scrolling a
+     * library looking for the small red line under a row.
+     */
+    | { kind: "state"; value: SeriesState }
+
+export type SeriesState =
+    /** At least one check in a row has failed. */
+    | "failing"
+    /** Not followed: still listed, but out of the badge and the notifications. */
+    | "unfollowed"
+    /** Not polled: never checked for new episodes. */
+    | "unchecked"
+    /** Followed, polled, and something is out that has not been watched. */
+    | "unwatched"
 
 export interface Category {
     /** Stable; `anime.categories` holds these, so renaming an id orphans membership. */
@@ -60,11 +79,13 @@ export type SourceCategories = Record<string, string[] | undefined>
  * at once and a series never carries a stale tag from a rule that no longer
  * exists.
  */
-export function categoriesOf(
-    anime: Pick<TrackedAnime, "categories" | "meta" | "sourceId">,
-    categories: Category[],
-    sources: SourceCategories = {}
-): string[] {
+/** The fields membership is decided from. */
+export type Categorisable = Pick<
+    TrackedAnime,
+    "categories" | "meta" | "sourceId" | "follow" | "poll" | "failCount" | "episodes" | "lastWatched"
+>
+
+export function categoriesOf(anime: Categorisable, categories: Category[], sources: SourceCategories = {}): string[] {
     const manual = new Set(anime.categories ?? [])
     const claimed = (sources[anime.sourceId] ?? []).map(name => name.toLowerCase())
 
@@ -80,17 +101,19 @@ export function categoriesOf(
              */
             if (claimed.includes(category.name.toLowerCase())) return true
 
-            return matchesRule(category.rule, anime.meta, anime.sourceId)
+            return matchesRule(category.rule, anime)
         })
         .map(category => category.id)
 }
 
-function matchesRule(rule: CategoryRule, meta: SeriesMeta | undefined, sourceId: string): boolean {
+function matchesRule(rule: CategoryRule, anime: Categorisable): boolean {
+    const meta: SeriesMeta | undefined = anime.meta
+
     switch (rule.kind) {
         case "manual":
             return false
         case "source":
-            return sourceId === rule.value
+            return anime.sourceId === rule.value
         case "country":
             return meta?.countryOfOrigin === rule.value
         case "format":
@@ -99,6 +122,24 @@ function matchesRule(rule: CategoryRule, meta: SeriesMeta | undefined, sourceId:
             return meta?.status === rule.value
         case "genre":
             return (meta?.genres ?? []).some(genre => genre.toLowerCase() === rule.value.toLowerCase())
+        case "state":
+            return matchesState(rule.value, anime)
+    }
+}
+
+function matchesState(state: SeriesState, anime: Categorisable): boolean {
+    switch (state) {
+        case "failing":
+            return (anime.failCount ?? 0) > 0
+        case "unfollowed":
+            return !anime.follow
+        case "unchecked":
+            return !anime.poll
+        case "unwatched": {
+            if (!anime.follow) return false
+            const from = anime.lastWatched?.number
+            return anime.episodes.some(episode => from === undefined || episode.number > from)
+        }
     }
 }
 
@@ -149,8 +190,24 @@ export function defaultCategories(): Category[] {
         { id: "cat-aeni", name: "Aeni", rule: { kind: "country", value: "KR" } },
         { id: "cat-airing", name: "Airing", rule: { kind: "status", value: "RELEASING" } },
         { id: "cat-finished", name: "Finished", rule: { kind: "status", value: "FINISHED" } },
-        { id: "cat-movies", name: "Movies", rule: { kind: "format", value: "MOVIE" } }
+        { id: "cat-movies", name: "Movies", rule: { kind: "format", value: "MOVIE" } },
+        { id: "cat-failing", name: "Failing", rule: { kind: "state", value: "failing" } },
+        { id: "cat-unfollowed", name: "Not following", rule: { kind: "state", value: "unfollowed" } },
+        { id: "cat-unchecked", name: "Not checking", rule: { kind: "state", value: "unchecked" } }
     ]
+}
+
+/**
+ * Built-in shelves the user has not been offered yet.
+ *
+ * Not simply "the defaults that are missing": a shelf deleted on purpose must
+ * stay deleted, so what is tracked is which ones have ever been *offered*. A
+ * later version adding a built-in gets it seeded once; a user who threw one away
+ * never sees it again.
+ */
+export function unseededCategories(existing: Category[], seeded: string[]): Category[] {
+    const known = new Set([...existing.map(category => category.id), ...seeded])
+    return defaultCategories().filter(category => !known.has(category.id))
 }
 
 /**
@@ -173,7 +230,7 @@ export function genresInLibrary(library: Pick<TrackedAnime, "meta">[]): { genre:
 
 /** How many entries are in each category, for the chip labels. */
 export function categoryCounts(
-    library: Pick<TrackedAnime, "categories" | "meta" | "sourceId">[],
+    library: Categorisable[],
     categories: Category[],
     sources: SourceCategories = {}
 ): Record<string, number> {

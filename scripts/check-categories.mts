@@ -17,10 +17,11 @@ import {
     matchesCategories,
     newCategory,
     pruneFilter,
+    unseededCategories,
     type Category,
     type CategoryFilter
 } from "~/library/categories"
-import type { TrackedAnime } from "~/model/types"
+import type { Categorisable } from "~/library/categories"
 
 let failures = 0
 
@@ -31,11 +32,15 @@ function eq(label: string, actual: unknown, expected: unknown) {
     console.log(`  ${a === b ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m"} ${label}${a === b ? "" : ` — got ${a}`}`)
 }
 
-type Entry = Pick<TrackedAnime, "categories" | "meta" | "sourceId">
+type Entry = Categorisable
 
 const entry = (overrides: Partial<Entry> = {}): Entry => ({
     sourceId: "myanime",
     categories: [],
+    follow: true,
+    poll: true,
+    failCount: 0,
+    episodes: [],
     ...overrides
 })
 
@@ -158,6 +163,57 @@ eq(
     categoriesOf(entry({ meta: { genres: ["action"] } }), withGenre).length,
     1
 )
+
+console.log("\n\x1b[1mstate shelves\x1b[0m\n")
+
+/*
+ * These are the shelves worth a visible count. "Failing" at zero reads as
+ * reassurance; the moment it does not, one click says which series stopped
+ * working — which beats scrolling a library hunting for a small red line.
+ */
+eq("a series whose checks are failing lands on Failing", categoriesOf(entry({ failCount: 2 }), cats), [id("Failing")])
+eq("a healthy one does not", categoriesOf(entry({ failCount: 0 }), cats).includes(id("Failing")), false)
+eq("an unfollowed series is on Not following", categoriesOf(entry({ follow: false }), cats), [id("Not following")])
+eq("an unpolled one is on Not checking", categoriesOf(entry({ poll: false }), cats), [id("Not checking")])
+eq(
+    "and a series can be on both at once",
+    categoriesOf(entry({ follow: false, poll: false }), cats).length,
+    2
+)
+// Crossing these is the filter the whole thing is for: "show me the library
+// minus the ones I have paused".
+eq(
+    "crossing them hides exactly those",
+    matchesCategories(categoriesOf(entry({ poll: false }), cats), { [id("Not checking")]: "exclude" }),
+    false
+)
+eq(
+    "and leaves the rest",
+    matchesCategories(categoriesOf(entry(), cats), { [id("Not checking")]: "exclude" }),
+    true
+)
+
+console.log("\n\x1b[1mseeding built-ins into an existing profile\x1b[0m\n")
+
+/*
+ * Settings are stored whole and merged over the defaults, so a `categories`
+ * array written by an earlier version wins outright and a newly added built-in
+ * would never appear. Seeding by id fixes that — but "add the defaults that are
+ * missing" and "undo a deletion" are the same statement unless what has been
+ * *offered* is tracked separately.
+ */
+const oldProfile = cats.filter(category => category.rule.kind !== "state")
+eq("a profile from before state shelves gets them", unseededCategories(oldProfile, oldProfile.map(c => c.id)).length, 3)
+eq("a current profile gets nothing", unseededCategories(cats, cats.map(c => c.id)).length, 0)
+eq(
+    "and a shelf deleted on purpose stays deleted",
+    unseededCategories(
+        cats.filter(category => category.id !== "cat-movies"),
+        cats.map(c => c.id)
+    ).length,
+    0
+)
+eq("a brand-new profile is seeded once", unseededCategories([], []).length, defaultCategories().length)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

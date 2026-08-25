@@ -13,7 +13,8 @@ import { installRules } from "./dnr"
 import { installScheduler } from "./scheduler"
 import { installNotificationListeners } from "./notifications"
 import { refreshBadge } from "./badge"
-import { loadSettings, loadSourceSettings } from "~/settings/storage"
+import { cachedSettings, loadSettings, loadSourceSettings, patchSettings } from "~/settings/storage"
+import { unseededCategories } from "~/library/categories"
 import { allSources } from "~/sources/registry"
 import { ensureSourceState } from "~/library/library"
 import { log, setLogLevel } from "~/shared/logger"
@@ -37,6 +38,8 @@ async function initialise() {
     await refreshBadge()
     await applyToolbarBehaviour(settings.openInTab)
 
+    await seedNewCategories()
+
     // Referer/Origin rewrites for video CDNs, and any opt-in CSP removal.
     // Dynamic rules persist, so this replaces our own set rather than appending.
     await installRules().catch(error => logger.error("could not install network rules", error))
@@ -58,6 +61,26 @@ registerPlaybackHandlers()
 registerTrackerHandlers()
 registerBackupHandlers()
 registerDownloadHandlers()
+
+/**
+ * Offer built-in shelves added since this profile was set up.
+ *
+ * Settings are stored as a whole object and merged over the defaults, so a
+ * `categories` array written by an earlier version wins outright — a shelf added
+ * in a later one would never appear. Seeding by id, and remembering what has
+ * been seeded, adds it exactly once and leaves a deleted one deleted.
+ */
+async function seedNewCategories(): Promise<void> {
+    const settings = cachedSettings()
+    const missing = unseededCategories(settings.categories ?? [], settings.seededCategories ?? [])
+    if (missing.length === 0) return
+
+    await patchSettings({
+        categories: [...(settings.categories ?? []), ...missing],
+        seededCategories: [...(settings.seededCategories ?? []), ...missing.map(category => category.id)]
+    })
+    logger.info(`added ${missing.length} new built-in shelf/shelves: ${missing.map(c => c.name).join(", ")}`)
+}
 
 const ready = initialise().catch(error => {
     logger.error("initialisation failed", error)

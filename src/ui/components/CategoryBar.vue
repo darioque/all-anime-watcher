@@ -96,8 +96,17 @@ function describe(category: Category): string {
             return category.rule.value.toLowerCase().replace(/_/g, " ")
         case "source":
             return `everything from ${category.rule.value}`
+        case "state":
+            return STATE_WORDS[category.rule.value]
     }
 }
+
+const STATE_WORDS = {
+    failing: "the last check failed",
+    unfollowed: "not followed",
+    unchecked: "not checked for new episodes",
+    unwatched: "something new to watch"
+} as const
 
 const active = computed(() => Object.keys(props.filter).length > 0)
 </script>

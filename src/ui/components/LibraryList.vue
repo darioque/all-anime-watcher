@@ -634,38 +634,41 @@ defineExpose({ load })
                 >
                     <span :class="{ spin: checking }">⟳</span>
                 </button>
+                <!--
+                    The popup keeps two buttons, not six. Search, downloads and
+                    settings all did the same thing there — open the full library
+                    — which is what the ⤢ button says it does. Five buttons and
+                    two pills in a 380px popup pushed the title out from under
+                    itself for no gained ability.
+                -->
+                <template v-if="variant === 'page'">
+                    <button
+                        class="btn icon"
+                        :class="{ primary: showSearch }"
+                        title="Find a series to follow"
+                        @click="openSearch"
+                    >
+                        ⌕
+                    </button>
+                    <button
+                        class="btn icon"
+                        :class="{ primary: showDownloads }"
+                        title="Downloads"
+                        @click="openDownloads"
+                    >
+                        ⇩
+                    </button>
+                    <button class="btn icon" :class="{ primary: showSettings }" title="Settings" @click="openSettings">
+                        ⚙
+                    </button>
+                </template>
                 <button
+                    v-else
                     class="btn icon"
-                    :class="{ primary: showSearch }"
-                    :title="variant === 'page' ? 'Find a series to follow' : 'Find a series (opens the full library)'"
-                    @click="openSearch"
-                >
-                    ⌕
-                </button>
-                <button class="btn icon" title="Reload the list" @click="load">↻</button>
-                <button
-                    v-if="variant === 'popup'"
-                    class="btn icon"
-                    title="Open the full library"
+                    title="Open the full library — search, downloads and settings live there"
                     @click="send('tab:openLibrary', {})"
                 >
                     ⤢
-                </button>
-                <button
-                    class="btn icon"
-                    :class="{ primary: showDownloads }"
-                    :title="variant === 'page' ? 'Downloads' : 'Downloads (opens the full library)'"
-                    @click="openDownloads"
-                >
-                    ⇩
-                </button>
-                <button
-                    class="btn icon"
-                    :class="{ primary: showSettings }"
-                    :title="variant === 'page' ? 'Settings' : 'Settings (opens the full library)'"
-                    @click="openSettings"
-                >
-                    ⚙
                 </button>
             </div>
         </header>
@@ -1016,6 +1019,10 @@ h1 {
     font-weight: 600;
     letter-spacing: -0.01em;
     white-space: nowrap;
+    /* Truncate rather than overflow: without this the title ran on underneath
+       the toolbar instead of giving way to it. */
+    overflow: hidden;
+    text-overflow: ellipsis;
 }
 
 .page h1 {
@@ -1026,6 +1033,9 @@ h1 {
     display: flex;
     align-items: center;
     gap: 5px;
+    /* Never squeezed: the title gives way instead, because a clipped title is
+       still readable and a clipped button row is not usable. */
+    flex: 0 0 auto;
 }
 
 .pill {
@@ -1179,9 +1189,30 @@ h1 {
     background: var(--state-warn);
 }
 
+/*
+ * Muted by colour rather than `opacity`.
+ *
+ * Any opacity below 1 creates a stacking context, which trapped the row menu's
+ * dropdown inside the row: its z-index stopped competing with the rows below it,
+ * so on an unfollowed series the menu opened *behind* every following row and
+ * could not be clicked. Nothing else on the row was affected, which is why it
+ * looked like a bug about following rather than a bug about opacity.
+ */
 .row[data-state="paused"] {
-    opacity: 0.66;
+    border-style: dashed;
 }
+
+.row[data-state="paused"] .title,
+.row[data-state="paused"] .meta,
+.row[data-state="paused"] .tags {
+    color: var(--ink-3);
+}
+
+/* A leaf element: its stacking context contains nothing that needs to escape. */
+.row[data-state="paused"] .poster {
+    opacity: 0.5;
+}
+
 
 .row[data-state="paused"] .stripe {
     background: var(--ink-3);

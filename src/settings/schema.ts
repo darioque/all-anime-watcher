@@ -114,6 +114,14 @@ export interface GlobalSettings {
      * pointing at shelves that no longer exist.
      */
     categories: Category[]
+    /**
+     * Built-in shelves that have already been offered.
+     *
+     * Kept apart from `categories` so a deletion sticks. Without it, "add the
+     * built-ins that are missing" and "undo the user deleting one" are the same
+     * statement, and a shelf thrown away would come back on the next start.
+     */
+    seededCategories: string[]
     /** Ticked and crossed chips, persisted like every other list control. */
     listCategoryFilter: CategoryFilter
     groupBySeries: boolean
@@ -195,6 +203,7 @@ export function defaultSettings(): GlobalSettings {
         listOnlyUnwatched: false,
         listSourceFilter: "",
         categories: defaultCategories(),
+        seededCategories: defaultCategories().map(category => category.id),
         listCategoryFilter: {},
         groupBySeries: true,
         perPage: 25,

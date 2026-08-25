@@ -2,7 +2,7 @@ import browser from "webextension-polyfill"
 import { getAllAnime, getDueAnime, putAnime } from "~/model/db"
 import type { TrackedAnime } from "~/model/types"
 import { refreshSeries } from "~/library/library"
-import { nextCheckAt } from "./schedule"
+import { checkable, nextCheckAt } from "./schedule"
 import { notifyNewEpisodes } from "./notifications"
 import { resolveAllDomains } from "./domains"
 import { enrich } from "~/trackers/match"
@@ -102,8 +102,13 @@ export async function runDueChecks(options: { force?: boolean } = {}): Promise<n
     const settings = cachedSettings()
     const now = Date.now()
 
+    /*
+     * "Check everything now" means everything the loop is allowed to check, not
+     * literally everything: a series with "check for new episodes" switched off
+     * stays off, however the run was started. Same predicate the due queue uses.
+     */
     const due = options.force
-        ? (await getAllAnime()).filter(anime => anime.poll)
+        ? (await getAllAnime()).filter(checkable)
         : await getDueAnime(now, settings.maxChecksPerRun)
 
     if (due.length === 0) return 0

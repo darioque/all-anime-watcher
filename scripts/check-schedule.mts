@@ -5,7 +5,7 @@
  *
  *   npm run check:schedule
  */
-import { nextCheckAt } from "~/background/schedule"
+import { checkable, dueNow, nextCheckAt } from "~/background/schedule"
 import type { SchedulePolicy, TrackedAnime } from "~/model/types"
 import { NEVER } from "~/shared/time"
 import { setLogLevel } from "~/shared/logger"
@@ -144,6 +144,37 @@ check("the same episode without a delay has fallen back", noDelay === now + 12 *
 // The delay must not resurrect data that is simply old.
 const veryStale = at(withDelay, { airing: { episode: 12, at: now - 30 * DAY, fetchedAt: now - 30 * DAY } })
 check("a delay does not rescue stale airing data", veryStale === now + 12 * HOUR)
+
+console.log("\n\x1b[1mwhat a check run is allowed to touch\x1b[0m\n")
+
+/*
+ * "Check for new episodes" being off has to mean off on every path into the
+ * update loop, including the button labelled "check every series now". The
+ * failure mode is invisible from the outside — a series you asked not to be
+ * checked simply gets checked — so it is worth stating rather than assuming.
+ */
+const queue = [
+    { key: "a", poll: true, nextCheckAt: 100 },
+    { key: "b", poll: false, nextCheckAt: 1 },
+    { key: "c", poll: true, nextCheckAt: 50 },
+    { key: "d", poll: true, nextCheckAt: 5_000 }
+]
+
+check("a series with polling off is never due", !checkable(queue[1]!))
+check("one with it on is", checkable(queue[0]!))
+check("and `poll` missing entirely is treated as off", !checkable({ poll: undefined as unknown as boolean }))
+
+const picked = dueNow(queue, 1_000, 10).map(entry => entry.key)
+check("polling off is excluded even though it is the most overdue", !picked.includes("b"), picked.join(","))
+check("a slot in the future is not yet due", !picked.includes("d"))
+check("and the rest come back soonest first", picked.join(",") === "c,a", picked.join(","))
+check("the limit caps the run", dueNow(queue, 1_000, 1).length === 1)
+check("a limit of zero takes nothing", dueNow(queue, 1_000, 0).length === 0)
+
+// The same rule again from the other end: a series with polling off is given no
+// slot at all, so it cannot re-enter the queue by the clock either.
+const off: TrackedAnime = anime({ poll: false })
+check("an unpolled series is scheduled to never", nextCheckAt(off, { mode: "interval", everyHours: 1 }, now) === NEVER)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

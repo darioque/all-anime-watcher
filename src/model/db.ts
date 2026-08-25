@@ -1,5 +1,6 @@
 import { openDB, type DBSchema, type IDBPDatabase } from "idb"
 import type { SourceState, TrackedAnime } from "./types"
+import { checkable } from "./keys"
 import { log } from "~/shared/logger"
 
 const logger = log("db")
@@ -84,7 +85,9 @@ export async function getDueAnime(now: number, limit: number): Promise<TrackedAn
     let cursor = await database.transaction("anime").store.index("byNextCheck").openCursor()
     while (cursor && due.length < limit) {
         if (cursor.value.nextCheckAt > now) break
-        if (cursor.value.poll) due.push(cursor.value)
+        // Same predicate the forced run uses, so "not checking" cannot mean two
+        // different things depending on how the run started.
+        if (checkable(cursor.value)) due.push(cursor.value)
         cursor = await cursor.continue()
     }
     return due

@@ -1,6 +1,9 @@
 import type { SchedulePolicy, TrackedAnime } from "~/model/types"
+import { checkable } from "~/model/keys"
 import { log } from "~/shared/logger"
 import { NEVER } from "~/shared/time"
+
+export { checkable }
 
 const logger = log("schedule")
 
@@ -20,8 +23,26 @@ const DAY = 24 * HOUR
  * this a pure function of its arguments, so the date maths can be tested without
  * an extension around it. Callers pass `resolveSchedule(anime)`.
  */
+/**
+ * Which series a run should take, soonest first.
+ *
+ * The database answers the same question with an index scan, which is what keeps
+ * a large library cheap; this is the same rule stated where it can be tested,
+ * and what the forced "check everything" path uses.
+ */
+export function dueNow<T extends Pick<TrackedAnime, "poll" | "nextCheckAt">>(
+    list: T[],
+    now: number,
+    limit: number
+): T[] {
+    return list
+        .filter(anime => checkable(anime) && anime.nextCheckAt <= now)
+        .sort((a, b) => a.nextCheckAt - b.nextCheckAt)
+        .slice(0, Math.max(0, limit))
+}
+
 export function nextCheckAt(anime: TrackedAnime, policy: SchedulePolicy, now = Date.now()): number {
-    if (!anime.poll) return NEVER
+    if (!checkable(anime)) return NEVER
 
     const value = computeNext(policy, anime, now)
 

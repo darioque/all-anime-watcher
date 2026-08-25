@@ -38,6 +38,19 @@ export function unwatchedCount(anime: Pick<TrackedAnime, "episodes" | "lastWatch
     return anime.episodes.reduce((n, ep) => (ep.number > from ? n + 1 : n), 0)
 }
 
+/**
+ * May a check run touch this series at all?
+ *
+ * One definition, used by every path into the update loop — the due-queue index
+ * scan, the "check everything now" button, and the slot calculation. Three
+ * separate `anime.poll` tests would be three chances for "check for new
+ * episodes: off" to be quietly ignored by one of them, and the failure is
+ * invisible from the outside: a series you asked not to be checked is checked.
+ */
+export function checkable(anime: Pick<TrackedAnime, "poll">): boolean {
+    return anime.poll === true
+}
+
 export function hasUnwatched(anime: Pick<TrackedAnime, "episodes" | "lastWatched" | "follow">): boolean {
     return anime.follow && unwatchedCount(anime) > 0
 }
