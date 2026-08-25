@@ -72,6 +72,13 @@ export function showPageBadge(identity: PageIdentity): void {
     titleEl.textContent = info.title
     subEl.textContent = `Episode ${info.number}`
 
+    /*
+     * `identity.key` is the whole test for "already followed". It is set by the
+     * background whenever an entry exists — whatever `autoAddOnWatch` says, and
+     * whether the entry was found by its key or by its series URL — so a series
+     * you already follow is never offered again just because automatic adding is
+     * turned off.
+     */
     const tracked = Boolean(identity.key)
     action.textContent = tracked ? "Open library" : "+ Follow"
 
@@ -88,9 +95,25 @@ export function showPageBadge(identity: PageIdentity): void {
             seriesId: info.seriesId,
             title: info.title
         })
-            .then(() => {
+            .then(anime => {
                 action.textContent = "Following"
                 subEl.textContent = `Episode ${info.number} · tracked`
+
+                /*
+                 * This badge only ever appears on a page we left alone, so the
+                 * site's own player is what is playing and nothing can see
+                 * inside it. Opening the episode is the only signal there will
+                 * be, and following from here is the moment it can be taken —
+                 * the background already did this for series that were followed
+                 * before the page loaded.
+                 */
+                if (anime && identity.markOnEmbed !== false) {
+                    void send("library:markWatched", {
+                        key: anime.key,
+                        number: info.number,
+                        ...(info.variant ? { variant: info.variant } : {})
+                    }).catch(() => undefined)
+                }
             })
             .catch((error: unknown) => {
                 action.disabled = false

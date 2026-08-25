@@ -10,6 +10,7 @@
  * The list diff was right. Calling that diff "new" was not.
  */
 import { latestEpisodeNumber, newReleases, positionDrift, unwatchedCount } from "~/model/keys"
+import { marksOnOpen } from "~/settings/watching"
 import type { Episode } from "~/model/types"
 
 let failures = 0
@@ -145,6 +146,32 @@ eq(
     unwatchedCount({ episodes: range(356, 476), lastWatched: at(400) }),
     76
 )
+
+console.log("\n\x1b[1mopening an episode as a watch signal\x1b[0m\n")
+
+const marking = (onOpen: boolean, takeOver: boolean, onEmbed: boolean) =>
+    marksOnOpen({ markWatchedOnOpen: onOpen, takeOverPage: takeOver, markWatchedOnEmbed: onEmbed })
+
+eq("opening marks it when that is what the setting says", marking(true, true, false), true)
+eq("and still does with the site's own player left in place", marking(true, false, false), true)
+
+/*
+ * The case that was silently broken. "Replace the site's player" off means
+ * nothing of ours ever touches the video, so the completion threshold has no
+ * signal to work from and the progress tick never fires. Opening the page is
+ * the only moment the episode can be recorded at all — the same reason the
+ * player marks an iframe stream on sight.
+ */
+eq("with no player of ours, opening is the only signal there is", marking(false, false, true), true)
+eq("unless that signal was turned off too", marking(false, false, false), false)
+
+/*
+ * And the case that must stay untouched: our player is mounted, so the watch
+ * time is measurable and is what decides. Marking on open here would credit
+ * every episode the moment it was opened, which is the behaviour the viewer
+ * turned off.
+ */
+eq("our own player measures instead of assuming", marking(false, true, true), false)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

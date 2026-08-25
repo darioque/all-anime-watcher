@@ -1,13 +1,15 @@
 import { refreshBadge } from "./badge"
 import { libraryChanged } from "./broadcast"
-import { getAnime } from "~/model/db"
+import { getAnime, getAnimeBySource } from "~/model/db"
 import { animeKey } from "~/model/keys"
 import { addSeries, fetchCtxFor, markWatched } from "~/library/library"
 import { matchEpisodeUrl, sourceForUrl } from "~/sources/registry"
+import { pathOf } from "~/shared/url"
 import { orderServers } from "~/library/servers"
 import type { AnimeSource, Server } from "~/sources/types"
 import type { PageIdentity } from "~/shared/messages"
 import { resolve } from "~/settings/resolver"
+import { marksOnOpen } from "~/settings/watching"
 import { log } from "~/shared/logger"
 
 const logger = log("identify")
@@ -42,7 +44,7 @@ export async function identifyEpisode(options: {
         const pageInfo = await source.getPageInfo(html, url, ctx)
         const key = animeKey(source.id, pageInfo.seriesId)
 
-        let entry = await getAnime(key)
+        let entry = (await getAnime(key)) ?? (await entryBySeriesUrl(source.id, pageInfo.seriesUrl, key))
 
         /*
          * `autoAddOnWatch` decides whether an *unknown* series is added. It has
@@ -61,10 +63,26 @@ export async function identifyEpisode(options: {
             libraryChanged("added", entry.key)
         }
 
-        // Opening the page is a tracking signal in its own right: the player may
-        // end up embedding a frame it cannot see inside, and on a freshly added
-        // series "watch next" would otherwise point at episode 1.
-        if (options.track && entry && resolve("markWatchedOnOpen", { anime: entry, sourceId: source.id })) {
+        /*
+         * Opening the page is a tracking signal in its own right: the player may
+         * end up embedding a frame it cannot see inside, and on a freshly added
+         * series "watch next" would otherwise point at episode 1.
+         *
+         * The second clause is the "we left the site's own player alone" case.
+         * With `takeOverPage` off nothing of ours is ever attached to the video,
+         * so no completion threshold can be reached and no progress tick will
+         * ever arrive — opening the page is the only signal that will ever
+         * exist, which is precisely what `markWatchedOnEmbed` is for. Without
+         * this, turning the player off silently turned tracking off with it.
+         */
+        const where = { anime: entry, sourceId: source.id }
+        const marks = marksOnOpen({
+            markWatchedOnOpen: resolve("markWatchedOnOpen", where),
+            takeOverPage: resolve("takeOverPage", where),
+            markWatchedOnEmbed: resolve("markWatchedOnEmbed", where)
+        })
+
+        if (options.track && entry && marks) {
             entry = (await markWatched(entry.key, pageInfo.number, pageInfo.variant)) ?? entry
             libraryChanged("position", entry.key)
         }
@@ -106,6 +124,40 @@ export async function identifyEpisode(options: {
         logger.error(`could not read page info for ${url}`, error)
         return { sourceId: source.id, isEpisode: true, error: message }
     }
+}
+
+/**
+ * The library entry for a series whose id the page derives differently.
+ *
+ * `${sourceId}/${seriesId}` is the identity, and normally the id a series page
+ * yields and the id an episode page yields are the same string. Normally. A
+ * source that reads its id out of a tag, a breadcrumb or a post slug can produce
+ * one id when the series was added from search and another when the same series
+ * is opened from an episode — and the exact-key lookup then reports a followed
+ * series as unknown. What follows is a duplicate library entry, an offer to
+ * follow something already followed, and a watch position recorded against the
+ * wrong key, none of which announces itself.
+ *
+ * So the series URL is the second opinion. Compared by path only, because a
+ * source that moved domains has entries pointing at the old host and both URLs
+ * still name the same series.
+ */
+async function entryBySeriesUrl(sourceId: string, seriesUrl: string, expectedKey: string) {
+    const wanted = seriesPath(seriesUrl)
+    if (wanted === "") return undefined
+
+    const found = (await getAnimeBySource(sourceId)).find(anime => seriesPath(anime.url) === wanted)
+    if (!found) return undefined
+
+    logger.warn(
+        `${sourceId}: this episode page derives "${expectedKey}" but ${seriesUrl} is already followed as ` +
+            `"${found.key}" — the source gives a series two identities. Using the followed one.`
+    )
+    return found
+}
+
+function seriesPath(url: string): string {
+    return pathOf(url).replace(/\/+$/, "").toLowerCase()
 }
 
 /** The source that owns a URL, if it is an episode page at all. */
