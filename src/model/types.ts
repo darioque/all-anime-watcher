@@ -65,6 +65,7 @@ export interface AnimeOverrides {
     releaseDelayMin?: number
     takeOverPage?: boolean
     notifyNewEpisode?: boolean
+    positionDriftTolerance?: number
     pushToTracker?: boolean
 }
 

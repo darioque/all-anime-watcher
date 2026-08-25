@@ -64,6 +64,17 @@ export interface GlobalSettings {
     /** How often the player reports position back to the background. */
     progressTickSec: number
 
+    /**
+     * How far the watch pointer may sit above the newest episode a source lists
+     * before the library says so.
+     *
+     * One by default: a site pulling its newest episode for a re-upload is
+     * routine and heals itself, while a gap of any size is a renumbering that
+     * will otherwise read as "up to date" forever. Never acted on automatically
+     * — see `positionDrift`.
+     */
+    positionDriftTolerance: number
+
     // --- notifications
     notifyNewEpisode: boolean
     /** Auto-clear a notification after this many ms. 0 keeps it until dismissed. */
@@ -113,6 +124,8 @@ export interface SourceSettings {
     variantPref?: Variant
     subtitleLanguages?: string[]
     notifyNewEpisode?: boolean
+    /** Sites that renumber per season want a tighter or looser figure than most. */
+    positionDriftTolerance?: number
     /** Per-source politeness, overriding sourceRequestDelaySec. */
     sourceRequestDelaySec?: number
     /** Pin the fetch strategy when this source's CDNs are fussy. */
@@ -150,6 +163,8 @@ export function defaultSettings(): GlobalSettings {
         skipIntro: "button",
         skipOutro: "button",
         progressTickSec: 5,
+
+        positionDriftTolerance: 1,
 
         notifyNewEpisode: true,
         notificationTimeoutMs: 0,

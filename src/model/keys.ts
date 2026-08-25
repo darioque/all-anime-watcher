@@ -124,3 +124,32 @@ export function newReleases(options: {
 
     return options.added.filter(episode => episode.number > floor)
 }
+
+/**
+ * How far the watch pointer sits above the newest episode the source lists.
+ *
+ * 0 when all is well, which is nearly always. It goes positive when a source
+ * renumbers — an absolutely-numbered run split into seasons, a parse regression,
+ * a site that dropped its back catalogue — and the position we hold no longer
+ * has anywhere to point.
+ *
+ * AMR resets to zero in the equivalent situation, and it is right to: its
+ * position *is* a chapter URL (`chapPath`), so a path that disappeared means the
+ * position is genuinely gone and zero is the only value left. Ours is a number,
+ * deliberately (see model/types.ts), and "you are at episode 476" stays true and
+ * useful whether or not a post numbered 476 is still on the site. Resetting
+ * would discard information we still hold, and do real damage doing it: every
+ * episode becomes unwatched, the badge lights up, and "watch next" points at the
+ * bottom of the list.
+ *
+ * So nothing is reset automatically. The drift is reported instead, and the
+ * episode picker sets the position deliberately — which is the only actor that
+ * actually knows where the viewer got to.
+ */
+export function positionDrift(anime: Pick<TrackedAnime, "episodes" | "lastWatched">): number {
+    if (!anime.lastWatched) return 0
+    const newest = latestEpisodeNumber(anime)
+    // An empty list is a failed or pending fetch, not a renumbering.
+    if (newest === null) return 0
+    return Math.max(0, anime.lastWatched.number - newest)
+}

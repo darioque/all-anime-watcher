@@ -9,7 +9,7 @@
  * viewer was on — and every one of them raised a "new episodes" notification.
  * The list diff was right. Calling that diff "new" was not.
  */
-import { latestEpisodeNumber, newReleases, unwatchedCount } from "~/model/keys"
+import { latestEpisodeNumber, newReleases, positionDrift, unwatchedCount } from "~/model/keys"
 import type { Episode } from "~/model/types"
 
 let failures = 0
@@ -23,6 +23,9 @@ function eq<T>(label: string, actual: T, expected: T) {
 /** Episodes `from`..`to` inclusive, as a source would hand them over. */
 const range = (from: number, to: number): Episode[] =>
     Array.from({ length: to - from + 1 }, (_, i) => ({ number: from + i, url: `https://x/ep-${from + i}` }))
+
+/** A watch pointer. */
+const at = (number: number) => ({ number, at: 0 })
 
 console.log("\n\x1b[1mreleases vs backfill\x1b[0m\n")
 
@@ -111,6 +114,37 @@ const partial = { episodes: range(356, 476), lastWatched: { number: 476, at: 0 }
 eq("a partial list knows its newest episode", latestEpisodeNumber(partial), 476)
 eq("which is not its length", partial.episodes.length, 121)
 eq("and a viewer at the newest has nothing unwatched", unwatchedCount(partial), 0)
+
+console.log("\n\x1b[1mposition drift\x1b[0m\n")
+
+/*
+ * AMR resets the position to zero when it cannot find the chapter you were on,
+ * because its position *is* a URL and a URL that vanished leaves nothing. Ours
+ * is a number, so it stays meaningful with or without a post to point at, and
+ * resetting would throw away real state — see `positionDrift`. Nothing here
+ * mutates anything; it only measures the gap.
+ */
+eq("a pointer inside the list does not drift", positionDrift({ episodes: range(1, 12), lastWatched: at(7) }), 0)
+eq("nor does one exactly at the newest", positionDrift({ episodes: range(1, 12), lastWatched: at(12) }), 0)
+eq("a renumbered source shows the whole gap", positionDrift({ episodes: range(1, 12), lastWatched: at(476) }), 464)
+eq(
+    "an episode pulled for re-upload drifts by one",
+    positionDrift({ episodes: range(356, 475), lastWatched: at(476) }),
+    1
+)
+
+// The two cases that must never look like a renumbering, because both are
+// ordinary and both would otherwise nag on every render.
+eq("an empty list is a failed fetch, not drift", positionDrift({ episodes: [], lastWatched: at(476) }), 0)
+eq("and an unstarted series cannot drift", positionDrift({ episodes: range(1, 12) }), 0)
+
+// The pointer surviving is the whole point: a partial list still reports its own
+// position rather than being reset to the bottom of it.
+eq(
+    "a partial list keeps the position it was given",
+    unwatchedCount({ episodes: range(356, 476), lastWatched: at(400) }),
+    76
+)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

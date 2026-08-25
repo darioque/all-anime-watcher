@@ -4,11 +4,14 @@ import { onLibraryChanged, send } from "~/shared/messages"
 import type { SourceDescriptor } from "~/shared/messages"
 import type { Episode, SchedulePolicy, TrackedAnime } from "~/model/types"
 import type { GlobalSettings } from "~/settings/schema"
+import { resolve } from "~/settings/resolver"
+import { loadSettings, loadSourceSettings } from "~/settings/storage"
 import {
     episodeProgressKey,
     latestEpisode,
     latestEpisodeNumber,
     nextEpisode,
+    positionDrift,
     titleOf,
     unwatchedCount,
     watchState
@@ -160,30 +163,34 @@ function episodeState(anime: TrackedAnime, episode: Episode): "watched" | "curre
  * When the list really does run 1..n the two agree and the short form is used,
  * which is the common case and stays short.
  */
-function episodeSpan(anime: TrackedAnime): { label: string; heading: string; title: string } {
+function episodeSpan(anime: TrackedAnime): { label: string; heading: string } {
     const newest = latestEpisodeNumber(anime)
-    if (newest === null) {
-        return {
-            label: "no episodes",
-            heading: "No episodes",
-            title: "This source has not returned an episode list yet"
-        }
-    }
+    if (newest === null) return { label: "no episodes", heading: "No episodes" }
 
     const count = anime.episodes.length
     const earliest = anime.episodes.reduce((lo, ep) => Math.min(lo, ep.number), newest)
 
-    if (count === newest && earliest === 1) {
-        return { label: `${count} ep`, heading: `${count} episodes`, title: `Episodes 1 to ${newest}` }
-    }
+    if (count === newest && earliest === 1) return { label: `${count} ep`, heading: `${count} episodes` }
 
     return {
         label: `${count} ep, newest E${newest}`,
-        heading: `${count} episodes, E${earliest} to E${newest}`,
-        title:
-            `${count} episodes listed, E${earliest} to E${newest}. That is everything this source ` +
-            `carries for the series — the missing ones are not published here.`
+        heading: `${count} episodes, E${earliest} to E${newest}`
     }
+}
+
+/**
+ * A watch pointer that has run off the end of the list, in words.
+ *
+ * Deliberately a statement plus a button rather than a repair: see
+ * `positionDrift` for why nothing here resets anything on its own. Silence is
+ * the failure this exists to prevent — a renumbered series reads as "Up to date"
+ * forever, which looks exactly like being up to date.
+ */
+function driftNote(a: TrackedAnime): string | null {
+    const drift = positionDrift(a)
+    if (drift === 0) return null
+    if (drift <= resolve("positionDriftTolerance", { anime: a, sourceId: a.sourceId })) return null
+    return `You are at E${a.lastWatched?.number}, past everything this source lists (newest is E${latestEpisodeNumber(a)}).`
 }
 
 const newEpisodes = computed(() => library.value.reduce((n, a) => (a.follow ? n + unwatchedCount(a) : n), 0))
@@ -212,9 +219,18 @@ async function reload() {
     }
 }
 
-/** Restore the list controls, then keep them saved as they change. */
+/**
+ * Restore the list controls, then keep them saved as they change.
+ *
+ * Also warms the settings cache in *this* context. The resolver reads it
+ * synchronously, and the page is a consumer like any other: a row that decides
+ * something per-anime has to go through `resolve` or the per-source and
+ * per-anime overrides quietly stop applying here while still applying in the
+ * background — which is worse than not having them.
+ */
 async function restoreControls() {
     try {
+        await Promise.all([loadSettings(), loadSourceSettings()])
         const settings = await send("settings:get", {})
         sort.value = settings.listSort
         onlyUnwatched.value = settings.listOnlyUnwatched
@@ -661,7 +677,7 @@ defineExpose({ load })
                         <div class="meta">
                             <span>{{ sourceName(a.sourceId) }}</span>
                             <span class="sep">·</span>
-                            <span :title="episodeSpan(a).title">{{ episodeSpan(a).label }}</span>
+                            <span>{{ episodeSpan(a).label }}</span>
                             <span class="sep">·</span>
                             <span v-if="a.lastWatched">at E{{ a.lastWatched.number }}</span>
                             <span v-else class="faint">not started</span>
@@ -683,6 +699,13 @@ defineExpose({ load })
 
                         <p v-if="a.lastError" class="row-error" :title="a.lastError">Last check failed</p>
 
+                        <p v-if="driftNote(a)" class="row-note">
+                            {{ driftNote(a) }}
+                            <button class="link" @click="episodesFor = episodesFor === a.key ? null : a.key">
+                                Set position
+                            </button>
+                        </p>
+
                         <div class="actions">
                             <button
                                 class="btn"
@@ -700,7 +723,7 @@ defineExpose({ load })
 
                         <div v-if="episodesFor === a.key" class="episodes-panel">
                             <div class="panel-head">
-                                <span class="panel-title" :title="episodeSpan(a).title">{{ episodeSpan(a).heading }}</span>
+                                <span class="panel-title">{{ episodeSpan(a).heading }}</span>
                                 <button class="btn tiny" @click="episodesFor = null">Close</button>
                             </div>
                             <div class="episode-grid">
@@ -1197,6 +1220,22 @@ h1 {
     margin: 2px 0 0;
     font-size: 11px;
     color: var(--danger);
+}
+
+.row-note {
+    margin: 2px 0 0;
+    font-size: 11px;
+    color: var(--state-warn);
+}
+
+.row-note .link {
+    font: inherit;
+    color: inherit;
+    background: none;
+    border: 0;
+    padding: 0;
+    text-decoration: underline;
+    cursor: pointer;
 }
 
 .actions {
