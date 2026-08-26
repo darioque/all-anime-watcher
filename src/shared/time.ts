@@ -3,6 +3,24 @@
 /** Far enough out to mean "not scheduled" without needing a null case in the DB index. */
 export const NEVER = 8_640_000_000_000_000
 
+/**
+ * A playback position: "12:34", or "1:02:03" once it earns the hours.
+ *
+ * Minutes are unpadded below an hour and padded above it, which is how every
+ * player writes it — "5:07" alone, "1:05:07" inside an hour.
+ */
+export function clock(seconds: number): string {
+    if (!Number.isFinite(seconds) || seconds < 0) return "--:--"
+
+    const whole = Math.floor(seconds)
+    const hours = Math.floor(whole / 3600)
+    const minutes = Math.floor((whole % 3600) / 60)
+    const secs = whole % 60
+
+    const mm = hours > 0 ? String(minutes).padStart(2, "0") : String(minutes)
+    return `${hours > 0 ? `${hours}:` : ""}${mm}:${String(secs).padStart(2, "0")}`
+}
+
 /** "3m ago", "2d ago". For a timestamp of 0, "never". */
 export function relativePast(ts: number, now = Date.now()): string {
     if (!ts) return "never"

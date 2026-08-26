@@ -6,6 +6,7 @@
  *   npm run check:schedule
  */
 import { checkable, dueNow, nextCheckAt } from "~/background/schedule"
+import { clock } from "~/shared/time"
 import type { SchedulePolicy, TrackedAnime } from "~/model/types"
 import { NEVER } from "~/shared/time"
 import { setLogLevel } from "~/shared/logger"
@@ -183,6 +184,22 @@ check("a limit of zero takes nothing", dueNow(queue, 1_000, 0).length === 0)
 // slot at all, so it cannot re-enter the queue by the clock either.
 const off: TrackedAnime = anime({ poll: false })
 check("an unpolled series is scheduled to never", nextCheckAt(off, { mode: "interval", everyHours: 1 }, now) === NEVER)
+
+console.log("\n\x1b[1mplayback clock\x1b[0m\n")
+
+/*
+ * The player's OSD reads this while seeking, which is the one moment nobody is
+ * looking anywhere else — an off-by-one in the padding is glaring there and
+ * invisible in a screenshot taken at 0:00.
+ */
+check("under a minute", clock(7) === "0:07", clock(7))
+check("minutes are unpadded below an hour", clock(5 * 60 + 7) === "5:07", clock(5 * 60 + 7))
+check("and padded above one", clock(3600 + 5 * 60 + 7) === "1:05:07", clock(3600 + 5 * 60 + 7))
+check("the hour boundary itself", clock(3600) === "1:00:00", clock(3600))
+check("seconds round down, never up", clock(59.99) === "0:59", clock(59.99))
+check("zero is a real position", clock(0) === "0:00", clock(0))
+check("an unknown duration says so", clock(Number.NaN) === "--:--", clock(Number.NaN))
+check("and so does a live stream's Infinity", clock(Number.POSITIVE_INFINITY) === "--:--")
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

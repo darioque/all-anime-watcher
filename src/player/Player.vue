@@ -9,6 +9,7 @@ import type { Episode } from "~/model/types"
 import type { Stream } from "~/extractors/types"
 import { BackgroundLoader } from "./backgroundLoader"
 import { loadTrack, releaseTracks, type LoadedTrack } from "./subtitles"
+import { clock } from "~/shared/time"
 
 const props = defineProps<{
     identity: PageIdentity
@@ -586,12 +587,50 @@ function togglePlay() {
     if (!element) return
     if (element.paused) void element.play()
     else element.pause()
+    // Said out loud because the keyboard path deliberately has no control bar to
+    // read the state off; without this, pausing from the keyboard is silent.
+    flashOsd(element.paused ? "▶  Play" : "❚❚  Paused")
+}
+
+/**
+ * A one-line OSD, mpv's rather than the browser's.
+ *
+ * The native controls are the wrong feedback for a keyboard seek. They are tall,
+ * they carry a darkening gradient, and Chrome pins them on screen for as long as
+ * the <video> element holds focus — so in fullscreen they sit over the bottom of
+ * the picture, which is exactly where a hardcoded subtitle is. This says the same
+ * thing in a line along the top and takes itself away.
+ */
+/** Native controls are for the mouse; the keyboard gets a clean picture. */
+const controlsVisible = ref(true)
+
+const osd = ref<{ text: string; bar: number | null } | null>(null)
+let osdTimer = 0
+
+/** Long enough to read a timestamp, short enough not to become furniture. */
+const OSD_MS = 1000
+
+function flashOsd(text: string, bar: number | null = null) {
+    osd.value = { text, bar }
+    if (osdTimer) window.clearTimeout(osdTimer)
+    osdTimer = window.setTimeout(() => (osd.value = null), OSD_MS)
 }
 
 function seekBy(seconds: number) {
     const element = video.value
     if (!element) return
-    element.currentTime = Math.max(0, element.currentTime + seconds)
+
+    const duration = Number.isFinite(element.duration) ? element.duration : 0
+    const to = Math.max(
+        0,
+        duration > 0 ? Math.min(duration, element.currentTime + seconds) : element.currentTime + seconds
+    )
+    element.currentTime = to
+
+    flashOsd(
+        `${seconds > 0 ? "+" : "−"}${Math.abs(seconds)}s   ${clock(to)}${duration > 0 ? ` / ${clock(duration)}` : ""}`,
+        duration > 0 ? to / duration : null
+    )
 }
 
 function nudgeVolume(delta: number) {
@@ -599,6 +638,7 @@ function nudgeVolume(delta: number) {
     if (!element) return
     element.volume = Math.min(1, Math.max(0, element.volume + delta))
     element.muted = element.volume === 0
+    flashOsd(`Volume ${Math.round(element.volume * 100)}%`, element.volume)
 }
 
 async function toggleFullscreen() {
@@ -715,6 +755,8 @@ onMounted(async () => {
     tickTimer = window.setInterval(reportProgress, Math.max(1, props.progressTickSec) * 1000)
     document.addEventListener("visibilitychange", reportProgress)
     window.addEventListener("keydown", onKey)
+    window.addEventListener("mousemove", onPointer, { passive: true })
+    window.addEventListener("mousedown", onPointer, { passive: true })
 
     void loadEpisodeList()
     await playServer(0, true)
@@ -762,7 +804,36 @@ function onKey(event: KeyboardEvent) {
 
     event.preventDefault()
     event.stopPropagation()
+
+    /*
+     * Driving with the keyboard puts the picture back the way mpv leaves it.
+     *
+     * Two separate things go wrong otherwise, and both are Chrome doing what it
+     * is supposed to. The <video> element takes focus from a click or from
+     * entering fullscreen, so the first arrow key draws a focus ring — in
+     * fullscreen, a white box around the whole picture. And the native controls
+     * do not auto-hide while the element has focus, so the darkened bar stays
+     * put, over the bottom of the frame where a hardcoded subtitle lives.
+     *
+     * Neither is needed here: every shortcut is bound on the window, so the
+     * element never has to hold focus, and the OSD above says what a seek did.
+     * The mouse brings the controls straight back — see onPointer.
+     */
+    controlsVisible.value = false
+    video.value?.blur()
+
     match.run()
+}
+
+/**
+ * The mouse asks for the control bar back.
+ *
+ * The alternative — hiding the controls only in fullscreen, or on a timer — makes
+ * their state something to reason about. "Whichever device you last used" needs
+ * no explaining: reach for the mouse and they are there.
+ */
+function onPointer() {
+    if (!controlsVisible.value) controlsVisible.value = true
 }
 
 SHORTCUTS.push(
@@ -796,6 +867,9 @@ onBeforeUnmount(() => {
     if (tickTimer) window.clearInterval(tickTimer)
     document.removeEventListener("visibilitychange", reportProgress)
     window.removeEventListener("keydown", onKey)
+    window.removeEventListener("mousemove", onPointer)
+    window.removeEventListener("mousedown", onPointer)
+    if (osdTimer) window.clearTimeout(osdTimer)
     reportProgress()
     releaseTracks(subtitles.value)
     teardown()
@@ -859,7 +933,7 @@ onBeforeUnmount(() => {
             <video
                 v-show="!embedded"
                 ref="video"
-                controls
+                :controls="controlsVisible"
                 playsinline
                 autoplay
                 @ended="onEnded"
@@ -875,6 +949,18 @@ onBeforeUnmount(() => {
                     :default="index === activeSubtitle"
                 />
             </video>
+
+            <!--
+                Along the very top, never the bottom: the bottom of the frame is
+                where a hardcoded subtitle is burned in, and covering those was
+                the whole complaint about the native control bar.
+            -->
+            <div v-if="osd" class="osd" aria-hidden="true">
+                <div v-if="osd.bar !== null" class="osd-bar">
+                    <span :style="{ width: `${Math.round(osd.bar * 1000) / 10}%` }"></span>
+                </div>
+                <span class="osd-text">{{ osd.text }}</span>
+            </div>
 
             <button
                 v-if="inSkip && (inSkip === 'intro' ? skipIntro : skipOutro) !== 'off'"
@@ -1130,6 +1216,52 @@ video,
     display: block;
     background: #000;
     border: 0;
+}
+
+/*
+ * No focus ring on the picture. Every shortcut is bound on the window, so the
+ * element holding focus tells the viewer nothing — and in fullscreen the ring is
+ * a white box drawn around the entire frame.
+ */
+video:focus,
+video:focus-visible {
+    outline: none;
+}
+
+.osd {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    pointer-events: none;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Thin and white, the way mpv draws it: legible over any frame, obscuring none of it. */
+.osd-bar {
+    height: 3px;
+    background: rgba(255, 255, 255, 0.25);
+}
+
+.osd-bar span {
+    display: block;
+    height: 100%;
+    background: rgba(255, 255, 255, 0.92);
+}
+
+.osd-text {
+    align-self: flex-start;
+    margin: 10px 0 0 14px;
+    font-family: var(--mono, ui-monospace, "SF Mono", "Cascadia Mono", Menlo, monospace);
+    font-size: 13px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    color: #fff;
+    /* A shadow rather than a panel: a box would be one more thing on the frame. */
+    text-shadow:
+        0 1px 4px rgba(0, 0, 0, 0.95),
+        0 0 12px rgba(0, 0, 0, 0.7);
 }
 
 .embed-note {
