@@ -20,6 +20,27 @@ interface Candidate {
 const candidates = ref<Candidate[]>([])
 const loading = ref(false)
 const error = ref<string | null>(null)
+/** What the user typed, if they have. Empty means the results are the automatic ones. */
+const query = ref("")
+/** True once a search has been run by hand, so the results can say how they were found. */
+const manual = ref(false)
+
+async function look(typed: string) {
+    const key = props.anime?.key
+    if (!key) return
+
+    loading.value = true
+    error.value = null
+    candidates.value = []
+    manual.value = typed !== ""
+    try {
+        candidates.value = await send("tracker:matches", { key, ...(typed === "" ? {} : { query: typed }) })
+    } catch (e) {
+        error.value = e instanceof Error ? e.message : String(e)
+    } finally {
+        loading.value = false
+    }
+}
 
 /**
  * Reload whenever the dialog opens on a different series. Matching is a network
@@ -29,19 +50,22 @@ watch(
     () => props.anime?.key,
     async key => {
         if (!key) return
-        loading.value = true
-        error.value = null
-        candidates.value = []
-        try {
-            candidates.value = await send("tracker:matches", { key })
-        } catch (e) {
-            error.value = e instanceof Error ? e.message : String(e)
-        } finally {
-            loading.value = false
-        }
+        // Seeded with the title the automatic search used, so correcting it is an
+        // edit rather than retyping a name off the row behind the dialog.
+        query.value = props.anime ? titleOf(props.anime) : ""
+        await look("")
     },
     { immediate: true }
 )
+
+function search() {
+    void look(query.value.trim())
+}
+
+function again() {
+    query.value = props.anime ? titleOf(props.anime) : ""
+    void look("")
+}
 
 async function choose(id: number) {
     if (!props.anime) return
@@ -100,38 +124,76 @@ function confidence(score: number): string {
                 >{{ anime.trackerConfirmed ? " (confirmed by you)" : " (matched automatically)" }}.
             </p>
 
+            <!--
+                Manual search, always offered rather than only after a miss: the
+                automatic search fails *quietly* too, returning eight confident
+                wrong answers for a donghua AniList lists under another
+                romanisation. An id or an anilist.co link works here as well,
+                which is the only way to reach a series no query of ours finds.
+            -->
+            <div class="search">
+                <input
+                    v-model="query"
+                    type="search"
+                    placeholder="Search AniList, or paste an id or link"
+                    aria-label="Search AniList"
+                    @keyup.enter="search"
+                />
+                <button class="btn" :disabled="loading || query.trim() === ''" @click="search">Search</button>
+                <button
+                    v-if="manual"
+                    class="btn"
+                    :disabled="loading"
+                    title="Back to the automatic match"
+                    @click="again"
+                >
+                    Auto
+                </button>
+            </div>
+
             <p v-if="error" class="error">{{ error }}</p>
             <p v-if="loading" class="muted">Searching…</p>
 
-            <ul v-else-if="candidates.length > 0" class="list">
-                <li v-for="candidate in candidates" :key="candidate.id">
-                    <button
-                        class="row"
-                        :class="{ current: candidate.id === anime.anilistId }"
-                        @click="choose(candidate.id)"
-                    >
-                        <span class="cover">
-                            <img v-if="candidate.cover" :src="candidate.cover" alt="" loading="lazy" />
-                        </span>
-                        <span class="body">
-                            <span class="title">{{ candidate.title }}</span>
-                            <span class="meta">
-                                <span v-if="candidate.format">{{ candidate.format }}</span>
-                                <span v-if="candidate.year">· {{ candidate.year }}</span>
-                                <span v-if="candidate.episodes">· {{ candidate.episodes }} ep</span>
-                                <span class="sep">·</span>
-                                <span :data-confidence="confidence(candidate.score)">{{
-                                    confidence(candidate.score)
-                                }}</span>
-                            </span>
-                        </span>
-                    </button>
-                </li>
-            </ul>
+            <template v-if="!loading">
+                <p v-if="manual && candidates.length > 0" class="muted">
+                    In AniList's order. The confidence still says how well each one matches “{{ titleOf(anime) }}”, so a
+                    low one here is expected when the names differ — pick the one you recognise.
+                </p>
 
-            <p v-else-if="!loading" class="muted">
-                No matches. This is common for donghua, which AniList often lists under a different romanisation.
-            </p>
+                <ul v-if="candidates.length > 0" class="list">
+                    <li v-for="candidate in candidates" :key="candidate.id">
+                        <button
+                            class="row"
+                            :class="{ current: candidate.id === anime.anilistId }"
+                            @click="choose(candidate.id)"
+                        >
+                            <span class="cover">
+                                <img v-if="candidate.cover" :src="candidate.cover" alt="" loading="lazy" />
+                            </span>
+                            <span class="body">
+                                <span class="title">{{ candidate.title }}</span>
+                                <span class="meta">
+                                    <span v-if="candidate.format">{{ candidate.format }}</span>
+                                    <span v-if="candidate.year">· {{ candidate.year }}</span>
+                                    <span v-if="candidate.episodes">· {{ candidate.episodes }} ep</span>
+                                    <span class="sep">·</span>
+                                    <span :data-confidence="confidence(candidate.score)">{{
+                                        confidence(candidate.score)
+                                    }}</span>
+                                </span>
+                            </span>
+                        </button>
+                    </li>
+                </ul>
+
+                <p v-else class="muted">
+                    {{
+                        manual
+                            ? "Nothing for that. AniList often lists donghua under a romanisation of the Chinese title — or open it on anilist.co and paste the link here."
+                            : "No matches. This is common for donghua, which AniList often lists under a different romanisation. Try searching for it above."
+                    }}
+                </p>
+            </template>
 
             <footer>
                 <button v-if="anime.anilistId" class="btn danger" @click="clear">Unlink</button>
@@ -202,6 +264,24 @@ h3 {
     padding: 8px 10px;
     border-radius: var(--radius);
     font-size: 12px;
+}
+
+.search {
+    display: flex;
+    gap: 6px;
+    align-items: center;
+}
+
+.search input {
+    flex: 1 1 auto;
+    min-width: 0;
+    font: inherit;
+    font-size: 12px;
+    color: var(--ink);
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 5px 8px;
 }
 
 .list {

@@ -5,9 +5,10 @@ import { nextCheckAt } from "~/background/schedule"
 import { enrich } from "~/trackers/match"
 import * as db from "~/model/db"
 import { createFetchCtx } from "~/net/fetcher"
-import { sourceById } from "~/sources/registry"
+import { allSources, sourceById } from "~/sources/registry"
 import type { AnimeSource, SeriesInfo } from "~/sources/types"
 import { cachedSettings, loadSettings } from "~/settings/storage"
+import { automaticCategoriesOf, shelveOverrides } from "./categories"
 import { log } from "~/shared/logger"
 import { ensureTrailingSlash, swapOrigin } from "~/shared/url"
 
@@ -274,6 +275,13 @@ export async function updateProgress(input: {
     const moved = !previous || Math.abs(previous.positionSec - input.positionSec) >= 1
     const threshold = resolve("completionThreshold", { anime, sourceId: anime.sourceId })
     const ratio = input.durationSec && input.durationSec > 0 ? input.positionSec / input.durationSec : 0
+    /*
+     * A threshold of 0 is meaningful and needs no special case: every ratio
+     * clears it, so the first tick of actual playback marks the episode. Note
+     * what that is *not* — ticks only arrive from our own player and only while
+     * something is playing, so 0 does not mean "watched when I open the page".
+     * That is `markWatchedOnOpen`, which needs no video at all.
+     */
     const completed = previous?.completed === true || ratio >= threshold
 
     if (!moved && completed === (previous?.completed ?? false)) return { anime, advanced: false }
@@ -371,6 +379,44 @@ export async function rename(key: string, displayTitle: string): Promise<Tracked
  * tracker data on every read, so a category whose rule changes takes effect at
  * once and nothing is ever left tagged by a rule that no longer exists.
  */
+/**
+ * The shelves a series lands on by rule alone.
+ *
+ * Kept here rather than in the handler so that every path that shelves something
+ * — one row, a bulk action — decides "is this already automatic?" the same way.
+ */
+function automaticShelves(anime: TrackedAnime): Set<string> {
+    const claims = Object.fromEntries(allSources().map(source => [source.id, source.categories]))
+    return new Set(automaticCategoriesOf(anime, cachedSettings().categories ?? [], claims))
+}
+
+/** Write the two override lists back, dropping an empty one rather than storing it. */
+function applyShelving(anime: TrackedAnime, categoryId: string, on: boolean): boolean {
+    const next = shelveOverrides(anime, categoryId, on, automaticShelves(anime).has(categoryId))
+
+    const same =
+        next.categories.join("\u0000") === [...(anime.categories ?? [])].sort().join("\u0000") &&
+        next.categoriesOff.join("\u0000") === [...(anime.categoriesOff ?? [])].sort().join("\u0000")
+    if (same) return false
+
+    anime.categories = next.categories
+    if (next.categoriesOff.length > 0) anime.categoriesOff = next.categoriesOff
+    else delete anime.categoriesOff
+    anime.updatedAt = Date.now()
+    return true
+}
+
+/**
+ * Put one series on one shelf, or take it off — including a shelf that fills
+ * itself. See `shelveOverrides`: the rule is evidence, the user is the decision.
+ */
+export async function shelve(key: string, categoryId: string, on: boolean): Promise<TrackedAnime | null> {
+    const anime = await db.getAnime(key)
+    if (!anime) return null
+    if (applyShelving(anime, categoryId, on)) await db.putAnime(anime)
+    return anime
+}
+
 export async function setCategories(key: string, categories: string[]): Promise<TrackedAnime | null> {
     const anime = await db.getAnime(key)
     if (!anime) return null
@@ -388,14 +434,9 @@ export async function bulkCategory(keys: string[], categoryId: string, action: "
         const anime = await db.getAnime(key)
         if (!anime) continue
 
-        const current = new Set(anime.categories ?? [])
-        const before = current.size
-        if (action === "add") current.add(categoryId)
-        else current.delete(categoryId)
-        if (current.size === before) continue
-
-        anime.categories = [...current].sort()
-        anime.updatedAt = Date.now()
+        // Same rules as one row at a time, so a bulk add onto "Donghua" means
+        // what a hand-tick there means.
+        if (!applyShelving(anime, categoryId, action === "add")) continue
         changed.push(anime)
     }
 

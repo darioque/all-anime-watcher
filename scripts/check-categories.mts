@@ -15,13 +15,17 @@ import {
     defaultCategories,
     genresInLibrary,
     matchesCategories,
+    automaticCategoriesOf,
     newCategory,
+    offeredCategories,
+    shelveOverrides,
     pruneFilter,
     unseededCategories,
     type Category,
     type CategoryFilter
 } from "~/library/categories"
 import type { Categorisable } from "~/library/categories"
+import { defaultSettings } from "~/settings/schema"
 
 let failures = 0
 
@@ -98,11 +102,7 @@ eq("a ticked category it has passes", matchesCategories(mine, { [id("Donghua")]:
 eq("a ticked category it lacks does not", matchesCategories(mine, { [id("Anime")]: "include" }), false)
 
 // Ticking narrows: "show me what is both", which is what narrowing a list means.
-eq(
-    "two ticks mean both",
-    matchesCategories(mine, { [id("Donghua")]: "include", [id("Airing")]: "include" }),
-    true
-)
+eq("two ticks mean both", matchesCategories(mine, { [id("Donghua")]: "include", [id("Airing")]: "include" }), true)
 eq(
     "and one of them missing is enough to drop it",
     matchesCategories(mine, { [id("Donghua")]: "include", [id("Movies")]: "include" }),
@@ -175,11 +175,7 @@ eq("a series whose checks are failing lands on Failing", categoriesOf(entry({ fa
 eq("a healthy one does not", categoriesOf(entry({ failCount: 0 }), cats).includes(id("Failing")), false)
 eq("an unfollowed series is on Not following", categoriesOf(entry({ follow: false }), cats), [id("Not following")])
 eq("an unpolled one is on Not checking", categoriesOf(entry({ poll: false }), cats), [id("Not checking")])
-eq(
-    "and a series can be on both at once",
-    categoriesOf(entry({ follow: false, poll: false }), cats).length,
-    2
-)
+eq("and a series can be on both at once", categoriesOf(entry({ follow: false, poll: false }), cats).length, 2)
 // Crossing these is the filter the whole thing is for: "show me the library
 // minus the ones I have paused".
 eq(
@@ -187,9 +183,66 @@ eq(
     matchesCategories(categoriesOf(entry({ poll: false }), cats), { [id("Not checking")]: "exclude" }),
     false
 )
+eq("and leaves the rest", matchesCategories(categoriesOf(entry(), cats), { [id("Not checking")]: "exclude" }), true)
+
+console.log("\n\x1b[1mcorrecting a shelf by hand\x1b[0m\n")
+
+/*
+ * The reason this exists: "Donghua" is AniList's countryOfOrigin, which is
+ * simply absent for every series added before tracker matching existed, and for
+ * every one AniList lists under a name no search of ours finds. A shelf that
+ * cannot be corrected by hand is a shelf that is quietly wrong, so the rule is
+ * evidence and the user is the decision — on automatic shelves too, not just on
+ * the manual ones.
+ */
+const unmatched = entry({ sourceId: "lmanime" })
+eq("an unmatched series is on no automatic shelf", categoriesOf(unmatched, cats).length, 0)
+
+const put = shelveOverrides(unmatched, id("Donghua"), true, false)
+eq("putting it on Donghua records the override", put.categories, [id("Donghua")])
+eq("and it is then on the shelf", categoriesOf({ ...unmatched, ...put }, cats).includes(id("Donghua")), true)
+eq("counts follow the correction", categoryCounts([{ ...unmatched, ...put }], cats)[id("Donghua")], 1)
+
+/*
+ * The symmetric case. Taking a series off a shelf a rule puts it on has to
+ * record an exclusion — deleting from the "on" list would achieve nothing, since
+ * the rule would file it there again on the next render.
+ */
+const wrong = entry({ meta: { countryOfOrigin: "CN" } })
+const off = shelveOverrides(wrong, id("Donghua"), false, true)
+eq("taking it off an automatic shelf records an exclusion", off.categoriesOff, [id("Donghua")])
+eq("and the rule no longer wins", categoriesOf({ ...wrong, ...off }, cats).includes(id("Donghua")), false)
 eq(
-    "and leaves the rest",
-    matchesCategories(categoriesOf(entry(), cats), { [id("Not checking")]: "exclude" }),
+    "while the rule itself is untouched",
+    automaticCategoriesOf({ ...wrong, ...off }, cats).includes(id("Donghua")),
+    true
+)
+
+/* Only the disagreement is stored, so neither list becomes a stale copy of the rules. */
+eq("ticking a shelf that already matches records nothing", shelveOverrides(wrong, id("Donghua"), true, true), {
+    categories: [],
+    categoriesOff: []
+})
+eq("unticking one that never matched records nothing", shelveOverrides(unmatched, id("Donghua"), false, false), {
+    categories: [],
+    categoriesOff: []
+})
+eq(
+    "and a correction is undone by the opposite one",
+    shelveOverrides({ ...unmatched, ...put }, id("Donghua"), false, false).categories,
+    []
+)
+
+/* A manual shelf still behaves exactly as it did: it has no rule to overrule. */
+const shelfOnly = [...cats, shelf]
+eq(
+    "a manual shelf is automatic for nothing",
+    automaticCategoriesOf(entry({ categories: [shelf.id] }), shelfOnly).includes(shelf.id),
+    false
+)
+eq(
+    "but still holds what was put on it",
+    categoriesOf(entry({ categories: [shelf.id] }), shelfOnly).includes(shelf.id),
     true
 )
 
@@ -203,8 +256,22 @@ console.log("\n\x1b[1mseeding built-ins into an existing profile\x1b[0m\n")
  * *offered* is tracked separately.
  */
 const oldProfile = cats.filter(category => category.rule.kind !== "state")
-eq("a profile from before state shelves gets them", unseededCategories(oldProfile, oldProfile.map(c => c.id)).length, 3)
-eq("a current profile gets nothing", unseededCategories(cats, cats.map(c => c.id)).length, 0)
+eq(
+    "a profile from before state shelves gets them",
+    unseededCategories(
+        oldProfile,
+        oldProfile.map(c => c.id)
+    ).length,
+    3
+)
+eq(
+    "a current profile gets nothing",
+    unseededCategories(
+        cats,
+        cats.map(c => c.id)
+    ).length,
+    0
+)
 eq(
     "and a shelf deleted on purpose stays deleted",
     unseededCategories(
@@ -214,6 +281,42 @@ eq(
     0
 )
 eq("a brand-new profile is seeded once", unseededCategories([], []).length, defaultCategories().length)
+
+/*
+ * Where this actually went wrong, and why the rules above all passed while the
+ * shelves never appeared: `seededCategories` *defaulted* to every built-in id.
+ * Settings are stored whole and merged over the defaults, so a profile written
+ * before the state shelves existed inherited "all of them have been offered"
+ * about shelves it had never been shown. The fault is in a default value rather
+ * than in a rule, which is invisible from inside this module — so it is checked
+ * against the schema itself.
+ */
+const settings = defaultSettings()
+eq("nothing is claimed as offered by default", settings.seededCategories.length, 0)
+eq(
+    "so a profile that predates a built-in is still offered it",
+    unseededCategories(oldProfile, settings.seededCategories).length,
+    3
+)
+eq(
+    "and a fresh profile, which already has them all, is offered nothing",
+    unseededCategories(settings.categories, settings.seededCategories).length,
+    0
+)
+
+/*
+ * Deletion has to stay stuck without that default doing the work. Saving the
+ * shelf list is what records them as offered, using the list from *before* the
+ * save — which is the only moment a shelf about to be deleted is still visible.
+ */
+const afterDelete = cats.filter(category => category.id !== "cat-movies")
+eq("saving records what was on screen as offered", offeredCategories([], cats).includes("cat-movies"), true)
+eq(
+    "so a deleted shelf does not come back on the next start",
+    unseededCategories(afterDelete, offeredCategories([], cats)).length,
+    0
+)
+eq("and offering is cumulative, never a replacement", offeredCategories(["cat-gone"], afterDelete).length, cats.length)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

@@ -85,8 +85,16 @@ export interface MessageMap {
     "library:remove": { req: { key: string }; res: boolean }
     "library:setFlags": { req: { key: string; follow?: boolean; poll?: boolean }; res: TrackedAnime | null }
     "library:rename": { req: { key: string; displayTitle: string }; res: TrackedAnime | null }
-    /** Manual shelf membership. Automatic categories are derived, never stored. */
+    /** Manual shelf membership, as a whole list. */
     "library:setCategories": { req: { key: string; categories: string[] }; res: TrackedAnime | null }
+    /**
+     * One series on or off one shelf — including a shelf that fills itself.
+     *
+     * Separate from `setCategories` because the answer depends on the shelf's
+     * rule: taking a series off "Donghua" has to record an exclusion, while
+     * taking it off a shelf it was only ever put on by hand records nothing.
+     */
+    "library:shelve": { req: { key: string; categoryId: string; on: boolean }; res: TrackedAnime | null }
     /** One shelf, many series — the bulk action behind the category bar. */
     "library:bulkCategory": {
         req: { keys: string[]; categoryId: string; action: "add" | "remove" }
@@ -130,7 +138,8 @@ export interface MessageMap {
 
     "sources:list": { req: Record<string, never>; res: SourceDescriptor[] }
     "tracker:matches": {
-        req: { key: string }
+        /** `query` searches AniList for what the user typed; without it, for the series' own title. */
+        req: { key: string; query?: string }
         res: {
             id: number
             title: string

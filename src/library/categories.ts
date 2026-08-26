@@ -82,16 +82,27 @@ export type SourceCategories = Record<string, string[] | undefined>
 /** The fields membership is decided from. */
 export type Categorisable = Pick<
     TrackedAnime,
-    "categories" | "meta" | "sourceId" | "follow" | "poll" | "failCount" | "episodes" | "lastWatched"
+    "categories" | "categoriesOff" | "meta" | "sourceId" | "follow" | "poll" | "failCount" | "episodes" | "lastWatched"
 >
 
-export function categoriesOf(anime: Categorisable, categories: Category[], sources: SourceCategories = {}): string[] {
-    const manual = new Set(anime.categories ?? [])
+/**
+ * Where a shelf's rule alone would file this entry — before the user has a say.
+ *
+ * Separated from `categoriesOf` because "does the rule already cover it?" is the
+ * question `shelveOverrides` needs: an override is only worth storing where it
+ * disagrees with the rule.
+ */
+export function automaticCategoriesOf(
+    anime: Categorisable,
+    categories: Category[],
+    sources: SourceCategories = {}
+): string[] {
     const claimed = (sources[anime.sourceId] ?? []).map(name => name.toLowerCase())
 
     return categories
         .filter(category => {
-            if (category.rule.kind === "manual") return manual.has(category.id)
+            // A manual shelf has no rule; it is entirely the user's.
+            if (category.rule.kind === "manual") return false
 
             /*
              * A site that only ever carries donghua is telling us something a
@@ -104,6 +115,51 @@ export function categoriesOf(anime: Categorisable, categories: Category[], sourc
             return matchesRule(category.rule, anime)
         })
         .map(category => category.id)
+}
+
+/**
+ * Which categories an entry is in, rules and the user's corrections together.
+ *
+ * The user wins, on every shelf. An automatic rule is evidence, not a verdict:
+ * "Donghua" is AniList's `countryOfOrigin`, which is simply absent for anything
+ * unmatched — every series added before tracker matching existed, and every one
+ * AniList lists under a name no search of ours will find. A shelf that cannot be
+ * corrected by hand is a shelf that is quietly wrong.
+ */
+export function categoriesOf(anime: Categorisable, categories: Category[], sources: SourceCategories = {}): string[] {
+    const forcedOn = new Set(anime.categories ?? [])
+    const forcedOff = new Set(anime.categoriesOff ?? [])
+    const automatic = new Set(automaticCategoriesOf(anime, categories, sources))
+
+    return categories
+        .filter(category => !forcedOff.has(category.id) && (forcedOn.has(category.id) || automatic.has(category.id)))
+        .map(category => category.id)
+}
+
+/**
+ * Put one series on a shelf, or take it off, whatever the shelf's rule says.
+ *
+ * Only the disagreement is stored. Ticking a shelf that already matches records
+ * nothing, so a series does not carry a redundant tag that would outlive the
+ * rule; unticking one that does not match records nothing either. That keeps the
+ * two lists to what they mean — *corrections* — rather than a second, staler
+ * copy of the rules.
+ */
+export function shelveOverrides(
+    anime: Pick<Categorisable, "categories" | "categoriesOff">,
+    categoryId: string,
+    on: boolean,
+    automatic: boolean
+): { categories: string[]; categoriesOff: string[] } {
+    const forcedOn = new Set(anime.categories ?? [])
+    const forcedOff = new Set(anime.categoriesOff ?? [])
+
+    forcedOn.delete(categoryId)
+    forcedOff.delete(categoryId)
+    if (on && !automatic) forcedOn.add(categoryId)
+    if (!on && automatic) forcedOff.add(categoryId)
+
+    return { categories: [...forcedOn].sort(), categoriesOff: [...forcedOff].sort() }
 }
 
 function matchesRule(rule: CategoryRule, anime: Categorisable): boolean {
@@ -208,6 +264,23 @@ export function defaultCategories(): Category[] {
 export function unseededCategories(existing: Category[], seeded: string[]): Category[] {
     const known = new Set([...existing.map(category => category.id), ...seeded])
     return defaultCategories().filter(category => !known.has(category.id))
+}
+
+/**
+ * Every shelf that has now been offered.
+ *
+ * Called whenever the shelf list is *saved*, with the list as it stood *before*
+ * that save: anything that was on screen a moment ago has by definition been
+ * offered, so deleting it must not be undone by the next start's seeding.
+ *
+ * This is what lets `seededCategories` default to empty — and an empty default
+ * is what lets a profile written before a built-in existed be offered it at all.
+ * Settings are stored whole and merged over the defaults, so a default that
+ * *listed* the built-ins told every older profile it had already seen shelves it
+ * had never been shown.
+ */
+export function offeredCategories(seeded: string[], categories: Category[]): string[] {
+    return [...new Set([...seeded, ...categories.map(category => category.id)])]
 }
 
 /**

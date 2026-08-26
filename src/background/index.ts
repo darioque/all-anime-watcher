@@ -15,7 +15,7 @@ import { installScheduler } from "./scheduler"
 import { installNotificationListeners } from "./notifications"
 import { refreshBadge } from "./badge"
 import { cachedSettings, loadSettings, loadSourceSettings, patchSettings } from "~/settings/storage"
-import { unseededCategories } from "~/library/categories"
+import { offeredCategories, unseededCategories } from "~/library/categories"
 import { allSources } from "~/sources/registry"
 import { ensureSourceState } from "~/library/library"
 import { log, setLogLevel } from "~/shared/logger"
@@ -39,6 +39,7 @@ async function initialise() {
     await refreshBadge()
     await applyToolbarBehaviour(settings.openInTab)
 
+    await repairOfferedCategories()
     await seedNewCategories()
 
     // Referer/Origin rewrites for video CDNs, and any opt-in CSP removal.
@@ -72,6 +73,35 @@ registerLabHandlers()
  * in a later one would never appear. Seeding by id, and remembering what has
  * been seeded, adds it exactly once and leaves a deleted one deleted.
  */
+/**
+ * Undo a claim an earlier default made about profiles it had never seen.
+ *
+ * `seededCategories` used to default to every built-in shelf's id. Settings are
+ * stored whole, so the first write of *any* setting persisted that into the
+ * profile — it then read as "you have already been offered all of these" about
+ * shelves that did not exist when the profile was made, and `seedNewCategories`
+ * correctly did nothing, for ever. Changing the default cannot help a profile
+ * that already wrote the old one down.
+ *
+ * The repair says the only thing that is actually known: you have been offered
+ * the shelves you have. It runs once, because after it runs, deletions recorded
+ * the honest way (`offeredCategories`, on save) have to stand. The cost is that
+ * a built-in deleted *before* this runs comes back one time — unavoidable, since
+ * the record that would have said otherwise is the corrupt one.
+ */
+const REOFFER_BUILT_INS = "reoffer-built-ins"
+
+async function repairOfferedCategories(): Promise<void> {
+    const settings = cachedSettings()
+    if ((settings.migrations ?? []).includes(REOFFER_BUILT_INS)) return
+
+    await patchSettings({
+        seededCategories: offeredCategories([], settings.categories ?? []),
+        migrations: [...(settings.migrations ?? []), REOFFER_BUILT_INS]
+    })
+    logger.info("repaired the record of which built-in shelves have been offered")
+}
+
 async function seedNewCategories(): Promise<void> {
     const settings = cachedSettings()
     const missing = unseededCategories(settings.categories ?? [], settings.seededCategories ?? [])

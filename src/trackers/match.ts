@@ -6,7 +6,7 @@ import { getAniListMedia, type AniListMedia } from "./anilist"
 import { CONFIDENT, findMatches } from "./matching"
 import { log } from "~/shared/logger"
 
-export { findMatches, scoreMatch } from "./matching"
+export { anilistIdFrom, findMatches, scoreMatch, searchMatches } from "./matching"
 
 const logger = log("tracker")
 

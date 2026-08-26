@@ -37,6 +37,24 @@ still needs `fish -c "nvm use 20.20.1; …"`. Don't carry that habit over here.)
 `dist/` is loaded unpacked in the browser. **The user builds and tests; don't run
 builds repeatedly just to re-read output.**
 
+## Committing
+
+A husky `pre-commit` hook (`.husky/pre-commit`) runs, in order: `lint-staged`
+(prettier over the staged files), `typecheck`, `check:all`, then
+`scripts/bump-version.mjs`. About four seconds.
+
+**The patch version moves on every commit, and that is the point.** The manifest
+takes its version from `package.json`, so it is what chrome://extensions shows —
+which makes it the only cheap answer to "is the browser running the build I just
+made?" A whole debugging session has been lost to that question. The bump is
+skipped during a merge, rebase or cherry-pick, when the version was already
+changed by hand, and under `SKIP_BUMP=1`; `git commit --no-verify` skips the lot.
+
+Prose and `package-lock.json` are in `.prettierignore` on purpose — see the file
+for why. Note that typecheck and the check suites read the *working tree*, not
+the staged content, so with unstaged work in flight they answer a slightly
+different question than "is this commit sound".
+
 ## Two build passes, on purpose
 
 - `vite.config.ts` — extension pages (Vue, HTML entries) and the background
@@ -108,6 +126,25 @@ These are load-bearing. Breaking one costs a rewrite later.
     it looked from the outside like one toggle being ignored. Storage change
     events carry `newValue`; *replace* the cache from it in the same tick rather
     than nulling it and hoping something re-reads in time.
+11. **A default must never assert something about the user's history.** Settings
+    are stored whole and merged *over* `defaultSettings()`, so any default is
+    also what every older profile is told about itself. `seededCategories`
+    defaulted to every built-in shelf's id — which said "all of these have
+    already been offered" to profiles that predated the shelves and could
+    therefore never be offered them. The pure rules (`unseededCategories`) were
+    correct and tested throughout; the fault was one line of default data, which
+    is invisible from inside the module that reads it. Defaults for
+    "what has happened" start empty; `offeredCategories` records the fact at the
+    moment it becomes true (saving the shelf list) instead. Same family as rule
+    10: a stand-in value quietly answering a question about real state.
+
+    **And changing the default does not repair the profiles that already stored
+    it.** `patchSettings` writes the whole merged object, so the first write of
+    *any* setting — a sort order, a filter — persisted the wrong claim into
+    storage, where no later default can reach it. A fix of this shape needs a
+    one-off repair recorded in `settings.migrations`; here that is
+    `repairOfferedCategories` in `background/index.ts`. Shipping only the new
+    default looks right, tests green, and changes nothing on the user's machine.
 
 ## Nothing hardcoded
 
@@ -486,6 +523,16 @@ family, signed AJAX, embeds on the MegaPlay engine).
    mundodonghua says `["Donghua"]`, which works with no tracker match at all.
    Chips have three states: ticking narrows (all must match), crossing removes
    (any is enough).
+
+   **An automatic rule is evidence, not a verdict.** Every shelf can be corrected
+   by hand, the ones that fill themselves included: `countryOfOrigin` is absent
+   for everything AniList has not matched — which is every series added before
+   tracker matching existed — so a "Donghua" shelf that cannot be corrected is
+   quietly wrong for exactly the library it was built for. `categories` forces a
+   series on and `categoriesOff` forces it off; `shelveOverrides` stores only the
+   *disagreement*, so neither list becomes a stale second copy of the rules.
+   Restricting hand-editing to manual shelves was the first attempt and was
+   useless: a user with no manual shelves saw no way to fix anything at all.
 
    *Look-ahead*: the background reads the next episode's page while the current
    one plays, and the player swaps identity in place with `pushState` instead of

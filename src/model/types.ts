@@ -149,7 +149,17 @@ export interface TrackedAnime {
     follow: boolean
     /** Include it in update checks. */
     poll: boolean
+    /**
+     * Shelves the user put this on by hand, whatever the shelf's rule says.
+     *
+     * Not only manual shelves: "Donghua" is decided by AniList's
+     * `countryOfOrigin`, which is missing for anything unmatched and wrong often
+     * enough besides — so the rule is a starting point the user is allowed to
+     * overrule, not a verdict.
+     */
     categories: string[]
+    /** Shelves the user took it *off*, overruling a rule that puts it there. */
+    categoriesOff?: string[]
 
     overrides: AnimeOverrides
 

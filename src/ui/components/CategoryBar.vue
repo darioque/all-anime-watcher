@@ -1,8 +1,10 @@
 <script setup lang="ts">
 import { computed, ref } from "vue"
 import type { TrackedAnime } from "~/model/types"
+import { titleOf } from "~/model/keys"
 import type { SourceDescriptor } from "~/shared/messages"
 import {
+    categoriesOf,
     categoryCounts,
     cycleFilter,
     genresInLibrary,
@@ -32,19 +34,39 @@ const emit = defineEmits<{
     "update:filter": [CategoryFilter]
     "update:categories": [Category[]]
     bulk: [{ action: "add" | "remove"; categoryId: string }]
+    /** One series on or off one shelf, by hand. */
+    assign: [{ key: string; categoryId: string; on: boolean }]
 }>()
 
 const managing = ref(false)
 const draft = ref("")
 const genreDraft = ref("")
 const bulkTarget = ref("")
+/**
+ * Which shelf's contents are open.
+ *
+ * The bulk control below fills a shelf from whatever the list is currently
+ * showing, which is the fast way to put forty series somewhere and no way at all
+ * to put one. This is the other half: pick the shelf, find the series, tick it.
+ */
+const editing = ref<string | null>(null)
+const memberQuery = ref("")
+
+/** How many candidates to show at once — a library is longer than a panel. */
+const CANDIDATE_LIMIT = 25
 
 const sourceClaims = computed(() => Object.fromEntries(props.sources.map(source => [source.id, source.categories])))
 
 const counts = computed(() => categoryCounts(props.library, props.categories, sourceClaims.value))
 
-/** Manual shelves are the only ones a row can be put on by hand. */
-const manual = computed(() => props.categories.filter(category => category.rule.kind === "manual"))
+/**
+ * Every shelf can be filled by hand, automatic ones included.
+ *
+ * A rule is evidence, not a verdict: "Donghua" comes from AniList's
+ * `countryOfOrigin`, which is missing for everything unmatched — including
+ * every series added before tracker matching existed.
+ */
+const fillable = computed(() => props.categories)
 
 const genres = computed(() => {
     const taken = new Set(
@@ -78,6 +100,41 @@ function removeShelf(category: Category) {
         "update:categories",
         props.categories.filter(candidate => candidate.id !== category.id)
     )
+}
+
+function editShelf(category: Category) {
+    editing.value = editing.value === category.id ? null : category.id
+    memberQuery.value = ""
+}
+
+/** What is on a shelf: put there by a rule, by hand, or both. */
+function membersOf(categoryId: string): TrackedAnime[] {
+    return props.library
+        .filter(anime => categoriesOf(anime, props.categories, sourceClaims.value).includes(categoryId))
+        .sort((a, b) => titleOf(a).localeCompare(titleOf(b)))
+}
+
+/** Whether the user put it there themselves, which is what the ✕ undoes. */
+function byHand(anime: TrackedAnime, categoryId: string): boolean {
+    return (anime.categories ?? []).includes(categoryId)
+}
+
+const matches = computed(() => {
+    const id = editing.value
+    if (id === null) return []
+    const needle = memberQuery.value.trim().toLowerCase()
+    const already = new Set(membersOf(id).map(anime => anime.key))
+
+    return props.library
+        .filter(anime => !already.has(anime.key))
+        .filter(anime => needle === "" || titleOf(anime).toLowerCase().includes(needle))
+        .sort((a, b) => titleOf(a).localeCompare(titleOf(b)))
+})
+
+const candidates = computed(() => matches.value.slice(0, CANDIDATE_LIMIT))
+
+function assign(anime: TrackedAnime, categoryId: string, on: boolean) {
+    emit("assign", { key: anime.key, categoryId, on })
 }
 
 function describe(category: Category): string {
@@ -134,10 +191,74 @@ const active = computed(() => Object.keys(props.filter).length > 0)
 
         <div v-if="managing" class="manage-panel">
             <ul class="shelves">
-                <li v-for="category in categories" :key="category.id">
-                    <span class="name">{{ category.name }}</span>
-                    <span class="rule">{{ describe(category) }}</span>
-                    <button class="link" title="Delete this shelf" @click="removeShelf(category)">Delete</button>
+                <li v-for="category in categories" :key="category.id" class="shelf">
+                    <div class="shelf-head">
+                        <span class="name">{{ category.name }}</span>
+                        <span class="rule">{{ describe(category) }}</span>
+                        <button
+                            class="link"
+                            :title="`Choose which series sit on ${category.name}`"
+                            @click="editShelf(category)"
+                        >
+                            {{ editing === category.id ? "Done" : `Series (${counts[category.id] ?? 0})` }}
+                        </button>
+                        <button class="link" title="Delete this shelf" @click="removeShelf(category)">Delete</button>
+                    </div>
+
+                    <!--
+                        Hand-picking, as the counterpart to the bulk control below:
+                        that one fills a shelf from whatever the list is showing,
+                        which cannot put a single series anywhere.
+                    -->
+                    <div v-if="editing === category.id" class="members">
+                        <p v-if="category.rule.kind !== 'manual'" class="hint">
+                            This shelf fills itself from {{ describe(category) }} — adding and removing here overrules
+                            that, which is what an unmatched series needs.
+                        </p>
+
+                        <ul v-if="membersOf(category.id).length > 0" class="picked">
+                            <li v-for="anime in membersOf(category.id)" :key="anime.key">
+                                <span class="member-title">{{ titleOf(anime) }}</span>
+                                <span class="how">{{ byHand(anime, category.id) ? "by hand" : "automatic" }}</span>
+                                <button
+                                    class="link"
+                                    :title="`Take ${titleOf(anime)} off ${category.name}`"
+                                    @click="assign(anime, category.id, false)"
+                                >
+                                    ✕
+                                </button>
+                            </li>
+                        </ul>
+                        <p v-else class="hint">Nothing on this shelf yet.</p>
+
+                        <input
+                            v-model="memberQuery"
+                            type="search"
+                            placeholder="Find a series to add…"
+                            :aria-label="`Find a series to add to ${category.name}`"
+                        />
+
+                        <ul v-if="candidates.length > 0" class="picked candidates">
+                            <li v-for="anime in candidates" :key="anime.key">
+                                <span class="member-title">{{ titleOf(anime) }}</span>
+                                <button
+                                    class="link add"
+                                    :title="`Put ${titleOf(anime)} on ${category.name}`"
+                                    @click="assign(anime, category.id, true)"
+                                >
+                                    Add
+                                </button>
+                            </li>
+                        </ul>
+                        <p v-else class="hint">
+                            {{
+                                memberQuery.trim() === "" ? "Every series is already here." : "No series matches that."
+                            }}
+                        </p>
+                        <p v-if="matches.length > candidates.length" class="hint">
+                            {{ matches.length - candidates.length }} more — keep typing to narrow it.
+                        </p>
+                    </div>
                 </li>
             </ul>
 
@@ -164,10 +285,10 @@ const active = computed(() => Object.keys(props.filter).length > 0)
                 Genres come from AniList, so they appear as series get matched.
             </p>
 
-            <div v-if="manual.length > 0" class="add">
+            <div v-if="fillable.length > 0" class="add">
                 <select v-model="bulkTarget" aria-label="Shelf to put the shown series on">
                     <option value="">Put the {{ shown.length }} shown series on…</option>
-                    <option v-for="category in manual" :key="category.id" :value="category.id">
+                    <option v-for="category in fillable" :key="category.id" :value="category.id">
                         {{ category.name }}
                     </option>
                 </select>
@@ -186,7 +307,7 @@ const active = computed(() => Object.keys(props.filter).length > 0)
                     Remove
                 </button>
             </div>
-            <p v-else class="hint">Bulk actions need a shelf you fill yourself — the automatic ones fill themselves.</p>
+            <p v-else class="hint">Make a shelf first and this fills it from whatever the list is showing.</p>
         </div>
     </div>
 </template>
@@ -196,6 +317,10 @@ const active = computed(() => Object.keys(props.filter).length > 0)
     display: flex;
     flex-direction: column;
     gap: 8px;
+    /* Matches the controls row underneath, and keeps the first row of chips off
+       the header's bottom rule — flush against it they read as part of the title
+       bar rather than as the top of the list. */
+    padding: 12px 14px 2px;
 }
 
 .chips {
@@ -270,11 +395,82 @@ const active = computed(() => Object.keys(props.filter).length > 0)
 }
 
 .shelves li {
+    font-size: 12px;
+}
+
+.shelf-head {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto auto;
+    gap: 8px;
+    align-items: baseline;
+}
+
+.members {
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+    margin: 5px 0 9px;
+    padding: 8px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+}
+
+.members input {
+    font: inherit;
+    font-size: 12px;
+    color: var(--ink);
+    background: var(--surface-2);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    padding: 5px 8px;
+}
+
+.picked {
+    list-style: none;
+    margin: 0;
+    padding: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.picked.candidates li {
+    grid-template-columns: minmax(0, 1fr) auto;
+}
+
+/* Bounded: the candidate list is the whole library until something is typed. */
+.picked.candidates {
+    max-height: 168px;
+    overflow-y: auto;
+}
+
+.picked li {
     display: grid;
     grid-template-columns: minmax(0, 1fr) auto auto;
     gap: 8px;
     align-items: baseline;
-    font-size: 12px;
+}
+
+.how {
+    font-size: 10px;
+    color: var(--ink-3);
+    opacity: 0.8;
+}
+
+.member-title {
+    color: var(--ink-2);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.link.add:hover {
+    color: var(--accent-ink);
+}
+
+.rule.auto {
+    opacity: 0.7;
 }
 
 .name {

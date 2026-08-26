@@ -26,7 +26,13 @@ import ConfirmDialog from "./ConfirmDialog.vue"
 import SearchPanel from "./SearchPanel.vue"
 import DownloadsPanel from "./DownloadsPanel.vue"
 import CategoryBar from "./CategoryBar.vue"
-import { categoriesOf, matchesCategories, pruneFilter } from "~/library/categories"
+import {
+    automaticCategoriesOf,
+    categoriesOf,
+    matchesCategories,
+    offeredCategories,
+    pruneFilter
+} from "~/library/categories"
 import type { Category, CategoryFilter } from "~/library/categories"
 import { groupSeries, groupLatest, groupPosition, groupUnwatched, preferredEntry } from "~/library/grouping"
 import type { SeriesGroup } from "~/library/grouping"
@@ -52,6 +58,8 @@ const sort = ref<Sort>("recent")
 const onlyUnwatched = ref(false)
 const sourceFilter = ref("")
 const categories = ref<Category[]>([])
+/** Which built-ins have been offered, so deleting one stays deleted. */
+const seededCategories = ref<string[]>([])
 const categoryFilter = ref<CategoryFilter>({})
 /** Which row's shelf editor is open, mirroring the episode picker. */
 const categoriesFor = ref<string | null>(null)
@@ -222,28 +230,52 @@ function membershipOf(a: TrackedAnime): string[] {
     return categoriesOf(a, categories.value, sourceClaims.value)
 }
 
-/** Only manual shelves can be ticked by hand; the rest fill themselves. */
-const manualCategories = computed(() => categories.value.filter(category => category.rule.kind === "manual"))
-
-function automaticFor(a: TrackedAnime): Category[] {
-    const mine = new Set(membershipOf(a))
-    return categories.value.filter(category => category.rule.kind !== "manual" && mine.has(category.id))
+/** Where the rules alone would file it — what the "auto" tag marks. */
+function automaticIds(a: TrackedAnime): string[] {
+    return automaticCategoriesOf(a, categories.value, sourceClaims.value)
 }
 
-async function toggleCategory(a: TrackedAnime, categoryId: string) {
-    const current = new Set(a.categories ?? [])
-    if (current.has(categoryId)) current.delete(categoryId)
-    else current.add(categoryId)
-
-    const updated = await send("library:setCategories", { key: a.key, categories: [...current] })
+/**
+ * On or off one shelf, stated rather than toggled.
+ *
+ * The background decides what to store, because that depends on the shelf's
+ * rule: taking a series off "Donghua" records an exclusion, taking it off a
+ * shelf it was only put on by hand records nothing.
+ */
+async function setCategory(a: TrackedAnime, categoryId: string, on: boolean) {
+    const updated = await send("library:shelve", { key: a.key, categoryId, on })
     if (updated) replaceRow(updated)
 }
 
+function toggleCategory(a: TrackedAnime, categoryId: string) {
+    return setCategory(a, categoryId, !membershipOf(a).includes(categoryId))
+}
+
+/**
+ * One series onto one shelf, from the shelf's own editor.
+ *
+ * Stated rather than toggled: the caller already knows which way it is going,
+ * and a toggle over a list that is re-sorting under the click is how the wrong
+ * row gets changed.
+ */
+async function assignCategory(event: { key: string; categoryId: string; on: boolean }) {
+    const anime = library.value.find(candidate => candidate.key === event.key)
+    if (!anime) return
+    await setCategory(anime, event.categoryId, event.on)
+}
+
 async function saveCategories(next: Category[]) {
+    // Recorded *before* the change: a shelf that was on screen has been offered,
+    // so deleting it here must not be undone by the next start's seeding.
+    const seeded = offeredCategories(seededCategories.value, categories.value)
+
     categories.value = next
+    seededCategories.value = seeded
     // A filter pointing at a deleted shelf would silently hide everything.
     categoryFilter.value = pruneFilter(categoryFilter.value, next)
-    await send("settings:patch", { patch: { categories: next, listCategoryFilter: categoryFilter.value } })
+    await send("settings:patch", {
+        patch: { categories: next, seededCategories: seeded, listCategoryFilter: categoryFilter.value }
+    })
 }
 
 async function bulkCategory(event: { action: "add" | "remove"; categoryId: string }) {
@@ -305,6 +337,7 @@ async function restoreControls() {
         onlyUnwatched.value = settings.listOnlyUnwatched
         sourceFilter.value = settings.listSourceFilter
         categories.value = settings.categories ?? []
+        seededCategories.value = settings.seededCategories ?? []
         categoryFilter.value = pruneFilter(settings.listCategoryFilter ?? {}, categories.value)
         grouping.value = settings.groupBySeries
     } catch {
@@ -696,6 +729,7 @@ defineExpose({ load })
             @update:filter="value => (categoryFilter = value)"
             @update:categories="saveCategories"
             @bulk="bulkCategory"
+            @assign="assignCategory"
         />
 
         <div v-if="library.length > 1" class="controls-row">
@@ -908,26 +942,23 @@ defineExpose({ load })
                                 <button class="btn tiny" @click="categoriesFor = null">Close</button>
                             </div>
 
-                            <div v-if="manualCategories.length > 0" class="shelf-picks">
-                                <label v-for="category in manualCategories" :key="category.id" class="shelf-pick">
+                            <div v-if="categories.length > 0" class="shelf-picks">
+                                <label v-for="category in categories" :key="category.id" class="shelf-pick">
                                     <input
                                         type="checkbox"
-                                        :checked="(a.categories ?? []).includes(category.id)"
+                                        :checked="membershipOf(a).includes(category.id)"
                                         @change="toggleCategory(a, category.id)"
                                     />
                                     <span>{{ category.name }}</span>
+                                    <span v-if="automaticIds(a).includes(category.id)" class="shelf-auto">auto</span>
                                 </label>
                             </div>
-                            <p v-else class="shelf-note">
-                                No shelves of your own yet — make one under “Shelves…” above the list.
-                            </p>
+                            <p v-else class="shelf-note">No shelves yet — make one under “Shelves…” above the list.</p>
 
-                            <p v-if="automaticFor(a).length > 0" class="shelf-note">
-                                Also on
-                                <span v-for="(category, index) in automaticFor(a)" :key="category.id">
-                                    <strong>{{ category.name }}</strong
-                                    ><span v-if="index < automaticFor(a).length - 1">, </span> </span
-                                >, which fill themselves.
+                            <p class="shelf-note">
+                                “auto” means a rule already files it there — usually what AniList says. Ticking or
+                                unticking overrules the rule, which is how a series it has never heard of gets on the
+                                right shelf.
                             </p>
                         </div>
 
@@ -1441,6 +1472,12 @@ h1 {
     font-size: 12px;
     color: var(--ink-2);
     cursor: pointer;
+}
+
+.shelf-auto {
+    font-size: 10px;
+    color: var(--ink-3);
+    opacity: 0.75;
 }
 
 .shelf-note {

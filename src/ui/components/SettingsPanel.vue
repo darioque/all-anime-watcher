@@ -53,9 +53,9 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
             {
                 key: "completionThreshold",
                 label: "Count an episode as watched at",
-                help: "A fraction of its length. 0.85 means 85% in.",
+                help: "A fraction of its length. 0.85 means 85% in. 0 counts it as soon as our player starts playing it — for “watched the moment I open it”, use the setting above instead, which does not need the video to play.",
                 type: "number",
-                min: 0.1,
+                min: 0,
                 max: 1,
                 step: 0.05
             }

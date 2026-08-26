@@ -122,6 +122,16 @@ export interface GlobalSettings {
      * statement, and a shelf thrown away would come back on the next start.
      */
     seededCategories: string[]
+    /**
+     * One-off repairs already applied to this profile, by name.
+     *
+     * Needed because a *default* is also what every stored profile is told about
+     * itself: `seededCategories` once defaulted to every built-in id, and any
+     * settings write persisted that claim into storage. No later default can
+     * undo a lie already written down, so the repair has to run once and record
+     * that it has.
+     */
+    migrations: string[]
     /** Ticked and crossed chips, persisted like every other list control. */
     listCategoryFilter: CategoryFilter
     groupBySeries: boolean
@@ -203,7 +213,18 @@ export function defaultSettings(): GlobalSettings {
         listOnlyUnwatched: false,
         listSourceFilter: "",
         categories: defaultCategories(),
-        seededCategories: defaultCategories().map(category => category.id),
+        /*
+         * Empty, not "every built-in id" — the two look equivalent and are not.
+         * Settings are stored whole and merged *over* these defaults, so a
+         * profile written before this field existed inherits whatever sits here.
+         * Filling it in said "every built-in has already been offered" about a
+         * profile that had never been offered any of them, and the shelves added
+         * after that profile was created could never appear. A fresh profile is
+         * still covered: `categories` above already holds all of them, and
+         * `unseededCategories` treats an existing shelf as offered.
+         */
+        seededCategories: [],
+        migrations: [],
         listCategoryFilter: {},
         groupBySeries: true,
         perPage: 25,

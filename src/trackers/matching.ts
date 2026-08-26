@@ -1,4 +1,4 @@
-import { titlesOf, searchAniList, type AniListMedia } from "./anilist"
+import { titlesOf, searchAniList, getAniListMedia, type AniListMedia } from "./anilist"
 
 /**
  * Title matching, kept free of storage and settings so it can be exercised
@@ -121,9 +121,55 @@ export async function findMatches(title: string): Promise<MatchCandidate[]> {
         media = await searchAniList(title)
     }
 
-    const seen = new Set<number>()
-    return media
-        .filter(item => (seen.has(item.id) ? false : seen.add(item.id) && true))
+    return dedupe(media)
         .map(item => ({ media: item, score: scoreMatch(title, item) }))
         .sort((a, b) => b.score - a.score)
+}
+
+/**
+ * The AniList id in something the user pasted: a bare id, or any of its URLs.
+ *
+ * Pasting the page is the way out of the case manual search exists for — a
+ * series AniList carries under a romanisation nobody would guess, where the user
+ * can find it in their browser and no query here ever will.
+ */
+export function anilistIdFrom(query: string): number | null {
+    const text = query.trim()
+    if (/^\d+$/.test(text)) return Number.parseInt(text, 10)
+
+    const url = /anilist\.co\/(?:anime|manga)\/(\d+)/i.exec(text)
+    return url?.[1] ? Number.parseInt(url[1], 10) : null
+}
+
+/**
+ * Candidates for a query the user typed themselves.
+ *
+ * Two things differ from `findMatches`, both deliberate:
+ *
+ *  - The query is sent as typed. Cleaning exists to get an *automatic* search
+ *    past AniList's dislike of season markers; when someone types "Season 2"
+ *    here they mean it, and stripping it would answer a question they did not
+ *    ask.
+ *  - The score still measures the result against the *series*, not against what
+ *    was typed — otherwise every result reads "near-certain" merely for being
+ *    what was searched for, which is exactly the confident-and-wrong link the
+ *    threshold exists to prevent. AniList's own relevance order is kept for the
+ *    same reason: when the right answer is a romanisation the local title does
+ *    not resemble, every score is low and sorting by them is noise.
+ */
+export async function searchMatches(query: string, against: string): Promise<MatchCandidate[]> {
+    const id = anilistIdFrom(query)
+    if (id !== null) {
+        const media = await getAniListMedia(id)
+        return media ? [{ media, score: scoreMatch(against, media) }] : []
+    }
+
+    const media = await searchAniList(query.trim())
+    return dedupe(media).map(item => ({ media: item, score: scoreMatch(against, item) }))
+}
+
+/** AniList can return the same media twice across two searches. */
+function dedupe(media: AniListMedia[]): AniListMedia[] {
+    const seen = new Set<number>()
+    return media.filter(item => (seen.has(item.id) ? false : seen.add(item.id) && true))
 }

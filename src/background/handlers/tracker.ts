@@ -2,19 +2,28 @@ import { on } from "../router"
 import { libraryChanged } from "../broadcast"
 import { getAllAnime, getAnime } from "~/model/db"
 import { titleOf } from "~/model/keys"
-import { enrich, findMatches, linkTo, unlink } from "~/trackers/match"
+import { enrich, findMatches, linkTo, searchMatches, unlink } from "~/trackers/match"
 import { resolve } from "~/settings/resolver"
 import { log } from "~/shared/logger"
 
 const logger = log("handler:tracker")
 
 export function registerTrackerHandlers() {
-    /** Ranked AniList candidates, so the user can confirm or correct a match. */
-    on("tracker:matches", async ({ key }) => {
+    /**
+     * Ranked AniList candidates, so the user can confirm or correct a match.
+     *
+     * With a `query`, it searches for what the user typed instead of for the
+     * series' title. That is the whole point of the manual box: the automatic
+     * search fails when AniList lists a donghua under a romanisation the site's
+     * title does not resemble, and no amount of cleverness on our side finds it —
+     * the user knows the name and we do not.
+     */
+    on("tracker:matches", async ({ key, query }) => {
         const anime = await getAnime(key)
         if (!anime) return []
 
-        const candidates = await findMatches(titleOf(anime))
+        const typed = query?.trim() ?? ""
+        const candidates = typed === "" ? await findMatches(titleOf(anime)) : await searchMatches(typed, titleOf(anime))
         return candidates.map(({ media, score }) => ({
             id: media.id,
             title: media.titleEnglish ?? media.titleRomaji ?? media.titleNative ?? String(media.id),

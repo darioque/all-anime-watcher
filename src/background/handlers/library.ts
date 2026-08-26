@@ -10,6 +10,7 @@ import {
     remove,
     rename,
     setCategories,
+    shelve,
     bulkCategory,
     resetWatchStatus,
     setFlags,
@@ -54,6 +55,12 @@ export function registerLibraryHandlers() {
         })
         await refreshBadge()
         libraryChanged("flags", key)
+        return anime
+    })
+
+    on("library:shelve", async ({ key, categoryId, on: wanted }) => {
+        const anime = await shelve(key, categoryId, wanted)
+        libraryChanged("categories", key)
         return anime
     })
 

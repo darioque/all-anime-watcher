@@ -7,7 +7,7 @@
  *
  *   npm run check:matching
  */
-import { CONFIDENT, scoreMatch, searchQuery, seasonOf } from "~/trackers/matching"
+import { anilistIdFrom, CONFIDENT, scoreMatch, searchQuery, seasonOf } from "~/trackers/matching"
 import type { AniListMedia } from "~/trackers/anilist"
 
 let failures = 0
@@ -51,7 +51,10 @@ check("matches on a synonym", scoreMatch("Xian Ni", exact) === 1, `${scoreMatch(
 check("punctuation is ignored", scoreMatch("renegade-immortal!", exact) === 1)
 
 const seasonOne = media({ romaji: "Fanren Xiu Xian Zhuan", english: "A Record of a Mortal's Journey to Immortality" })
-const seasonFive = media({ romaji: "Fanren Xiu Xian Zhuan Di Wu Ji", synonyms: ["A Record of a Mortal's Journey to Immortality Season 5"] })
+const seasonFive = media({
+    romaji: "Fanren Xiu Xian Zhuan Di Wu Ji",
+    synonyms: ["A Record of a Mortal's Journey to Immortality Season 5"]
+})
 
 const wrongSeason = scoreMatch("A Record of a Mortal's Journey to Immortality Season 5", seasonOne)
 const rightSeason = scoreMatch("A Record of a Mortal's Journey to Immortality Season 5", seasonFive)
@@ -62,6 +65,20 @@ check("the right season outranks the wrong one", rightSeason > wrongSeason)
 // A season-1 title has no marker, so nothing should be penalised.
 const plain = scoreMatch("A Record of a Mortal's Journey to Immortality", seasonOne)
 check("an unnumbered title is not penalised", plain >= CONFIDENT, plain.toFixed(2))
+
+console.log("\n\x1b[1mwhat the user typed\x1b[0m\n")
+
+/*
+ * Manual search exists for the series no query of ours will ever find — AniList
+ * carries plenty of donghua under a romanisation the site's title does not
+ * resemble. Pasting the page is the way out, so what counts as a paste matters.
+ */
+check("a bare id is an id", anilistIdFrom("21") === 21)
+check("a series URL carries one", anilistIdFrom("https://anilist.co/anime/153406/Xian-Ni/") === 153406)
+check("with or without a scheme", anilistIdFrom("anilist.co/anime/1535") === 1535)
+check("surrounding space is ignored", anilistIdFrom("  9253 ") === 9253)
+check("a title is not an id", anilistIdFrom("Xian Ni") === null)
+check("and neither is a title with numbers in it", anilistIdFrom("Tales of Demons and Gods 8") === null)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)
