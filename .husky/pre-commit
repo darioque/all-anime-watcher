@@ -1,0 +1,19 @@
+# What has to be true of every commit here, cheapest first.
+#
+# The whole hook is ~4s. That is affordable per commit and is bought back the
+# first time it catches a rule that stopped holding, because the alternative is
+# finding out from the extension misbehaving in the browser.
+#
+# Escape hatches: `git commit --no-verify` skips all of it, `SKIP_BUMP=1` keeps
+# the checks and leaves the version alone.
+#
+# One caveat worth knowing: typecheck and the check suites read the *working
+# tree*, not the staged content. With unstaged changes in flight they answer a
+# slightly different question than "is this commit sound".
+
+npx lint-staged
+
+npm run --silent typecheck
+npm run --silent check:all
+
+node scripts/bump-version.mjs

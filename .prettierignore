@@ -1,0 +1,12 @@
+dist
+node_modules
+.probe
+
+# npm owns this file's formatting and rewrites it on every install; prettier
+# reformatting it in between just makes the two fight over the same lines.
+package-lock.json
+
+# Prose, deliberately hand-wrapped. Prettier's markdown pass rewrites emphasis
+# markers and pads every table, which is 200 lines of churn on CLAUDE.md for no
+# reader's benefit — and it would do it again on every commit that touches it.
+*.md

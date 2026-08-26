@@ -1,13 +1,17 @@
 {
     "name": "all-anime-watcher",
-    "version": "0.1.0",
+    "version": "0.1.1",
     "private": true,
     "description": "Follow anime and donghua across streaming sites: auto-track what you watch, get notified about new episodes, watch in one consistent player.",
     "type": "module",
+    "lint-staged": {
+        "**/*": "prettier --write --ignore-unknown"
+    },
     "engines": {
         "node": ">=20.19.0"
     },
     "scripts": {
+        "prepare": "husky",
         "build": "vite build && vite build --config vite.content.config.ts && node scripts/check-dist.mjs",
         "check": "node scripts/check-dist.mjs",
         "check:all": "npm run --silent check:schedule && npm run --silent check:matching && npm run --silent check:myanime && npm run --silent check:grouping && npm run --silent check:m3u8 && npm run --silent check:episodes && npm run --silent check:backup && npm run --silent check:downloads && npm run --silent check:categories && npm run --silent check:lab && npm run --silent check:extractors",
@@ -43,6 +47,8 @@
         "@types/webextension-polyfill": "^0.12.4",
         "@vitejs/plugin-vue": "^6.0.1",
         "esbuild": "^0.28.2",
+        "husky": "^9.1.7",
+        "lint-staged": "^17.3.0",
         "prettier": "^3.4.2",
         "typescript": "^6.0.3",
         "vite": "^8.2.2",
