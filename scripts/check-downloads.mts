@@ -56,7 +56,11 @@ eq("an unknown placeholder is left visible", fileNameFor("{titel}-{ep}.{ext}", b
 eq("an empty field takes its separator with it", fileNameFor("{title} {quality}.{ext}", base), "Xian Ni.mp4")
 eq("including a dash", fileNameFor("{title} - {quality}.{ext}", base), "Xian Ni.mp4")
 eq("and a whole path segment", fileNameFor("{source}/{title}.{ext}", base), "Xian Ni.mp4")
-eq("while a present field keeps it", fileNameFor("{title} - {quality}.{ext}", { ...base, quality: "1080p" }), "Xian Ni - 1080p.mp4")
+eq(
+    "while a present field keeps it",
+    fileNameFor("{title} - {quality}.{ext}", { ...base, quality: "1080p" }),
+    "Xian Ni - 1080p.mp4"
+)
 
 console.log("\n\x1b[1mnames a filesystem would refuse\x1b[0m\n")
 
@@ -87,14 +91,22 @@ eq("as is a trailing space", fileNameFor("{title}/x.{ext}", { ...base, title: "S
 // "CON.mp4" is as unwritable as "CON" — the extension does not rescue it.
 eq("a reserved device name is escaped", fileNameFor("{title}.{ext}", { ...base, title: "CON" }), "_CON.mp4")
 eq("in any case", fileNameFor("{title}.{ext}", { ...base, title: "nul" }), "_nul.mp4")
-eq("but a name merely starting with one is fine", fileNameFor("{title}.{ext}", { ...base, title: "Console" }), "Console.mp4")
+eq(
+    "but a name merely starting with one is fine",
+    fileNameFor("{title}.{ext}", { ...base, title: "Console" }),
+    "Console.mp4"
+)
 
 console.log("\n\x1b[1mpaths\x1b[0m\n")
 
 eq("a traversal attempt is dropped, not escaped", fileNameFor("../../{title}.{ext}", base), "Xian Ni.mp4")
 eq("a leading slash does not make it absolute", fileNameFor("/{title}.{ext}", base), "Xian Ni.mp4")
 eq("empty segments collapse", fileNameFor("{title}//x.{ext}", base), "Xian Ni/x.mp4")
-eq("a template that sanitises away still yields a file", fileNameFor("{unknownfield}", { ...base, ext: "ts" }), "{unknownfield}")
+eq(
+    "a template that sanitises away still yields a file",
+    fileNameFor("{unknownfield}", { ...base, ext: "ts" }),
+    "{unknownfield}"
+)
 eq("an entirely empty template falls back", fileNameFor("", base), "episode.mp4")
 
 const long = "A".repeat(300)
@@ -118,8 +130,16 @@ console.log("\n\x1b[1mHLS decryption vectors\x1b[0m\n")
  */
 const hex = (bytes: Uint8Array) => [...bytes].map(byte => byte.toString(16).padStart(2, "0")).join("")
 
-eq("an explicit IV is used as written", hex(ivFor({ iv: "0x0123456789abcdef0123456789abcdef", index: 7 })), "0123456789abcdef0123456789abcdef")
-eq("the 0x prefix is optional", hex(ivFor({ iv: "0123456789ABCDEF0123456789ABCDEF", index: 0 })), "0123456789abcdef0123456789abcdef")
+eq(
+    "an explicit IV is used as written",
+    hex(ivFor({ iv: "0x0123456789abcdef0123456789abcdef", index: 7 })),
+    "0123456789abcdef0123456789abcdef"
+)
+eq(
+    "the 0x prefix is optional",
+    hex(ivFor({ iv: "0123456789ABCDEF0123456789ABCDEF", index: 0 })),
+    "0123456789abcdef0123456789abcdef"
+)
 
 // With no IV stated, the segment's media sequence number is the IV, as a
 // 128-bit big-endian integer — which is why the sequence is carried through the

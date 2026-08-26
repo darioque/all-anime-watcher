@@ -10,7 +10,15 @@
  * it. A check that only ever runs against a live site is a check nobody can
  * trust — and these are the ones that decide whether a source is healthy.
  */
-import { checkAttributes, checkFetch, checkPage, checkSearch, checkSeries, checkServers, checkStreams } from "~/lab/checks"
+import {
+    checkAttributes,
+    checkFetch,
+    checkPage,
+    checkSearch,
+    checkSeries,
+    checkServers,
+    checkStreams
+} from "~/lab/checks"
 import type { SourceFacts } from "~/lab/checks"
 import type { LabFetchReport, LabSeriesReport } from "~/lab/types"
 import type { SearchResult } from "~/sources/types"
@@ -63,11 +71,7 @@ console.log("\n\x1b[1msource attributes\x1b[0m\n")
 
 eq("a complete source passes", checkAttributes(source).ok, true)
 eq("one with no domains cannot be matched at all", checkAttributes({ ...source, domains: [] }).ok, false)
-says(
-    "and says which attribute is missing",
-    checkAttributes({ ...source, languages: [] }).note,
-    "languages"
-)
+says("and says which attribute is missing", checkAttributes({ ...source, languages: [] }).note, "languages")
 eq("a home that is not a URL fails", checkAttributes({ ...source, home: "anikoto" }).ok, false)
 
 // Not a failure — a source is allowed to have moved — but it must be said,
@@ -220,11 +224,7 @@ const allIframes = checkServers([
 eq("every server on an iframe is a failure", allIframes.ok, false)
 says("said as a count rather than one host", allIframes.note, "2")
 
-eq(
-    "a probe that threw is a dead server too",
-    checkServers([{ server: "Fm", thrown: "unknown source" }]).ok,
-    false
-)
+eq("a probe that threw is a dead server too", checkServers([{ server: "Fm", thrown: "unknown source" }]).ok, false)
 eq("and no servers at all cannot pass", checkServers([]).ok, false)
 
 console.log("\n\x1b[1mthe fetch the CLI cannot make\x1b[0m\n")

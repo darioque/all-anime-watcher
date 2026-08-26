@@ -91,19 +91,26 @@ function cookieHeaderFor(url: string): string {
     return [...cookies].map(([k, v]) => `${k}=${v}`).join("; ")
 }
 
-
 const [sourceId, explicitEpisodeUrl] = process.argv.slice(2)
 
 if (!sourceId) {
     console.error("usage: npm run probe -- <sourceId> [episodeUrl]")
-    console.error(`known sources: ${allSources().map(s => s.id).join(", ")}`)
+    console.error(
+        `known sources: ${allSources()
+            .map(s => s.id)
+            .join(", ")}`
+    )
     process.exit(1)
 }
 
 const source = sourceById(sourceId)
 if (!source) {
     console.error(`unknown source "${sourceId}"`)
-    console.error(`known sources: ${allSources().map(s => s.id).join(", ")}`)
+    console.error(
+        `known sources: ${allSources()
+            .map(s => s.id)
+            .join(", ")}`
+    )
     process.exit(1)
 }
 
@@ -181,7 +188,10 @@ const results = await step(
     "search",
     () => source.search("a", ctx),
     r => `${r.length} result(s)` + (r[0] ? `, first: "${r[0].title}" → ${r[0].seriesId}` : ""),
-    r => (r.length === 0 ? "no results for a one-letter query — the selector is probably wrong" : posterProblem(r[0]?.poster, "search poster"))
+    r =>
+        r.length === 0
+            ? "no results for a one-letter query — the selector is probably wrong"
+            : posterProblem(r[0]?.poster, "search poster")
 )
 
 // -------------------------------------------------------------- series
@@ -200,7 +210,10 @@ if (seriesUrl) {
         "getEpisodes",
         () => source.getEpisodes(seriesUrl, ctx),
         e => {
-            const numbers = e.slice(0, 3).map(x => x.number).join(", ")
+            const numbers = e
+                .slice(0, 3)
+                .map(x => x.number)
+                .join(", ")
             return `${e.length} episode(s), newest first: [${numbers}]`
         },
         e => {
@@ -333,8 +346,10 @@ if (html) {
                 () => extractor.extract(embedUrl!, extractCtx),
                 s => {
                     const first = s[0]!
-                    return `${s.length} stream(s), first: ${first.kind}${first.fetchVia ? ` via ${first.fetchVia}` : ""}` +
+                    return (
+                        `${s.length} stream(s), first: ${first.kind}${first.fetchVia ? ` via ${first.fetchVia}` : ""}` +
                         (first.subtitles?.length ? `, ${first.subtitles.length} subtitle track(s)` : "")
+                    )
                 },
                 s => (s.length === 0 ? "the extractor returned no streams" : null)
             )
@@ -347,7 +362,10 @@ if (html) {
                 await step(
                     "media loads",
                     async () => {
-                        const headers = { ...netHeadersFor(stream.url, extractor.netRules, stream), Range: "bytes=0-2000" }
+                        const headers = {
+                            ...netHeadersFor(stream.url, extractor.netRules, stream),
+                            Range: "bytes=0-2000"
+                        }
                         const response = await fetch(stream.url, { headers })
                         return {
                             status: response.status,

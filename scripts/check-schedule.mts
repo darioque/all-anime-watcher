@@ -72,13 +72,21 @@ check("test anchor is a Monday", monday === 1, `getDay()=${monday}`)
 
 const tuesday = at({ mode: "weekly", weekday: 2, time: "18:00" })
 const tuesdayDate = new Date(tuesday)
-check("weekly Tue 18:00 → tomorrow", tuesdayDate.getDay() === 2 && tuesdayDate.getHours() === 18, tuesdayDate.toString())
+check(
+    "weekly Tue 18:00 → tomorrow",
+    tuesdayDate.getDay() === 2 && tuesdayDate.getHours() === 18,
+    tuesdayDate.toString()
+)
 check("weekly slot is in the future", tuesday > now)
 
 // Same weekday, but the time has already passed today → must jump a full week,
 // not land in the past.
 const mondayEarly = at({ mode: "weekly", weekday: 1, time: "09:00" })
-check("weekly same-day-but-past → +7d", mondayEarly > now && mondayEarly - now > 6 * DAY, new Date(mondayEarly).toString())
+check(
+    "weekly same-day-but-past → +7d",
+    mondayEarly > now && mondayEarly - now > 6 * DAY,
+    new Date(mondayEarly).toString()
+)
 
 // Same weekday, time still ahead → today.
 const mondayLater = at({ mode: "weekly", weekday: 1, time: "20:00" })

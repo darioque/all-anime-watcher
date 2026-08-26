@@ -86,10 +86,9 @@ eq("unalike titles with the same AniList id do merge", acrossTitles.length, 1)
 // --- switching it off
 eq(
     "disabled means one group per entry",
-    groupSeries(
-        [entry({ title: "Xian Ni", sourceId: "a" }), entry({ title: "Xian Ni", sourceId: "b" })],
-        { enabled: false }
-    ).length,
+    groupSeries([entry({ title: "Xian Ni", sourceId: "a" }), entry({ title: "Xian Ni", sourceId: "b" })], {
+        enabled: false
+    }).length,
     2
 )
 

@@ -71,9 +71,7 @@ eq("62 and 63 are - and _", Array.from(fromBase64Url("--__")).join(","), "251,23
 console.log("\n\x1b[1mbyse — the whole scheme, against a captured response\x1b[0m\n")
 
 eq("two parts make a 256-bit key", assembleKey(bysePlayback).length, 32)
-throws("a version that names no parts refuses to assemble one", () =>
-    assembleKey({ ...bysePlayback, version: "99" })
-)
+throws("a version that names no parts refuses to assemble one", () => assembleKey({ ...bysePlayback, version: "99" }))
 
 const config = await decryptPlayback(bysePlayback)
 const source = config.sources?.[0]

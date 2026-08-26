@@ -215,28 +215,44 @@ deepEq(
 
 console.log("\n\x1b[1mrefusing bad files\x1b[0m\n")
 
-throws("a truncated file is caught by the count", () => {
-    const cut = JSON.parse(file) as Record<string, unknown>
-    ;(cut.anime as unknown[]).pop()
-    return readBackup(JSON.stringify(cut))
-}, "truncated")
+throws(
+    "a truncated file is caught by the count",
+    () => {
+        const cut = JSON.parse(file) as Record<string, unknown>
+        ;(cut.anime as unknown[]).pop()
+        return readBackup(JSON.stringify(cut))
+    },
+    "truncated"
+)
 throws("an unrelated JSON file is refused by name", () => readBackup('{"hello":true}'), "no format marker")
 throws("someone else's backup is refused by name", () => readBackup('{"format":"tachiyomi"}'), '"tachiyomi"')
-throws("a future format version is refused rather than half-read", () => {
-    const ahead = JSON.parse(file) as Record<string, unknown>
-    ahead.version = BACKUP_VERSION + 1
-    return readBackup(JSON.stringify(ahead))
-}, "Update the extension")
-throws("a series with no key is named", () => {
-    const broken = JSON.parse(file) as Record<string, unknown>
-    delete (broken.anime as Record<string, unknown>[])[1]!.key
-    return readBackup(JSON.stringify(broken))
-}, "series #2 in that backup has no key")
-throws("and so is one with no episode list", () => {
-    const broken = JSON.parse(file) as Record<string, unknown>
-    delete (broken.anime as Record<string, unknown>[])[0]!.episodes
-    return readBackup(JSON.stringify(broken))
-}, "has no episode list")
+throws(
+    "a future format version is refused rather than half-read",
+    () => {
+        const ahead = JSON.parse(file) as Record<string, unknown>
+        ahead.version = BACKUP_VERSION + 1
+        return readBackup(JSON.stringify(ahead))
+    },
+    "Update the extension"
+)
+throws(
+    "a series with no key is named",
+    () => {
+        const broken = JSON.parse(file) as Record<string, unknown>
+        delete (broken.anime as Record<string, unknown>[])[1]!.key
+        return readBackup(JSON.stringify(broken))
+    },
+    "series #2 in that backup has no key"
+)
+throws(
+    "and so is one with no episode list",
+    () => {
+        const broken = JSON.parse(file) as Record<string, unknown>
+        delete (broken.anime as Record<string, unknown>[])[0]!.episodes
+        return readBackup(JSON.stringify(broken))
+    },
+    "has no episode list"
+)
 throws("plain text is not mistaken for a backup", () => readBackup("not json at all"), "not a JSON file")
 
 console.log("\n\x1b[1mreplace\x1b[0m\n")
@@ -286,8 +302,16 @@ deepEq("categories are unioned, not replaced", both.categories, ["a", "b"])
 deepEq("merging is symmetric", JSON.parse(JSON.stringify(mergeAnime(newer, older))), JSON.parse(JSON.stringify(both)))
 
 // `completed` is the one flag whose loss cannot be undone by re-checking.
-const finished = anime({ key: "s/x", updatedAt: 1, progress: { "5:": { positionSec: 1400, completed: true, updatedAt: 1 } } })
-const restarted = anime({ key: "s/x", updatedAt: 9, progress: { "5:": { positionSec: 30, completed: false, updatedAt: 9 } } })
+const finished = anime({
+    key: "s/x",
+    updatedAt: 1,
+    progress: { "5:": { positionSec: 1400, completed: true, updatedAt: 1 } }
+})
+const restarted = anime({
+    key: "s/x",
+    updatedAt: 9,
+    progress: { "5:": { positionSec: 30, completed: false, updatedAt: 9 } }
+})
 const after = mergeAnime(finished, restarted)
 eq("a completed episode stays completed", after.progress["5:"]?.completed, true)
 eq("while its position follows the newer write", after.progress["5:"]?.positionSec, 30)
@@ -316,9 +340,16 @@ console.log("\n\x1b[1mempty and edge\x1b[0m\n")
 const empty: BackupParts = { anime: [], sourceState: [], settings: defaultSettings(), sourceSettings: {} }
 const emptyFile = serializeBackup(buildBackup(empty, { exportedAt: 0 }))
 eq("an empty library exports and imports", readBackup(emptyFile).anime.length, 0)
-eq("importing an empty backup over a real one in merge mode changes nothing",
-    planImport(library, readBackup(emptyFile), { mode: "merge", settings: false }).anime.length, 2)
-eq("and in replace mode empties it", planImport(library, readBackup(emptyFile), { mode: "replace", settings: false }).anime.length, 0)
+eq(
+    "importing an empty backup over a real one in merge mode changes nothing",
+    planImport(library, readBackup(emptyFile), { mode: "merge", settings: false }).anime.length,
+    2
+)
+eq(
+    "and in replace mode empties it",
+    planImport(library, readBackup(emptyFile), { mode: "replace", settings: false }).anime.length,
+    0
+)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

@@ -7,7 +7,14 @@
  * whose variants are relative, and a variant whose segments are absolute and on
  * an entirely different domain. That split is the whole reason this code exists.
  */
-import { containerFor, isMasterPlaylist, pickVariant, playlistUrls, playlistVariants, readMediaPlaylist } from "~/shared/m3u8"
+import {
+    containerFor,
+    isMasterPlaylist,
+    pickVariant,
+    playlistUrls,
+    playlistVariants,
+    readMediaPlaylist
+} from "~/shared/m3u8"
 
 let failures = 0
 

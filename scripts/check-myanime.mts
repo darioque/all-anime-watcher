@@ -94,7 +94,11 @@ eq(
     "Tunshi Xingkong Swallowed Star"
 )
 eq("a query can be rebuilt from the id alone", searchQueryFor("zxjds4"), "zxjds4")
-eq("the site's own grouping link is readable", searchQueryFromUrl("https://myanime.live/?s=Wan+Jie+Du+Zun"), "Wan Jie Du Zun")
+eq(
+    "the site's own grouping link is readable",
+    searchQueryFromUrl("https://myanime.live/?s=Wan+Jie+Du+Zun"),
+    "Wan Jie Du Zun"
+)
 eq("a plain URL carries no query", searchQueryFromUrl("https://myanime.live/2026/08/22/foo/"), null)
 
 // The round trip that makes grouping URLs safe to store: the id derived from a
