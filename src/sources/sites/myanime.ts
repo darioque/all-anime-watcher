@@ -89,6 +89,23 @@ export class MyAnime implements AnimeSource {
         return statedNumber(postSlug)
     }
 
+    /**
+     * This site gives a series two ids, so the library has to be told.
+     *
+     * `getPageInfo` reads identity from the post slug where the slug names an
+     * episode and from the post's tag where it does not — and the two disagree
+     * whenever the tag is the short name: a series followed from an untitled
+     * post is "yi-nian-yong-heng" while every titled post says
+     * "yi-nian-yong-heng-a-will-eternal". Without this the second kind of page
+     * reports a followed series as unknown, and offers to follow it again.
+     *
+     * The bare call is the pure rule in `myanime.parse.ts` — a prefix relation
+     * that refuses to cross a season marker — not this method.
+     */
+    sameSeries(a: string, b: string): boolean {
+        return sameSeries(a, b)
+    }
+
     // ------------------------------------------------------------ discovery
 
     /**

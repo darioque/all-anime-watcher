@@ -69,6 +69,21 @@ export function swapOrigin(url: string, newOrigin: string): string {
 }
 
 /** The `#fragment`, without its leading hash. "" when there is none. */
+/**
+ * The query string, without its "?".
+ *
+ * Needed because a source whose grouping page is a search ("/?s=…") carries the
+ * series name in the query and nothing but "/" in the path — so a comparison
+ * that reads the path alone cannot tell two of its series apart.
+ */
+export function queryOf(url: string): string {
+    try {
+        return new URL(url).search.replace(/^\?/, "")
+    } catch {
+        return ""
+    }
+}
+
 export function fragmentOf(url: string): string {
     try {
         return new URL(url).hash.replace(/^#/, "")

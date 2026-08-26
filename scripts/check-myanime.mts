@@ -19,6 +19,7 @@ import {
     slugify,
     statedNumber
 } from "~/sources/sites/myanime.parse"
+import { findFollowed } from "~/library/identity"
 
 let failures = 0
 
@@ -156,6 +157,76 @@ eq("a post that states no number is dropped", withUntitled.length, 2)
 check("and the ones around it are untouched", withUntitled.map(p => p.number).join(",") === "12,11")
 
 eq("posts with nothing to go on at all yield nothing", numberPosts([post("999", "", 1), post("998", "", 2)]).length, 0)
+
+console.log("\n\x1b[1mone series, two identities\x1b[0m\n")
+
+/*
+ * The real entry and the real page that exposed this, on 2026-08-26.
+ *
+ * The series was followed from an untitled post, so its id came from the post's
+ * tag; every titled post derives the slug stem instead. The exact-key lookup
+ * missed, and the symptoms were an offer to follow a followed series and a watch
+ * position that never moved — while notifications kept arriving, because the
+ * update loop searches from the stored entry and never asks a page who it is.
+ */
+const followed = {
+    key: "myanime/yi-nian-yong-heng",
+    seriesId: "yi-nian-yong-heng",
+    url: "https://myanime.live/tag/yi-nian-yong-heng/"
+}
+const episodePage = {
+    seriesId: "yi-nian-yong-heng-a-will-eternal",
+    seriesUrl: "https://myanime.live/?s=Yi%20Nian%20Yong%20Heng%20A%20Will%20Eternal"
+}
+
+eq("the tag id and the slug id find each other", findFollowed([followed], episodePage, sameSeries)?.key, followed.key)
+eq("and nothing is guessed without the source's say-so", findFollowed([followed], episodePage), undefined)
+eq(
+    "an exact id still wins outright",
+    findFollowed(
+        [followed, { key: "myanime/x", seriesId: episodePage.seriesId, url: "https://myanime.live/?s=x" }],
+        episodePage,
+        sameSeries
+    )?.key,
+    "myanime/x"
+)
+
+/* The safety property: a season is not a rename, whatever the prefix says. */
+const tdg = {
+    key: "myanime/tales-of-demons-and-gods",
+    seriesId: "tales-of-demons-and-gods",
+    url: "https://myanime.live/?s=Tales%20of%20Demons%20and%20Gods"
+}
+eq(
+    "a later season is not the same series",
+    findFollowed(
+        [tdg],
+        {
+            seriesId: "tales-of-demons-and-gods-10th-season",
+            seriesUrl: "https://myanime.live/?s=Tales%20of%20Demons%20and%20Gods%2010th%20Season"
+        },
+        sameSeries
+    ),
+    undefined
+)
+
+/*
+ * Why the URL comparison reads the query too: every series on this site has a
+ * grouping URL whose *path* is "/". Comparing paths alone made them all equal —
+ * and then bailed on the empty string, so the fallback never fired at all.
+ */
+const foo = { key: "myanime/foo", seriesId: "foo", url: "https://myanime.live/?s=Foo" }
+const bar = { key: "myanime/bar", seriesId: "bar", url: "https://myanime.live/?s=Bar" }
+eq(
+    "two search-page series are told apart",
+    findFollowed([foo, bar], { seriesId: "renamed-bar", seriesUrl: "https://myanime.live/?s=Bar" })?.key,
+    bar.key
+)
+eq(
+    "and a moved domain still matches on path and query",
+    findFollowed([bar], { seriesId: "renamed-bar", seriesUrl: "https://myanime.new/?s=Bar" })?.key,
+    bar.key
+)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

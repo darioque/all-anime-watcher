@@ -134,6 +134,21 @@ export interface AnimeSource {
      */
     readonly categories?: string[]
 
+    /**
+     * Do two of *this source's* series ids name the same show?
+     *
+     * Optional, and only worth implementing for a source that reconstructs its
+     * ids rather than reading them from the site — those can hand out two ids
+     * for one series depending on which page you opened, which the library then
+     * reads as two series. Only the source can tell the difference between the
+     * same show spelled two ways and a second season, and the cost of confusing
+     * them is a merged watch history, so nothing generic may guess at it.
+     *
+     * Consulted only after an exact id match and a series-URL match have both
+     * failed. See `library/identity.ts`.
+     */
+    sameSeries?(a: string, b: string): boolean
+
     /** Matched against `pathname`. Must not carry the `g` flag. */
     readonly episodeUrl: RegExp
     /** Optional: lets the user follow a series from its own page. */
