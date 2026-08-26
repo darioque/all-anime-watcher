@@ -153,6 +153,14 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
                 ]
             },
             {
+                key: "seekStepSec",
+                label: "Arrow keys seek by",
+                help: "Seconds. The left and right arrows; they never surface the control bar.",
+                type: "number",
+                min: 1,
+                max: 120
+            },
+            {
                 key: "progressTickSec",
                 label: "Save my position every",
                 help: "Seconds.",

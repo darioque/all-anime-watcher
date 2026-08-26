@@ -64,6 +64,8 @@ export interface GlobalSettings {
     skipOutro: "off" | "button" | "auto"
     /** How often the player reports position back to the background. */
     progressTickSec: number
+    /** Seconds the left/right arrows move. */
+    seekStepSec: number
 
     /**
      * How far the watch pointer may sit above the newest episode a source lists
@@ -191,6 +193,7 @@ export function defaultSettings(): GlobalSettings {
         skipIntro: "button",
         skipOutro: "button",
         progressTickSec: 5,
+        seekStepSec: 5,
 
         positionDriftTolerance: 1,
 

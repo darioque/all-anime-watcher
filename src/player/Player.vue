@@ -13,6 +13,7 @@ import { loadTrack, releaseTracks, type LoadedTrack } from "./subtitles"
 const props = defineProps<{
     identity: PageIdentity
     progressTickSec: number
+    seekStepSec: number
     preferredQuality: string
     autoAdvance: boolean
     skipIntro: "off" | "button" | "auto"
@@ -588,29 +589,31 @@ function togglePlay() {
     else element.pause()
 }
 
-/** Native controls are for the mouse; the keyboard gets a clean picture. */
+/** Native controls are for the mouse; a keypress is not a reason to show them. */
 const controlsVisible = ref(true)
 
 /**
- * Where the pointer was, so a mouse sitting still on a desk cannot ask for the
- * controls back. Optical mice report movement while untouched, and one stray
- * event undoes the hiding a keypress just did — which looks exactly like the
- * hiding never worked.
+ * Hide the control bar, by CSS as well as by attribute.
+ *
+ * The attribute alone did not do it. Rather than keep theorising about why,
+ * this also sets a class whose rule is `display: none !important` on Chrome's
+ * media-control pseudo-elements — there is no visibility state left for the
+ * browser to decide. Both are applied here and now, synchronously: Vue patches
+ * the binding on the next microtask, while the shortcut runs immediately, so a
+ * seek would otherwise land while the bar is still there to be shown.
  */
-let pointerAt: { x: number; y: number } | null = null
-
-/** Below this, in screen pixels, it was the desk moving and not the user. */
-const REAL_MOVE_PX = 8
-
 function hideControls() {
     controlsVisible.value = false
-    /*
-     * And synchronously, not only through the binding. Vue patches the attribute
-     * on the next microtask while the shortcut below runs *now*, so a seek would
-     * land on a video that still carries `controls` — and Chrome's controls react
-     * to a seek by showing themselves.
-     */
-    video.value?.removeAttribute("controls")
+    const element = video.value
+    if (!element) return
+    element.classList.add("no-native-controls")
+    element.removeAttribute("controls")
+}
+
+/** The mouse is welcome to them back. */
+function showControls() {
+    controlsVisible.value = true
+    video.value?.classList.remove("no-native-controls")
 }
 
 function seekBy(seconds: number) {
@@ -739,7 +742,8 @@ onMounted(async () => {
 
     tickTimer = window.setInterval(reportProgress, Math.max(1, props.progressTickSec) * 1000)
     document.addEventListener("visibilitychange", reportProgress)
-    window.addEventListener("keydown", onKey)
+    // Capture, so nothing on the page gets the key first.
+    window.addEventListener("keydown", onKey, true)
     window.addEventListener("mousemove", onPointer, { passive: true })
     window.addEventListener("mousedown", onPointer, { passive: true })
 
@@ -811,31 +815,21 @@ function onKey(event: KeyboardEvent) {
 }
 
 /**
- * The mouse asks for the control bar back — but only the mouse, and only once it
- * has really moved.
- *
- * "Whichever device you last used" needs no explaining, where "hidden only in
- * fullscreen" or "hidden on a timer" would be state to reason about. The
- * threshold is what makes that hold: without it, the jitter an untouched optical
- * mouse emits puts the controls straight back after every keypress.
+ * Moving or clicking the mouse brings the control bar back — that is wanted, and
+ * it is the only thing that brings it back. "Whichever device you last used"
+ * needs no explaining, where "hidden only in fullscreen" or "hidden on a timer"
+ * would be state to reason about.
  */
-function onPointer(event: MouseEvent) {
-    if (event.type === "mousemove") {
-        const last = pointerAt
-        pointerAt = { x: event.screenX, y: event.screenY }
-        if (!last) return
-        if (Math.abs(last.x - event.screenX) + Math.abs(last.y - event.screenY) < REAL_MOVE_PX) return
-    }
-
-    if (!controlsVisible.value) controlsVisible.value = true
+function onPointer() {
+    if (!controlsVisible.value) showControls()
 }
 
 SHORTCUTS.push(
     { keys: ["n"], label: "Next episode", run: () => goTo(nextEp.value) },
     { keys: ["b"], label: "Previous episode", run: () => goTo(previousEp.value) },
     { keys: [" ", "k"], label: "Play / pause", run: togglePlay },
-    { keys: ["arrowright", "l"], label: "Forward 10s", run: () => seekBy(10) },
-    { keys: ["arrowleft", "j"], label: "Back 10s", run: () => seekBy(-10) },
+    { keys: ["arrowright", "l"], label: `Forward ${props.seekStepSec}s`, run: () => seekBy(props.seekStepSec) },
+    { keys: ["arrowleft", "j"], label: `Back ${props.seekStepSec}s`, run: () => seekBy(-props.seekStepSec) },
     { keys: ["arrowup"], label: "Volume up", run: () => nudgeVolume(0.1) },
     { keys: ["arrowdown"], label: "Volume down", run: () => nudgeVolume(-0.1) },
     {
@@ -860,7 +854,7 @@ SHORTCUTS.push(
 onBeforeUnmount(() => {
     if (tickTimer) window.clearInterval(tickTimer)
     document.removeEventListener("visibilitychange", reportProgress)
-    window.removeEventListener("keydown", onKey)
+    window.removeEventListener("keydown", onKey, true)
     window.removeEventListener("mousemove", onPointer)
     window.removeEventListener("mousedown", onPointer)
     reportProgress()
@@ -1207,6 +1201,24 @@ video,
 video:focus,
 video:focus-visible {
     outline: none;
+}
+
+/*
+ * The control bar, gone — not asked to hide, made unrenderable.
+ *
+ * Removing the `controls` attribute is the polite way and it was not enough in
+ * practice. These are Chrome's own control pseudo-elements; with `display: none`
+ * there is no visibility state left for it to decide, whatever a seek would
+ * otherwise make it do. The class comes off the moment the mouse moves.
+ */
+video.no-native-controls::-webkit-media-controls,
+video.no-native-controls::-webkit-media-controls-enclosure,
+video.no-native-controls::-webkit-media-controls-panel,
+video.no-native-controls::-webkit-media-controls-panel-container,
+video.no-native-controls::-webkit-media-controls-overlay-play-button {
+    display: none !important;
+    opacity: 0 !important;
+    pointer-events: none !important;
 }
 
 .embed-note {

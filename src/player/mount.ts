@@ -14,6 +14,7 @@ let host: HTMLElement | null = null
  */
 export interface PlayerOptions {
     progressTickSec: number
+    seekStepSec: number
     preferredQuality: string
     autoAdvance: boolean
     skipIntro: "off" | "button" | "auto"

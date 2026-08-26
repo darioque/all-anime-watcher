@@ -81,6 +81,7 @@ async function identify() {
     // values.
     let options: PlayerOptions = {
         progressTickSec: 5,
+        seekStepSec: 5,
         preferredQuality: "1080p",
         autoAdvance: true,
         skipIntro: "button",
@@ -92,6 +93,7 @@ async function identify() {
         const settings = await send("settings:get", {})
         options = {
             progressTickSec: settings.progressTickSec,
+            seekStepSec: settings.seekStepSec,
             preferredQuality: settings.preferredQuality,
             autoAdvance: settings.autoAdvance,
             skipIntro: settings.skipIntro,
