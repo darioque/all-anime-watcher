@@ -15,7 +15,7 @@ import { enrich } from "~/trackers/match"
 import * as db from "~/model/db"
 import { createFetchCtx } from "~/net/fetcher"
 import { allSources, sourceById } from "~/sources/registry"
-import type { AnimeSource, SeriesInfo } from "~/sources/types"
+import type { AnimeSource, FetchCtx, SeriesInfo } from "~/sources/types"
 import { cachedSettings, loadSettings } from "~/settings/storage"
 import { automaticCategoriesOf, shelveOverrides } from "./categories"
 import { log } from "~/shared/logger"
@@ -33,6 +33,38 @@ export async function fetchCtxFor(source: AnimeSource, tabId?: number) {
         tabId,
         defaultHeaders: { Referer: ensureTrailingSlash(baseUrl) }
     })
+}
+
+/**
+ * The source's episode list, refusing an empty one.
+ *
+ * **An empty list is a failure, not a result.** `failCount` otherwise only ever
+ * counts *transport* failures — it lives in a `catch`, so it sees a timeout or a
+ * refused connection and nothing else. But the common way a source actually dies
+ * is a **parse** failure: a renamed class, a restyled listing, a soft-404 that
+ * answers 200 with no items. Every one of those returns cleanly with zero
+ * episodes, which read as a healthy check that happened to find nothing — no
+ * tag, no backoff, no entry in the failed filter, nothing to notice.
+ *
+ * Throwing rather than flagging does a second job that matters as much. The
+ * caller assigns the fetched list straight over the stored one, so an empty
+ * parse used to **replace a good episode list with nothing**: the row dropped to
+ * "unstarted", the episode picker emptied, and the only record of what the site
+ * had was gone until some later check happened to succeed. Failing here leaves
+ * the stored list untouched, which is the honest answer — we did not learn that
+ * the episodes are gone, we learned nothing at all.
+ *
+ * No attempt is made to tell "had episodes, now has none" from "never had any".
+ * A series in the library was put there by opening one of its episodes, so it
+ * had at least one; the ambiguous case is a technicality and treating it as real
+ * would only buy a second code path to keep right.
+ */
+async function episodeList(source: AnimeSource, seriesUrl: string, ctx: FetchCtx): Promise<Episode[]> {
+    const episodes = await source.getEpisodes(seriesUrl, ctx)
+    if (episodes.length === 0) {
+        throw new Error(`${source.name} listed no episodes at ${seriesUrl} — its episode selector has probably broken`)
+    }
+    return episodes
 }
 
 /** Rewrite a stored URL onto the source's currently-live origin. */
@@ -135,7 +167,7 @@ export async function addSeries(options: {
     })
 
     try {
-        anime.episodes = await source.getEpisodes(options.seriesUrl, ctx)
+        anime.episodes = await episodeList(source, options.seriesUrl, ctx)
         anime.lastCheckedAt = Date.now()
     } catch (error) {
         anime.failCount = 1
@@ -177,7 +209,7 @@ export async function refreshSeries(
     const url = swapOrigin(anime.url, ctx.baseUrl)
 
     try {
-        const episodes = await source.getEpisodes(url, ctx)
+        const episodes = await episodeList(source, url, ctx)
         const known = new Set(anime.episodes.map(e => progressKey(e.number, e.variant)))
         const added = episodes.filter(e => !known.has(progressKey(e.number, e.variant)))
 

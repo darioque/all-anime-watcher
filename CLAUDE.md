@@ -597,6 +597,47 @@ off the answer is still `now` — nothing of ours attaches to the site's own
 player, so no later moment is coming and the page read is the only signal there
 will ever be, exactly as `markWatchedOnEmbed` already says.
 
+**An empty episode list is a failure, not a result.** `failCount` lives in a
+`catch`, so on its own it only ever counts *transport* failures — a timeout, a
+refused connection. The common way a source actually dies is a **parse** failure:
+a renamed class, a restyled listing, a soft-404 answering 200 with no items.
+Every one of those returns cleanly with zero episodes, which reads as a healthy
+check that happened to find nothing — no tag, no backoff, nothing in the failed
+filter, nothing to notice at all.
+
+`episodeList()` throws instead, and both `addSeries` and `refreshSeries` go
+through it so they cannot drift apart. Throwing rather than flagging does a
+second job that matters as much: the caller assigns the fetched list straight
+over the stored one, so an empty parse used to **replace a good episode list with
+nothing** — the row dropped to "unstarted", the picker emptied, and the record of
+what the site had was gone until some later check succeeded. Failing leaves the
+stored list untouched, which is the honest answer: we did not learn the episodes
+are gone, we learned nothing.
+
+No attempt is made to tell "had episodes, now has none" from "never had any". A
+series in the library was put there by opening one of its episodes, so it had at
+least one; the ambiguous case is a technicality, and a second code path to keep
+right costs more than it buys.
+
+**The Lab and `npm run probe` keep calling `getEpisodes` directly**, deliberately.
+Their job is to report what happened, and "0 episodes" is exactly the finding
+someone runs them to see — throwing there would hide it behind a stack trace.
+
+**There is no auto-suspend, and that is a decision.** AMR stops polling a mirror
+that keeps failing, which is right for a library of thousands; here the backoff
+already caps a dead series at two requests a day, and the failure mode of
+suspending is bad in the way this codebase cares about — a source down for a day
+comes back and the series silently never checks again. `poll` also records the
+*user's* choice, so an automatic writer would make the UI stop telling them what
+they chose (rule 11's shape). If it is ever wanted it belongs in a separate
+`suspended` flag, never by flipping `poll`.
+
+The backoff is `min(2 ** min(failCount, 6) * 15min, 12h)`, applied as a *floor*
+under the normal schedule: 30min, 1h, 2h, 4h, 8h, then 12h from the sixth failure
+on. One failure is enough to tag the row and fill the failed filter — there is no
+threshold — and any successful check sets `failCount` back to 0 and clears
+`lastError`.
+
 **A pointer on an episode that cannot be watched rolls back, and that is a
 decided rule rather than a side effect of this feature.** Two situations reach
 it: the episode is gone from the list (the site renumbered, pulled a post,
