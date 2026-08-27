@@ -473,6 +473,76 @@ Both are now config, so lmanime is untouched:
   `div.player-embed > iframe[src]`. Its Dailymotion server has no iframe at all
   and still falls through to `meta[itemprop=embedUrl]`.
 
+## Posted, but not out
+
+**A site can publish an episode's page before it has the episode.** luciferdonghua.in
+does: Ancient God Sovereign E13 went up as a normal post with a `tickcounter.com`
+countdown widget where the player goes, and five servers in `select.mirror` that
+each resolved to nothing. It was announced as a release, the notification opened
+a dead page, and the watch position had already moved onto it on the way in — so
+the real E13 would never have shown as unwatched when it aired.
+
+**Nothing on the series page distinguishes it**, which is the whole difficulty:
+the update loop reads only the series page, and the placeholder's `<li>` is
+byte-for-byte the same shape as a real one — same `epl-num` ("13 [4K]"), same
+`epl-title`, same `status Sub`. The only tell there is that the post is
+*backdated* (E13 dated July 1 against E01-04's July 30), so it sorts to the
+bottom of `div.eplister` below episode 1. **Do not build on that.** An
+out-of-order date is also what a corrected typo or a late re-upload looks like,
+and reading it as "premium" would suppress real episodes. It is worth knowing as
+a symptom and is not evidence.
+
+The evidence is on the episode page, so `refreshSeries` opens it — one request
+per *candidate release*, not per episode, decided by `verificationCandidates`.
+`AnimeSource.episodeAvailability(html, url)` is optional and answers from markup
+already in hand; `AnimeStream` implements it from a per-site `pending` config
+(`markers`, `text`, `reason`). Three rules hold it together:
+
+- **An embed wins outright, checked before any marker.** A site is free to run a
+  countdown to the *next* episode above a player that works, and suppressing the
+  episode the viewer is on would be worse than the bug. The marker is only
+  consulted once the player container has no iframe and the page no
+  `meta[itemprop=embedUrl]`.
+- **Requiring both is what makes a broken selector safe.** An empty player
+  container is suggestive but not conclusive — a theme change looks identical —
+  so something has to positively say "not yet". Every failure path (no opinion,
+  setting off, fetch timeout, parse throw) leaves the episode *announced*. The
+  two mistakes are not symmetrical: announcing a countdown is a notification you
+  dismiss, suppressing a real episode is one you never learn you missed. That is
+  also why `pending` is opt-in per site and `lmanime` declares nothing.
+- **The placeholder is remembered, not dropped.** Dropping it would make the
+  episode new again on every check. Stored with `Episode.pending`, it is known —
+  so the diff stays quiet — while `latestEpisodeNumber`, `unwatchedCount`,
+  `nextEpisode`, `latestEpisode` and `watchState` all skip it via `watchable()`.
+  One predicate on purpose: getting it wrong in one place only is silent and
+  specific (the badge lights, "watch next" opens a dead page).
+
+**Suppressing the countdown must not suppress the release, and that needs a
+second rule.** A placeholder is in the stored list from the first check that saw
+it, so when the video finally goes up it is *not* in the diff — nothing about the
+list changed. `wentLive(previous, current)` reads that transition instead, by
+`progressKey` rather than array position, because the list is refetched whole and
+this site reorders it. Without it the placeholder would absorb the one
+announcement the episode was ever going to get.
+
+**And the watch position moved before anything was known to be playable.** That
+is a second bug with the same root: `markWatchedOnOpen` fired when the page was
+*read*, which is before any server had been resolved. The signal is kept and its
+timing moved — `onOpenMark` (pure, in `settings/watching.ts`) answers `never` /
+`now` / `whenPlaying`, and where our player is taking the page over the mark is
+handed to it and spent at the first frame (`markOnScreen`, at the three points
+where `status` becomes `ready`). Every server failing with no embed to fall back
+on therefore records nothing, which is the rule the user asked for. `never` is
+reachable for free, without a player, in exactly two cases: a page listing no
+servers, and one the source recognised as pending — so it holds with
+`takeOverPage` off too. `markOnlyWhenPlayable` is the opt-out and restores the
+old timing, but **not** for a recognised placeholder: "go back to marking on
+open" is not a request to mark episodes the source has said are not out.
+
+`npm run check:episodes` covers the rules; `npm run check:pending` covers
+reaching the verdict, against reduced fixtures of the three states the player
+container was observed in.
+
 **A non-browser User-Agent is the probe's *other* blind spot, and it points the
 opposite way.** The documented one is the CLI being too strong — Node can set a
 `Referer` a browser cannot. Node's default `User-Agent` is the same blind spot
@@ -607,6 +677,11 @@ mint and spend agree.
    navigating. The read is never a tracking signal. Page markup is fetched as
    soon as it is known; the stream is warmed only at 60% through, because
    extracted URLs are signed and short-lived.
+
+   Also in: episodes a site has posted but not released are recognised,
+   withheld from notifications and announced when they go live, and an episode
+   nothing would play is no longer recorded as watched. See "Posted, but not
+   out".
 
    Still open: the ZoroTheme family, Spanish sources beyond mundodonghua,
    AniList write-back (needs OAuth), and stats.

@@ -50,14 +50,45 @@ export function resumePositionFor(saved: EpisodeProgress | undefined): number | 
     return saved.positionSec
 }
 
+/**
+ * Is there actually something to watch behind this episode?
+ *
+ * A site can publish the post before the video: a countdown widget where the
+ * player goes, a premium early-access window, a placeholder pre-created with a
+ * backdated timestamp. The post is real, the episode is not — and every question
+ * the library asks about "the newest episode" means the newest *watchable* one.
+ *
+ * One predicate, used by all of them on purpose. The failure of getting this
+ * wrong in one place only is silent and specific: the badge lights up, "watch
+ * next" opens a page with no player, and the notification that brought you there
+ * was for something that does not exist yet. Three separate `!ep.pending` tests
+ * would be three chances for one of them to be forgotten.
+ */
+export function watchable(episode: Pick<Episode, "pending">): boolean {
+    return episode.pending !== true
+}
+
+/** The episodes that can actually be played, in the order given. */
+export function watchableEpisodes(episodes: Episode[]): Episode[] {
+    return episodes.filter(watchable)
+}
+
 export function titleOf(anime: Pick<TrackedAnime, "title" | "displayTitle">): string {
     return anime.displayTitle && anime.displayTitle.trim() !== "" ? anime.displayTitle : anime.title
 }
 
-/** Highest episode number the source currently lists, or null for an empty list. */
+/**
+ * Highest *watchable* episode number the source currently lists, or null when it
+ * lists none.
+ *
+ * Pending posts are skipped, which is what keeps a countdown out of the release
+ * floor: a placeholder for episode 13 must not make the real episode 13 look
+ * like something already seen when it finally airs.
+ */
 export function latestEpisodeNumber(anime: Pick<TrackedAnime, "episodes">): number | null {
     let max: number | null = null
     for (const ep of anime.episodes) {
+        if (!watchable(ep)) continue
         if (max === null || ep.number > max) max = ep.number
     }
     return max
@@ -69,9 +100,10 @@ export function latestEpisodeNumber(anime: Pick<TrackedAnime, "episodes">): numb
  * comparison that AMR needs `chapPath` and `findProbableChapter` to survive.
  */
 export function unwatchedCount(anime: Pick<TrackedAnime, "episodes" | "lastWatched">): number {
-    if (!anime.lastWatched) return anime.episodes.length
+    const episodes = watchableEpisodes(anime.episodes)
+    if (!anime.lastWatched) return episodes.length
     const from = anime.lastWatched.number
-    return anime.episodes.reduce((n, ep) => (ep.number > from ? n + 1 : n), 0)
+    return episodes.reduce((n, ep) => (ep.number > from ? n + 1 : n), 0)
 }
 
 /**
@@ -103,14 +135,18 @@ export function nextEpisode(anime: Pick<TrackedAnime, "episodes" | "lastWatched"
     const lowest = (candidates: Episode[]) =>
         candidates.reduce<Episode | undefined>((lo, ep) => (!lo || ep.number < lo.number ? ep : lo), undefined)
 
+    const episodes = watchableEpisodes(anime.episodes)
     const from = anime.lastWatched?.number
-    if (from === undefined) return lowest(anime.episodes)
-    return lowest(anime.episodes.filter(ep => ep.number > from))
+    if (from === undefined) return lowest(episodes)
+    return lowest(episodes.filter(ep => ep.number > from))
 }
 
-/** The newest episode the source lists. */
+/** The newest episode the source lists that can actually be played. */
 export function latestEpisode(anime: Pick<TrackedAnime, "episodes">): Episode | undefined {
-    return anime.episodes.reduce<Episode | undefined>((hi, ep) => (!hi || ep.number > hi.number ? ep : hi), undefined)
+    return watchableEpisodes(anime.episodes).reduce<Episode | undefined>(
+        (hi, ep) => (!hi || ep.number > hi.number ? ep : hi),
+        undefined
+    )
 }
 
 /**
@@ -127,7 +163,9 @@ export type WatchState = "new" | "current" | "unstarted" | "paused"
 
 export function watchState(anime: Pick<TrackedAnime, "episodes" | "lastWatched" | "follow">): WatchState {
     if (!anime.follow) return "paused"
-    if (anime.episodes.length === 0) return "unstarted"
+    // A list of nothing but countdowns is a series with nothing to watch yet,
+    // which reads as "unstarted" rather than as an episode waiting for you.
+    if (watchableEpisodes(anime.episodes).length === 0) return "unstarted"
     if (unwatchedCount(anime) > 0) return "new"
     return "current"
 }
@@ -167,11 +205,71 @@ export function newReleases(options: {
         options.watchedUpTo ?? Number.NEGATIVE_INFINITY
     )
 
+    // A post with nothing behind it is not a release, whatever its number. It
+    // is announced later, by `wentLive`, at the moment it becomes watchable.
+    const real = watchableEpisodes(options.added)
+
     // Nothing to compare against — a series being seen for the first time. The
     // caller decides whether that is worth announcing; here everything counts.
-    if (!Number.isFinite(floor)) return options.added
+    if (!Number.isFinite(floor)) return real
 
-    return options.added.filter(episode => episode.number > floor)
+    return real.filter(episode => episode.number > floor)
+}
+
+/**
+ * Episodes that were pending last time and are watchable now.
+ *
+ * This is the second half of `newReleases`, and it exists because the two halves
+ * answer to different evidence. A countdown post is in the stored list from the
+ * first check that saw it, so when the video finally goes up it is *not* in the
+ * diff — nothing about the list changed. The only thing that changed is the
+ * episode page, and this is the transition that reads it.
+ *
+ * Without it, suppressing the countdown would suppress the real episode too:
+ * the placeholder would absorb the one announcement the episode was ever going
+ * to get. That failure is worse than the notification being fixed here, because
+ * it is silent — the episode simply never arrives.
+ *
+ * Matched by `progressKey`, not by array position: the list is re-fetched whole
+ * and a site is free to reorder it, which luciferdonghua.in in fact does — its
+ * placeholder is backdated, so it sorts below episode 1 until it goes live.
+ */
+export function wentLive(previous: Episode[], current: Episode[]): Episode[] {
+    const wasPending = new Set(previous.filter(ep => !watchable(ep)).map(episodeProgressKey))
+    if (wasPending.size === 0) return []
+    return current.filter(ep => watchable(ep) && wasPending.has(episodeProgressKey(ep)))
+}
+
+/**
+ * Which episodes are worth opening to check whether they are real.
+ *
+ * Verification costs one request each, so this decides what that budget buys.
+ * Two kinds qualify and nothing else does:
+ *
+ *  - **the ones about to be announced.** A backfill is never announced, so
+ *    confirming a two-year-old post has a player in it buys nothing.
+ *  - **the ones already known to be pending.** These are the only episodes whose
+ *    answer can *change*, and re-asking is the only way a countdown ever becomes
+ *    a release. Skipping them would trade one wrong notification for a missing
+ *    one, which is the worse failure — it is silent.
+ *
+ * Highest number first, then capped. A site posts *ahead* of itself, never
+ * behind, so the placeholders are always at the top of the numbering; if the cap
+ * bites, the episodes it drops are the ones least likely to be placeholders. The
+ * cap exists for the series whose stored list was empty — a failed first fetch,
+ * a source that just came back — where every episode reads as a release and an
+ * uncapped check would open four hundred pages in one wake-up.
+ */
+export function verificationCandidates(options: {
+    /** The freshly fetched list, carrying whatever pending flags were kept. */
+    episodes: Episode[]
+    /** What would be announced if nothing were verified. */
+    releases: Episode[]
+    limit: number
+}): Episode[] {
+    const wanted = new Set(options.releases.map(episodeProgressKey))
+    const picked = options.episodes.filter(ep => !watchable(ep) || wanted.has(episodeProgressKey(ep)))
+    return picked.sort((a, b) => b.number - a.number).slice(0, Math.max(0, options.limit))
 }
 
 /**

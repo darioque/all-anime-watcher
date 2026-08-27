@@ -50,6 +50,16 @@ const servers = ref<Server[]>(props.identity.servers ?? [])
 const activeServer = ref<number>(-1)
 /** Servers that already failed this session, so fallback doesn't loop over them. */
 const failedServers = ref(new Set<number>())
+/**
+ * Whether this episode's on-open mark has been spent.
+ *
+ * Reset per episode, because the in-place swap keeps the component alive across
+ * several of them. Not an optimisation — `markWatchedHere` is cheap and the
+ * library ignores a repeat — but the flag is what makes "mark once, at the first
+ * moment there is a picture" a statement about the episode rather than about
+ * whichever code path happened to reach it first.
+ */
+const openMarkSpent = ref(props.identity.markedOnOpen === true)
 const levels = ref<Level[]>([])
 const currentLevel = ref(-1)
 const streamLabel = ref("")
@@ -155,6 +165,7 @@ async function swapTo(episode: Episode, identity: PageIdentity) {
     inSkip.value = null
     lastReported = -1
     prepared.value = null
+    openMarkSpent.value = false
     status.value = "resolving"
     message.value = ""
 
@@ -176,10 +187,17 @@ async function swapTo(episode: Episode, identity: PageIdentity) {
 
     /*
      * Nothing navigated, so nothing re-ran the tracking a page load would have
-     * done. The background resolved whether opening counts as watching when it
-     * read the page; honouring it here is what keeps the watch position moving.
+     * done — but the mark still waits for a picture, exactly as it does on a
+     * fresh page load. Auto-advance walks into the newest episode, which is
+     * precisely the one a site is most likely to have posted early, so marking
+     * here on arrival would move the position onto a countdown without the
+     * viewer ever having pressed anything.
      */
-    if (identity.markOnOpen !== false) markWatchedHere()
+    if (identity.pending) {
+        status.value = "error"
+        message.value = notYetMessage(identity)
+        return
+    }
 
     if (servers.value.length === 0) {
         status.value = "error"
@@ -352,7 +370,10 @@ async function attach(stream: Stream, index: number, viaProxy = false) {
         embedded.value = stream.url
         status.value = "ready"
         message.value = ""
-        if (current.value.markOnEmbed !== false) markWatchedHere()
+        // Either setting is enough here: the frame is the whole of what will
+        // ever be known about this episode, so both "opening counts" and
+        // "embedding counts" are answered by the same moment.
+        if (current.value.markOnEmbed !== false || current.value.markOnOpen !== false) markOnScreen()
         return
     }
 
@@ -375,6 +396,7 @@ async function attach(stream: Stream, index: number, viaProxy = false) {
         element.src = stream.url
         status.value = "ready"
         message.value = ""
+        markOnScreen()
         void restorePosition()
         return
     }
@@ -401,6 +423,7 @@ async function attach(stream: Stream, index: number, viaProxy = false) {
         currentLevel.value = instance.currentLevel
         status.value = "ready"
         message.value = ""
+        markOnScreen()
         void restorePosition()
     })
 
@@ -674,6 +697,33 @@ async function togglePip() {
 
 // ------------------------------------------------------------------ library
 
+/**
+ * The episode has a picture on screen, so an on-open mark may now be spent.
+ *
+ * This is the moment the background deliberately could not act on. When the page
+ * was read, "an episode page was opened" was all that was known — whether it had
+ * anything behind it took five server resolutions to find out, and on a site
+ * that posts a countdown the answer was none of them. Recording the position
+ * here instead costs the fraction of a second between the page load and the
+ * first frame, and buys never recording an episode that did not exist.
+ *
+ * Never reached when every server fails: `tryNextServer` runs out, the error
+ * shows, and nothing was marked — which is the whole point.
+ */
+function markOnScreen() {
+    if (openMarkSpent.value) return
+    if (current.value.markOnOpen === false) return
+    openMarkSpent.value = true
+    markWatchedHere()
+}
+
+/** What to say about an episode the site has posted but not released. */
+function notYetMessage(identity: PageIdentity): string {
+    return identity.pendingReason
+        ? `This episode isn't out yet — ${identity.pendingReason}.`
+        : "This episode isn't out yet: the page has a countdown where the player goes."
+}
+
 /** Record this episode as the viewer's position, without any progress signal. */
 function markWatchedHere() {
     if (!trackedKey.value || !info.value) return
@@ -832,6 +882,19 @@ function reportProgress() {
 
 onMounted(async () => {
     document.title = title.value
+
+    /*
+     * The source recognised a countdown or a placeholder. Say so rather than
+     * walking a server list that will resolve to nothing five times over — which
+     * is what the viewer saw before this existed, ending in "No server would
+     * play" for an episode that simply is not out.
+     */
+    if (props.identity.pending) {
+        status.value = "error"
+        message.value = notYetMessage(props.identity)
+        void loadEpisodeList()
+        return
+    }
 
     if (servers.value.length === 0) {
         status.value = "error"

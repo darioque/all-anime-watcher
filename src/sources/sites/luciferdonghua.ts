@@ -40,6 +40,28 @@ import { AnimeStream } from "~/sources/families/AnimeStream"
  *
  * The site sends `Content-Security-Policy: upgrade-insecure-requests`, which
  * constrains no script or media source, so `stripCsp` stays off.
+ *
+ * **It also posts episodes before it has them**, which is what `pending` below
+ * is for. Measured on Ancient God Sovereign E13 on 2026-08-27, against E12 as
+ * the control:
+ *
+ *   E12 `.player-embed`  →  the Dailymotion iframe, on the base page and on /v/1/
+ *   E13 `.player-embed`  →  a tickcounter.com countdown widget on the base page
+ *                           and /v/1/, "Video Not Available" on /v/2/../v/5/
+ *
+ * The server list is identical on both — five `option`s in `select.mirror` — so
+ * nothing about the *series* page or the server list distinguishes them, and the
+ * update loop reads only the series page. E13 was announced as a release, opened
+ * to five servers that each resolved to nothing, and was marked watched on the
+ * way in.
+ *
+ * The series list gives it away too, and it is worth knowing about while being
+ * the wrong thing to build on: the placeholder is backdated (E13 is dated
+ * July 1 while E01-04 is July 30), so it sorts to the bottom of `div.eplister`
+ * below episode 1. That is a cataloguing habit, not a declaration — an out-of-
+ * order date is also what a corrected typo or a late re-upload looks like — and
+ * reading it as "premium" would suppress real episodes. The countdown widget
+ * says what the date only hints at.
  */
 export const luciferdonghua = new AnimeStream({
     id: "luciferdonghua",
@@ -72,5 +94,16 @@ export const luciferdonghua = new AnimeStream({
         // `meta[itemprop=embedUrl]`, which the family falls through to when this
         // finds nothing.
         playerIframe: "div.player-embed iframe[src]"
+    },
+    // Checked only when no embed was found at all — see `episodeAvailability`.
+    // `a.tickcounter` is the widget's own class and `data-type=countdown` the
+    // attribute its loader reads, so either alone is enough; both are listed
+    // because the site writes both and dropping one is a free way to survive a
+    // markup tweak. The text clause covers the sibling state, where the site has
+    // given up on a server rather than scheduled it.
+    pending: {
+        markers: ["a.tickcounter", "[data-type=countdown]"],
+        text: ["video not available"],
+        reason: "the site is counting down to it rather than playing it"
     }
 })

@@ -9,7 +9,7 @@ import { orderServers } from "~/library/servers"
 import type { AnimeSource, PageInfo, Server } from "~/sources/types"
 import type { PageIdentity } from "~/shared/messages"
 import { resolve } from "~/settings/resolver"
-import { marksOnOpen } from "~/settings/watching"
+import { marksOnOpen, onOpenMark } from "~/settings/watching"
 import { log } from "~/shared/logger"
 
 const logger = log("identify")
@@ -63,43 +63,76 @@ export async function identifyEpisode(options: {
             libraryChanged("added", entry.key)
         }
 
+        const where = { anime: entry, sourceId: source.id }
+
+        // Servers come from the HTML we already have, ordered by preference here
+        // so the player never has to know about the settings chain.
+        //
+        // Read *before* the tracking decision below, which needs to know whether
+        // this page offers anything at all. It used to run after, which is the
+        // shape of the bug: the position moved to the episode and only then did
+        // anyone look at what was on the page.
+        let servers: Server[] = []
+        try {
+            const found = await source.getServers(html, url, ctx)
+            const preferred = resolve("preferredServers", where)
+            const variant = resolve("variantPref", where)
+            servers = orderServers(found, preferred, variant)
+        } catch (error) {
+            logger.warn(`${source.id}: could not read the server list`, error)
+        }
+
+        /*
+         * Some sites publish the post before the video — a countdown where the
+         * player goes. The page is a real episode page with a real server list,
+         * so nothing structural catches it; only the source knows the marker.
+         * Free to ask: the HTML is already here.
+         */
+        const availability = source.episodeAvailability?.(html, url)
+        const pending = availability?.pending === true
+        if (pending) {
+            logger.info(`${source.id}: E${pageInfo.number} is not out yet — ${availability?.reason ?? "no player"}`)
+        }
+
         /*
          * Opening the page is a tracking signal in its own right: the player may
          * end up embedding a frame it cannot see inside, and on a freshly added
          * series "watch next" would otherwise point at episode 1.
          *
-         * The second clause is the "we left the site's own player alone" case.
-         * With `takeOverPage` off nothing of ours is ever attached to the video,
-         * so no completion threshold can be reached and no progress tick will
-         * ever arrive — opening the page is the only signal that will ever
-         * exist, which is precisely what `markWatchedOnEmbed` is for. Without
-         * this, turning the player off silently turned tracking off with it.
+         * `marksOnOpen` answers whether it counts for this viewer; `onOpenMark`
+         * answers when it may be recorded. The second question exists because
+         * this point in the code is too early to answer the first honestly — no
+         * server has been resolved yet, so "the viewer opened an episode" and
+         * "the viewer opened something watchable" are still the same event here.
+         * Where our player is taking the page over, the mark is handed to it and
+         * lands when there is a picture; where it is not, this is the last
+         * moment anything will happen at all and it lands here.
          */
-        const where = { anime: entry, sourceId: source.id }
         const marks = marksOnOpen({
             markWatchedOnOpen: resolve("markWatchedOnOpen", where),
             takeOverPage: resolve("takeOverPage", where),
             markWatchedOnEmbed: resolve("markWatchedOnEmbed", where)
         })
+        const timing = onOpenMark({
+            marks,
+            takeOverPage: resolve("takeOverPage", where),
+            markOnlyWhenPlayable: resolve("markOnlyWhenPlayable", where),
+            pending,
+            hasServers: servers.length > 0
+        })
 
-        if (options.track && entry && marks) {
+        const markedHere = options.track && entry !== undefined && timing === "now"
+        if (markedHere && entry) {
             entry = (await markWatched(entry.key, pageInfo.number, pageInfo.variant)) ?? entry
             libraryChanged("position", entry.key)
+        } else if (options.track && entry && marks) {
+            logger.debug(
+                `${source.id}: holding the position at E${pageInfo.number} — ` +
+                    (timing === "never" ? "nothing to play here" : "waiting for the player to show something")
+            )
         }
 
         if (options.track && entry) await refreshBadge()
-
-        // Servers come from the HTML we already have, ordered by preference here
-        // so the player never has to know about the settings chain.
-        let servers: Server[] = []
-        try {
-            const found = await source.getServers(html, url, ctx)
-            const preferred = resolve("preferredServers", { anime: entry, sourceId: source.id })
-            const variant = resolve("variantPref", { anime: entry, sourceId: source.id })
-            servers = orderServers(found, preferred, variant)
-        } catch (error) {
-            logger.warn(`${source.id}: could not read the server list`, error)
-        }
 
         return {
             sourceId: source.id,
@@ -116,8 +149,11 @@ export async function identifyEpisode(options: {
              * navigates, so nothing re-runs the tracking above, and the player
              * has to do it at the moment it actually switches.
              */
-            markOnEmbed: resolve("markWatchedOnEmbed", { anime: entry, sourceId: source.id }),
-            markOnOpen: resolve("markWatchedOnOpen", { anime: entry, sourceId: source.id })
+            markOnEmbed: resolve("markWatchedOnEmbed", where),
+            markOnOpen: marks && timing !== "never",
+            markedOnOpen: markedHere,
+            pending,
+            ...(availability?.reason ? { pendingReason: availability.reason } : {})
         }
     } catch (error) {
         const message = error instanceof Error ? error.message : String(error)

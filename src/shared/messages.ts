@@ -50,6 +50,20 @@ export interface PageIdentity {
      * tracking that a page load would have done.
      */
     markOnOpen?: boolean
+    /**
+     * The background already recorded the on-open mark, so the player must not.
+     *
+     * False means "opening counts, but only once you have something on screen" —
+     * the player marks it at that moment instead. See `onOpenMark`.
+     */
+    markedOnOpen?: boolean
+    /**
+     * The source recognised this page as posted-but-not-watchable: a countdown,
+     * a premium window, a placeholder. The player says so instead of walking
+     * five servers that each resolve to nothing.
+     */
+    pending?: boolean
+    pendingReason?: string
     error?: string
 }
 

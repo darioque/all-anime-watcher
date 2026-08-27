@@ -56,6 +56,18 @@ export interface Server {
     resolve?: unknown
 }
 
+/**
+ * Whether an episode page has anything behind it yet.
+ *
+ * `pending` is the site saying "posted, but not watchable": a countdown widget
+ * where the player goes, a premium early-access window, a placeholder created
+ * ahead of the release. `reason` is for the log and the UI and is never acted on.
+ */
+export interface EpisodeAvailability {
+    pending: boolean
+    reason?: string
+}
+
 /** A resolved server, when the site tells us more than just the URL. */
 export interface ResolvedServer {
     embedUrl: string
@@ -166,6 +178,23 @@ export interface AnimeSource {
 
     /** Cheap structural check against the already-loaded page HTML. */
     isEpisodePage(html: string, url: string): boolean
+
+    /**
+     * Does this episode page actually offer something to watch?
+     *
+     * Optional, and deliberately separate from `isEpisodePage`, which these
+     * pages pass: the post is a real episode page, complete with a server list.
+     * Every server on it resolves to nothing, which the update loop cannot see —
+     * it never opens an episode page at all, it reads the series list, where a
+     * placeholder is indistinguishable from a release.
+     *
+     * Answered from the episode page's own HTML, so verification costs one
+     * request per candidate rather than one per server. Only implement it where
+     * the site has a marker that means this and nothing else; a source that
+     * cannot tell must not guess, because the cost of a false positive is an
+     * episode that is never announced at all.
+     */
+    episodeAvailability?(html: string, url: string): EpisodeAvailability
     getPageInfo(html: string, url: string, ctx: FetchCtx): Promise<PageInfo>
     getServers(html: string, url: string, ctx: FetchCtx): Promise<Server[]>
     /**

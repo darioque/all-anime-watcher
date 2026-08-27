@@ -9,8 +9,19 @@
  * viewer was on — and every one of them raised a "new episodes" notification.
  * The list diff was right. Calling that diff "new" was not.
  */
-import { latestEpisodeNumber, newReleases, positionDrift, resumePositionFor, unwatchedCount } from "~/model/keys"
-import { marksOnOpen } from "~/settings/watching"
+import {
+    latestEpisode,
+    latestEpisodeNumber,
+    newReleases,
+    nextEpisode,
+    positionDrift,
+    resumePositionFor,
+    unwatchedCount,
+    verificationCandidates,
+    watchState,
+    wentLive
+} from "~/model/keys"
+import { marksOnOpen, onOpenMark } from "~/settings/watching"
 import type { Episode } from "~/model/types"
 
 let failures = 0
@@ -172,6 +183,161 @@ eq("unless that signal was turned off too", marking(false, false, false), false)
  * turned off.
  */
 eq("our own player measures instead of assuming", marking(false, true, true), false)
+
+/*
+ * ---------------------------------------------------------------------------
+ * Posted, but not out
+ *
+ * luciferdonghua.in published Ancient God Sovereign E13 as a post with a
+ * tickcounter.com countdown where the player goes, backdated so it sorted below
+ * episode 1 in the series list. The list diff was right again — E13 really was
+ * new — and calling it a release was not: the notification opened a page whose
+ * five servers each resolved to nothing, and the watch position had already
+ * moved to it on the way in.
+ * ---------------------------------------------------------------------------
+ */
+console.log("\n\x1b[1mposted, but not out\x1b[0m\n")
+
+/** An episode the site has posted with nothing behind it. */
+const soon = (number: number): Episode => ({
+    number,
+    url: `https://x/ep-${number}`,
+    pending: true,
+    pendingReason: "a countdown"
+})
+
+// --- the case that shipped
+eq(
+    "a countdown post is not a release",
+    newReleases({ added: [soon(13)], previousHighest: 12, watchedUpTo: 12 }).length,
+    0
+)
+eq(
+    "…even when a real episode arrives beside it",
+    newReleases({ added: [soon(14), ...range(13, 13)], previousHighest: 12, watchedUpTo: 12 })
+        .map(e => e.number)
+        .join(),
+    "13"
+)
+
+// --- and the release it must not swallow
+//
+// The placeholder is in the stored list from the first check that saw it, so
+// when the video goes up nothing about the list changes. Only `wentLive` sees it.
+eq(
+    "the countdown announces when it finally goes live",
+    wentLive([soon(13)], range(13, 13))
+        .map(e => e.number)
+        .join(),
+    "13"
+)
+eq("…and only then, not on every check in between", wentLive([soon(13)], [soon(13)]).length, 0)
+eq("an episode that was never pending is not announced twice", wentLive(range(12, 12), range(12, 13)).length, 0)
+eq(
+    "a placeholder that turns into a *different* episode number is not it",
+    wentLive([soon(13)], range(14, 14)).length,
+    0
+)
+
+// The list is re-fetched whole and this site reorders it — the placeholder is
+// backdated below episode 1 — so the match has to be by number, not by position.
+eq(
+    "the transition is matched by number, whatever order the site returns",
+    wentLive([soon(13), ...range(1, 12)], [...range(1, 13)].reverse())
+        .map(e => e.number)
+        .join(),
+    "13"
+)
+
+// --- what the rest of the library sees meanwhile
+const withCountdown = { episodes: [...range(1, 12), soon(13)], lastWatched: at(12), follow: true }
+
+eq("a countdown is not the newest episode", latestEpisodeNumber(withCountdown), 12)
+eq("…so the position is not adrift from it", positionDrift(withCountdown), 0)
+eq("it does not light the badge", unwatchedCount(withCountdown), 0)
+eq("the row reads as caught up, not as new", watchState(withCountdown), "current")
+eq('"watch next" does not open it', nextEpisode(withCountdown), undefined)
+eq("nor does the newest-episode link", latestEpisode(withCountdown)?.number, 12)
+
+// A series whose whole list is placeholders has nothing to watch yet, which is
+// "unstarted" — the state for a source that returned nothing — not "new".
+eq(
+    "a series of nothing but countdowns is unstarted",
+    watchState({ episodes: [soon(1)], lastWatched: undefined, follow: true }),
+    "unstarted"
+)
+
+// And once it goes live everything reverses, with no other state changed.
+const wentUp = { episodes: range(1, 13), lastWatched: at(12), follow: true }
+eq("once it is out, the badge lights", unwatchedCount(wentUp), 1)
+eq("…and the row says so", watchState(wentUp), "new")
+eq("…and watch next opens it", nextEpisode(wentUp)?.number, 13)
+
+console.log("\n\x1b[1mwhat is worth opening to check\x1b[0m\n")
+
+// Only the episodes about to be announced, and the ones whose answer can change.
+eq(
+    "a backfill is not verified — it is not announced either way",
+    verificationCandidates({ episodes: range(1, 20), releases: [], limit: 5 }).length,
+    0
+)
+eq(
+    "the ones about to be announced are",
+    verificationCandidates({ episodes: range(1, 13), releases: range(13, 13), limit: 5 })
+        .map(e => e.number)
+        .join(),
+    "13"
+)
+eq(
+    "a known placeholder is re-checked even though nothing announced it",
+    verificationCandidates({ episodes: [...range(1, 12), soon(13)], releases: [], limit: 5 })
+        .map(e => e.number)
+        .join(),
+    "13"
+)
+
+/*
+ * The cap is for the entry whose stored list was empty — a failed first fetch, a
+ * source that just came back — where every episode reads as a release. Highest
+ * first, because a site posts ahead of itself and never behind, so the ones the
+ * cap drops are the least likely to be placeholders.
+ */
+const wholeRun = verificationCandidates({ episodes: range(1, 400), releases: range(1, 400), limit: 5 })
+eq("an empty stored list does not open four hundred pages", wholeRun.length, 5)
+eq("…and it checks the newest, where a placeholder would be", wholeRun.map(e => e.number).join(), "400,399,398,397,396")
+
+console.log("\n\x1b[1mwhen an on-open mark may be recorded\x1b[0m\n")
+
+const opened = (over: Partial<Parameters<typeof onOpenMark>[0]> = {}) =>
+    onOpenMark({
+        marks: true,
+        takeOverPage: true,
+        markOnlyWhenPlayable: true,
+        pending: false,
+        hasServers: true,
+        ...over
+    })
+
+eq("normally the player says when there is a picture", opened(), "whenPlaying")
+eq("a recognised countdown is never marked", opened({ pending: true }), "never")
+eq("a page listing no servers is never marked", opened({ hasServers: false }), "never")
+eq("opening not counting at all still wins", opened({ marks: false }), "never")
+
+/*
+ * With the site's own player left in place nothing of ours ever attaches, so no
+ * later moment is coming and the page read is the only one there is.
+ */
+eq("with no player of ours, the page read is the moment", opened({ takeOverPage: false }), "now")
+eq("…but a countdown is still refused there", opened({ takeOverPage: false, pending: true }), "never")
+
+/*
+ * Turning the guard off means "go back to marking on open" — it does not mean
+ * "mark episodes the source has said are not out". Nobody asking for the first
+ * is asking for the second.
+ */
+eq("the opt-out restores the old timing", opened({ markOnlyWhenPlayable: false }), "now")
+eq("…but not for a countdown", opened({ markOnlyWhenPlayable: false, pending: true }), "never")
+eq("…and it does not need a server list to do it", opened({ markOnlyWhenPlayable: false, hasServers: false }), "now")
 
 console.log("\n\x1b[1mwhere an episode resumes\x1b[0m\n")
 

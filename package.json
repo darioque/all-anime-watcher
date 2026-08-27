@@ -1,6 +1,6 @@
 {
     "name": "all-anime-watcher",
-    "version": "0.1.12",
+    "version": "0.1.13",
     "private": true,
     "description": "Follow anime and donghua across streaming sites: auto-track what you watch, get notified about new episodes, watch in one consistent player.",
     "type": "module",
@@ -14,7 +14,7 @@
         "prepare": "husky",
         "build": "vite build && vite build --config vite.content.config.ts && node scripts/check-dist.mjs",
         "check": "node scripts/check-dist.mjs",
-        "check:all": "npm run --silent check:schedule && npm run --silent check:matching && npm run --silent check:myanime && npm run --silent check:grouping && npm run --silent check:m3u8 && npm run --silent check:episodes && npm run --silent check:backup && npm run --silent check:downloads && npm run --silent check:categories && npm run --silent check:lab && npm run --silent check:extractors",
+        "check:all": "npm run --silent check:schedule && npm run --silent check:matching && npm run --silent check:myanime && npm run --silent check:grouping && npm run --silent check:m3u8 && npm run --silent check:episodes && npm run --silent check:backup && npm run --silent check:downloads && npm run --silent check:categories && npm run --silent check:lab && npm run --silent check:extractors && npm run --silent check:pending",
         "check:schedule": "esbuild scripts/check-schedule.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/schedule.mjs --log-level=warning && node .probe/schedule.mjs",
         "check:matching": "esbuild scripts/check-matching.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/matching.mjs --log-level=warning && node .probe/matching.mjs",
         "watch": "vite build --watch --mode development",
@@ -30,7 +30,8 @@
         "check:backup": "esbuild scripts/check-backup.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/backup.mjs --log-level=warning && node .probe/backup.mjs",
         "check:downloads": "esbuild scripts/check-downloads.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/downloads.mjs --log-level=warning && node .probe/downloads.mjs",
         "check:episodes": "esbuild scripts/check-episodes.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/episodes.mjs --log-level=warning && node .probe/episodes.mjs",
-        "check:m3u8": "esbuild scripts/check-m3u8.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/m3u8.mjs --log-level=warning && node .probe/m3u8.mjs"
+        "check:m3u8": "esbuild scripts/check-m3u8.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/m3u8.mjs --log-level=warning && node .probe/m3u8.mjs",
+        "check:pending": "esbuild scripts/check-pending.mts --bundle --platform=node --format=esm --alias:~=./src --outfile=.probe/pending.mjs --log-level=warning && node .probe/pending.mjs"
     },
     "dependencies": {
         "cheerio": "^1.2.0",

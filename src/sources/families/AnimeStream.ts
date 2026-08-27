@@ -2,6 +2,7 @@ import type { Episode } from "~/model/types"
 import type {
     AnimeSource,
     DomainSource,
+    EpisodeAvailability,
     FetchCtx,
     NetRequestConfig,
     PageInfo,
@@ -51,8 +52,44 @@ export interface AnimeStreamConfig {
     /** Labels to keep, in order, when the site lists servers per language. */
     serverLabelFilter?: (label: string) => boolean
 
+    /**
+     * How this site says "posted, but there is nothing to watch yet".
+     *
+     * Opt-in, and it has to be: the fallback test below is "the player container
+     * holds no embed", which is only evidence on a site that inlines its player
+     * into the episode page. A site that builds the player in JavaScript would
+     * have every episode declared pending, and pending episodes are never
+     * announced — so a wrong default here is a source that silently stops
+     * reporting new episodes at all. Say nothing and the check never runs.
+     */
+    pending?: PendingMarkers
+
     netRequest?: NetRequestConfig | null
     domainSource?: DomainSource
+}
+
+/**
+ * The evidence that an episode post has nothing behind it.
+ *
+ * Both lists are checked against the player container only, never the whole
+ * page: the phrase "coming soon" appears in a sidebar widget on half these
+ * sites, and matching it there would suppress real episodes.
+ *
+ * A match is necessary but not sufficient — `episodeAvailability` also requires
+ * that no embed was found. A site is free to run a countdown to the *next*
+ * episode above a player that works, and that page is not pending.
+ */
+export interface PendingMarkers {
+    /** Selectors, resolved inside the player container. */
+    markers?: string[]
+    /** Case-insensitive substrings of the player container's text. */
+    text?: string[]
+    /**
+     * How to describe this to the viewer, as the tail of "This episode isn't out
+     * yet — …". The selector that matched is not it: it goes in the debug log,
+     * where a CSS string is evidence, and never on screen, where it is noise.
+     */
+    reason?: string
 }
 
 export interface AnimeStreamSelectors {
@@ -72,6 +109,8 @@ export interface AnimeStreamSelectors {
     breadcrumbItem: string
     /** The video iframe on a resolved server page, not the page's ad iframes. */
     playerIframe: string
+    /** The player's own box, which is where a "not yet" notice replaces it. */
+    playerContainer: string
 }
 
 const DEFAULT_SELECTORS: AnimeStreamSelectors = {
@@ -89,7 +128,8 @@ const DEFAULT_SELECTORS: AnimeStreamSelectors = {
     episodeDate: ".epl-date",
     server: "select.mirror > option[value], ul.mirror a[data-em]",
     breadcrumbItem: "[itemprop=item]",
-    playerIframe: "iframe[src]"
+    playerIframe: "iframe[src]",
+    playerContainer: "div.player-embed"
 }
 
 const DEFAULT_EPISODE_URL = /^\/[^/]+-episode-[\d.]+\/?$/
@@ -112,6 +152,7 @@ export class AnimeStream implements AnimeSource {
     protected readonly episodeSuffix: RegExp
     protected readonly netRequestConfig: NetRequestConfig | null
     protected readonly serverLabelFilter: (label: string) => boolean
+    protected readonly pendingMarkers: PendingMarkers | null
     protected readonly logger
 
     constructor(config: AnimeStreamConfig) {
@@ -129,6 +170,7 @@ export class AnimeStream implements AnimeSource {
         this.sel = { ...DEFAULT_SELECTORS, ...config.selectors }
         this.netRequestConfig = config.netRequest ?? null
         this.serverLabelFilter = config.serverLabelFilter ?? (() => true)
+        this.pendingMarkers = config.pending ?? null
         this.domainSource = config.domainSource
         this.logger = log(`source:${config.id}`)
     }
@@ -294,6 +336,59 @@ export class AnimeStream implements AnimeSource {
     isEpisodePage(html: string, url: string): boolean {
         if (!this.matchesPath(this.episodeUrl, url)) return false
         return parse(html)(this.sel.server).length > 0
+    }
+
+    /**
+     * Is there a video behind this episode post, or only a promise of one?
+     *
+     * Only answered where the site declared how it says so — see `pending` on
+     * the config for why guessing is not an option here.
+     *
+     * The two clauses are ordered on purpose, and the order is the whole test:
+     *
+     *  1. **An embed wins outright.** If the player container holds an iframe,
+     *     or the page carries `meta[itemprop=embedUrl]`, the episode is
+     *     watchable and no notice on the page changes that. This is what keeps a
+     *     countdown *to the next episode*, sitting above a player that works,
+     *     from suppressing the episode you are actually on.
+     *  2. **Then, and only then, the marker.** An empty player container is
+     *     suggestive but not conclusive — a theme change or a selector that
+     *     drifted looks identical — so something has to positively say "not
+     *     yet". Requiring both means a broken selector degrades to "announced as
+     *     usual", which is the old behaviour, rather than to a source that
+     *     silently stops reporting episodes.
+     */
+    episodeAvailability(html: string, url: string): EpisodeAvailability {
+        const declared = this.pendingMarkers
+        if (!declared) return { pending: false }
+
+        const $ = parse(html)
+        const $container = $(this.sel.playerContainer)
+
+        const embed =
+            attrOf($container.find("iframe[src]").first(), "src") ??
+            attrOf($(this.sel.playerIframe).first(), "src") ??
+            attrOf($("meta[itemprop=embedUrl][content]").first(), "content")
+        if (embed) return { pending: false }
+
+        const reason = declared.reason ?? "the site has posted the page but not the video"
+
+        for (const marker of declared.markers ?? []) {
+            if ($container.find(marker).length > 0) {
+                this.logger.debug(`pending — "${marker}" stands where the player goes on ${url}`)
+                return { pending: true, reason }
+            }
+        }
+
+        const text = $container.text().toLowerCase()
+        for (const phrase of declared.text ?? []) {
+            if (text.includes(phrase.toLowerCase())) {
+                this.logger.debug(`pending — the player box reads "${phrase}" on ${url}`)
+                return { pending: true, reason }
+            }
+        }
+
+        return { pending: false }
     }
 
     async getPageInfo(html: string, url: string, ctx: FetchCtx): Promise<PageInfo> {

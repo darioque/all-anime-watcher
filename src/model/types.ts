@@ -29,6 +29,20 @@ export interface Episode {
     filler?: boolean
     /** Epoch ms, when the site publishes a release date. */
     airedAt?: number
+    /**
+     * The post exists but there is nothing to watch behind it — a countdown, a
+     * premium early-access window, a placeholder the site pre-created.
+     *
+     * Stored rather than dropped, and that is the whole point. Dropping it would
+     * make the episode "new" again on every single check, and re-announce it the
+     * moment it finally went live *and* every cycle in between. Kept with this
+     * flag, it is known — so the diff stays quiet — while every rule that asks
+     * "is there a new episode" skips it. When a later check finds it playable
+     * the flag comes off, and *that* transition is the release.
+     */
+    pending?: true
+    /** Why it is pending, for the UI and the log. Never load-bearing. */
+    pendingReason?: string
 }
 
 export interface EpisodeProgress {
@@ -62,6 +76,8 @@ export interface AnimeOverrides {
     completionThreshold?: number
     markWatchedOnOpen?: boolean
     markWatchedOnEmbed?: boolean
+    verifyNewEpisodes?: boolean
+    markOnlyWhenPlayable?: boolean
     releaseDelayMin?: number
     takeOverPage?: boolean
     notifyNewEpisode?: boolean
