@@ -17,9 +17,10 @@ import {
     checkSearch,
     checkSeries,
     checkServers,
+    checkStreamReach,
     checkStreams
 } from "~/lab/checks"
-import type { SourceFacts } from "~/lab/checks"
+import type { SourceFacts, StreamReach } from "~/lab/checks"
 import type { LabFetchReport, LabSeriesReport } from "~/lab/types"
 import type { SearchResult } from "~/sources/types"
 import type { Episode } from "~/model/types"
@@ -274,6 +275,75 @@ eq(
         playlist: false
     }).ok,
     false
+)
+
+/*
+ * Reachability across *every* stream, not just the first.
+ *
+ * The luciferdonghua.in vidhide server is the case this exists for: the Lab
+ * fetched one stream of one server, called the run green, and the episode then
+ * failed to play. A host that refuses an extracted URL does not answer with a
+ * status — the request never completes — so a thrown fetch has to read as a
+ * finding against a named stream rather than as an error that aborts the step.
+ */
+const reach = (over: Partial<StreamReach> = {}): StreamReach => ({
+    label: "OK.RU — 720p",
+    playlist: true,
+    // Proxied by default so these cases test reachability alone; the page-path
+    // caveat has its own cases below.
+    fetchVia: "background",
+    report: fetched(),
+    ...over
+})
+
+eq("one reachable stream passes", checkStreamReach([reach()]).ok, true)
+eq("no streams at all fails", checkStreamReach([]).ok, false)
+
+const allDead = checkStreamReach([
+    reach({ label: "VID HIDE — StreamWish", report: fetched({ status: 403, ok: false }) }),
+    reach({ label: "VID HIDE — alt", thrown: "Failed to fetch" })
+])
+eq("every stream dead fails", allDead.ok, false)
+says("and counts them", allDead.note, "none of 2")
+
+// The player falls through to the next server, so one live stream is a working
+// episode — but the dead ones must still be named, which is precisely what
+// reporting only streams[0] failed to do.
+const mixedReach = checkStreamReach([
+    reach({ label: "VID HIDE — StreamWish", thrown: "Failed to fetch" }),
+    reach({ label: "OK.RU — 720p" })
+])
+eq("one live stream among dead ones still passes", mixedReach.ok, true)
+says("and says how many survived", mixedReach.note, "1 of 2")
+eq("while warning about the dead one", mixedReach.warnings?.length, 1)
+says("naming it", mixedReach.warnings![0]!, "VID HIDE")
+
+// A throw is not an HTTP status: saying "HTTP undefined" here is what made the
+// original failure read as a dead host rather than a rejected request.
+says(
+    "a thrown fetch is reported as never completing",
+    checkStreamReach([reach({ thrown: "Failed to fetch" })]).warnings![0]!,
+    "never completed"
+)
+
+/*
+ * The luluvdo false green. `lab:fetch` runs in the worker, so a stream the
+ * player fetches from the page was vouched for on a path it never takes — and
+ * for a host that binds its signed URL to the client that minted it, that is the
+ * difference between passing here and `TypeError: Failed to fetch` in playback.
+ */
+const fromPageCtx = checkStreamReach([reach({ label: "VID HIDE — StreamWish", fetchVia: "page" })])
+eq("a page-fetched stream still passes on reachability", fromPageCtx.ok, true)
+says("but says the worker is not the path playback takes", fromPageCtx.warnings!.join(" | "), "from the page")
+eq(
+    "a proxied stream carries no such caveat",
+    checkStreamReach([reach({ fetchVia: "background" })]).warnings?.length ?? 0,
+    0
+)
+eq(
+    "and an unpinned stream is treated as page-fetched",
+    checkStreamReach([reach({ fetchVia: undefined })]).warnings?.length,
+    1
 )
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)

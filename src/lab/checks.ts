@@ -353,6 +353,72 @@ export function checkFetch(report: LabFetchReport, expect: { playlist: boolean }
     )
 }
 
+/** One stream, fetched for real, with the label the UI shows against it. */
+export interface StreamReach {
+    label: string
+    playlist: boolean
+    /** What the extractor pinned, so the check can say what it did *not* test. */
+    fetchVia?: "page" | "dnr" | "background"
+    /** Absent when the fetch threw rather than answering. */
+    report?: LabFetchReport
+    thrown?: string
+}
+
+/**
+ * Are the streams an extractor handed back actually reachable?
+ *
+ * Every one of them, because the player walks renditions and servers: an
+ * extractor that returns one live stream and three dead ones is a server that
+ * fails partway through, and testing only the first reported that as green.
+ *
+ * A single reachable stream is a pass, because that is what the player needs —
+ * it falls through to the next server on a fatal error, so one dead rendition
+ * degrades rather than breaks. The dead ones become warnings instead of being
+ * dropped: silence there is what let a host that answers the terminal and 403s
+ * the browser look like a working server for a whole session.
+ */
+export function checkStreamReach(reaches: StreamReach[]): Verdict {
+    if (reaches.length === 0) return fail("no streams to fetch")
+
+    const judged = reaches.map(reach => ({
+        label: reach.label,
+        verdict: reach.thrown
+            ? // A throw is not an HTTP status: the request never completed, which
+              // is what a CORS rejection, a blocked request or a dead host all
+              // look like from inside a page. Say so, rather than reporting it as
+              // a failed check with no number.
+              fail(`${reach.thrown} — the request never completed (blocked, CORS or unreachable)`)
+            : checkFetch(reach.report!, { playlist: reach.playlist })
+    }))
+
+    const live = judged.filter(entry => entry.verdict.ok)
+    const dead = judged.filter(entry => !entry.verdict.ok)
+
+    /*
+     * `lab:fetch` runs in the service worker, so a stream the player will fetch
+     * from the *page* is being checked on a path it never takes. That is not
+     * pedantry: luluvdo binds its signed URL to the client that minted it, the
+     * worker mints, and so the Lab passed a stream every page fetch then failed
+     * with `TypeError: Failed to fetch`. Say which streams were vouched for on
+     * the wrong path rather than reporting them as simply green.
+     */
+    const elsewhere = reaches
+        .filter(reach => (reach.fetchVia ?? "page") !== "background")
+        .map(reach => `${reach.label}: fetched from the worker, but playback fetches this from the page`)
+
+    const warnings = [
+        ...dead.map(entry => `${entry.label}: ${entry.verdict.note}`),
+        ...live.flatMap(entry => (entry.verdict.warnings ?? []).map(w => `${entry.label}: ${w}`)),
+        ...elsewhere
+    ]
+
+    if (live.length === 0) {
+        return fail(`none of ${judged.length} stream(s) could be fetched`, warnings)
+    }
+
+    return pass(`${live.length} of ${judged.length} stream(s) fetched`, warnings)
+}
+
 // ------------------------------------------------------------------- shared
 
 function hosts(source: SourceFacts): string[] {

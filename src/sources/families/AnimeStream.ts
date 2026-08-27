@@ -27,9 +27,20 @@ export interface AnimeStreamConfig {
     domains: string[]
     home: string
     icon?: string
+    /** What the site carries whatever the series is, e.g. `["Donghua"]`. */
+    categories?: string[]
 
     /** Matched against pathname. Defaults to the theme's `-episode-N` scheme. */
     episodeUrl?: RegExp
+    /**
+     * Where this site's series pages live, matched against pathname.
+     *
+     * Optional, and only some sites can say: lmanime keeps series at the root,
+     * where `/genres/` and `/anime-list/` are indistinguishable from a slug.
+     * Declaring it lets the user follow a series from its own page, and it also
+     * makes `seriesIdFromUrl` honest — see the note there.
+     */
+    seriesUrl?: RegExp
     /** Path of the browse/filter listing, relative to home. */
     animeListPath?: string
     /** Strips the episode part off a slug to recover the series slug. */
@@ -59,6 +70,8 @@ export interface AnimeStreamSelectors {
     episodeDate: string
     server: string
     breadcrumbItem: string
+    /** The video iframe on a resolved server page, not the page's ad iframes. */
+    playerIframe: string
 }
 
 const DEFAULT_SELECTORS: AnimeStreamSelectors = {
@@ -75,7 +88,8 @@ const DEFAULT_SELECTORS: AnimeStreamSelectors = {
     episodeSub: ".epl-sub",
     episodeDate: ".epl-date",
     server: "select.mirror > option[value], ul.mirror a[data-em]",
-    breadcrumbItem: "[itemprop=item]"
+    breadcrumbItem: "[itemprop=item]",
+    playerIframe: "iframe[src]"
 }
 
 const DEFAULT_EPISODE_URL = /^\/[^/]+-episode-[\d.]+\/?$/
@@ -88,7 +102,9 @@ export class AnimeStream implements AnimeSource {
     readonly domains: string[]
     readonly home: string
     readonly icon?: string
+    readonly categories?: string[]
     readonly episodeUrl: RegExp
+    readonly seriesUrl?: RegExp
     readonly domainSource?: DomainSource
 
     protected readonly sel: AnimeStreamSelectors
@@ -105,7 +121,9 @@ export class AnimeStream implements AnimeSource {
         this.domains = config.domains
         this.home = ensureTrailingSlash(config.home)
         this.icon = config.icon
+        this.categories = config.categories
         this.episodeUrl = config.episodeUrl ?? DEFAULT_EPISODE_URL
+        this.seriesUrl = config.seriesUrl
         this.animeListPath = config.animeListPath ?? "anime"
         this.episodeSuffix = config.episodeSuffix ?? DEFAULT_EPISODE_SUFFIX
         this.sel = { ...DEFAULT_SELECTORS, ...config.selectors }
@@ -122,10 +140,28 @@ export class AnimeStream implements AnimeSource {
     // ------------------------------------------------------------ identity
 
     /**
+     * Series identity from a URL — and only from one that is actually a series
+     * URL, where the site says which those are.
+     *
+     * Slug arithmetic assumes an episode slug is its series slug plus a marker.
+     * That holds on lmanime and fails on luciferdonghua.in, which publishes
+     * `perfect-world-wanmei-shijie-episode-284-…` under `/anime/perfect-world-new/`
+     * — a stem that looks like a series id, names no series, and would key a
+     * second library entry that never updates. So when a site declares where
+     * its series live, anything else returns null and identity comes from
+     * `getPageInfo`, which reads the theme's breadcrumb. Sites that cannot
+     * declare it keep the old behaviour, which is the best guess available.
+     */
+    seriesIdFromUrl(url: string): string | null {
+        if (this.seriesUrl && !this.matchesPath(this.seriesUrl, url)) return null
+        return this.slugFromUrl(url)
+    }
+
+    /**
      * Last non-empty path segment, with any `-episode-N` suffix removed. Works
      * for series at the root (`/slug/`) and under a prefix (`/anime/slug/`).
      */
-    seriesIdFromUrl(url: string): string | null {
+    protected slugFromUrl(url: string): string | null {
         const segments = pathOf(url)
             .split("/")
             .filter(s => s !== "")
@@ -133,6 +169,11 @@ export class AnimeStream implements AnimeSource {
         if (!last) return null
         const slug = last.replace(this.episodeSuffix, "")
         return slug === "" ? null : slug
+    }
+
+    /** A source's own pattern, matched without the `g` flag's sticky lastIndex. */
+    protected matchesPath(pattern: RegExp, url: string): boolean {
+        return new RegExp(pattern.source, pattern.flags.replace("g", "")).test(pathOf(url))
     }
 
     episodeNumberFromUrl(url: string): number | null {
@@ -251,9 +292,7 @@ export class AnimeStream implements AnimeSource {
     // ------------------------------------------------------------ page context
 
     isEpisodePage(html: string, url: string): boolean {
-        if (!new RegExp(this.episodeUrl.source, this.episodeUrl.flags.replace("g", "")).test(pathOf(url))) {
-            return false
-        }
+        if (!this.matchesPath(this.episodeUrl, url)) return false
         return parse(html)(this.sel.server).length > 0
     }
 
@@ -292,7 +331,7 @@ export class AnimeStream implements AnimeSource {
     }
 
     protected seriesUrlFromEpisodeUrl(url: string, ctx: FetchCtx): string {
-        const seriesId = this.seriesIdFromUrl(url)
+        const seriesId = this.slugFromUrl(url)
         const prefix =
             this.animeListPath && pathOf(url).startsWith(`/${this.animeListPath}/`) ? `/${this.animeListPath}` : ""
         return `${ctx.baseUrl}${prefix}/${seriesId}/`
@@ -331,7 +370,7 @@ export class AnimeStream implements AnimeSource {
             : this.decodeBase64(payload)
 
         const $ = parse(html)
-        const iframe = attrOf($("iframe[src]").first(), "src")
+        const iframe = attrOf($(this.sel.playerIframe).first(), "src")
         if (iframe) return absoluteUrl(iframe, ctx.baseUrl)
 
         const meta = attrOf($("meta[itemprop=embedUrl][content]").first(), "content")

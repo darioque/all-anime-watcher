@@ -6,7 +6,7 @@ import { sourceById } from "~/sources/registry"
 import { extractorFor, allExtractors } from "~/extractors/registry"
 import type { ExtractCtx } from "~/extractors/types"
 import type { Server } from "~/sources/types"
-import { createFetchCtx } from "~/net/fetcher"
+import { BASE_HEADERS, createFetchCtx } from "~/net/fetcher"
 import { ensureTrailingSlash, swapOrigin } from "~/shared/url"
 import { isMasterPlaylist, playlistVariants, readMediaPlaylist } from "~/shared/m3u8"
 import type { LabFetchReport, LabSeriesReport } from "~/lab/types"
@@ -140,10 +140,14 @@ export function registerLabHandlers() {
             // headers here would test something that never happens.
             const response = await fetch(url, {
                 credentials: "omit",
+                // Same base headers the proxy sends, so the Lab tests the request
+                // playback actually makes. Without them a CDN that binds its
+                // token to the mint's Accept-Language answers 403 here and the
+                // failure looks like a dead host rather than a mismatched client.
+                headers: { ...BASE_HEADERS, Range: "bytes=0-262143" }
                 // A playlist is a few kilobytes and arrives whole regardless; a
                 // progressive file is the episode, and asking for all of it to
                 // find out whether the host answers would download it.
-                headers: { Range: "bytes=0-262143" }
             })
             const body = await response.text()
 

@@ -198,8 +198,9 @@ scripts/probe-source.mts the CLI Lab page
 | mundodonghua.com | custom PHP, packed-JS server tabs | done — probe green |
 | myanime.live | WordPress REST API; no series pages at all | done — probe green |
 | anikototv.to | AnimeKai/AnimeSuge family, signed AJAX | done — probe green |
+| luciferdonghua.in | the same `animestream` theme, added later | done — plays via OK.ru and Dailymotion |
 
-All four launch sources are in, and the **Lab page** (Settings → Lab) tests one
+All four launch sources are in, plus luciferdonghua.in, and the **Lab page** (Settings → Lab) tests one
 end to end: pick a source, press Run, and six chained steps go from its declared
 attributes through search, the episode list, an episode page, a server and the
 extractor to a real fetch of the resulting stream. Each step hands its result to
@@ -308,18 +309,6 @@ the parts that touch IndexedDB. Two rules earn their keep:
 Air times feed the `airing` schedule policy. No data, or a date already past the
 pad window, degrades to the fallback interval rather than never checking.
 
-## Editing these files
-
-Several patches to `.vue` files have silently no-op'd because an exact-string
-replace ran against markup prettier had already reformatted — leaving working
-code that nothing could reach (a settings panel with no button, a `checkAll` with
-no caller). Typecheck passes in that state, so it proves nothing.
-
-Rewrite the file or use a real editor tool; if you must patch by string, assert
-the replacement changed the buffer, and afterwards grep the *built bundle* for a
-user-visible string from the change. `grep -F "Check every series now" dist/*.js`
-is the check that would have caught all three.
-
 ## UI surfaces
 
 The popup is the compact view; **the full library page (`src/ui/library/`) is the
@@ -357,11 +346,18 @@ source that embeds that host. `Stream.fetchVia` decides how the player fetches:
   Dailymotion is this.
 - `iframe` — **no extraction at all**: the host's own player runs in a frame
   inside our chrome. Produced by `playback:streams` when no extractor matches, or
-  when one matches and fails. The viewer keeps episode navigation, the server
-  picker and library tracking, and loses only their position inside the episode.
-  The player treats it as a last resort — it walks every server first and only
-  embeds if nothing extractable worked. This is why an unknown host is degraded
-  rather than unsupported, and why writing an extractor is an optimisation.
+  when one matches and fails. It is the failure state, not a supported mode: the
+  viewer gets the host's ads, its controls and its quality picker instead of ours,
+  no resume position, no skip intro/outro, no subtitle handling, no quality
+  preference, no PiP, no keyboard shortcuts, and no download. It exists so an
+  unrecognised host degrades instead of dead-ending, and the player walks every
+  server before it embeds.
+
+  **Extraction is the point of this extension.** A host falling back to an iframe
+  is a bug with an address, and "it still embeds" is never the answer to one. If
+  an extracted stream will not play, fix the extractor — `fetchVia: "background"`
+  and a DNR `Referer` rule exist precisely so that a CDN which refuses the page
+  can still be played by us.
 
 `Referer` and `Origin` are forbidden header names — `fetch()` silently refuses to
 set them — so an extractor declares `netRules` and `background/dnr.ts` installs
@@ -394,7 +390,7 @@ exercises one at a time.
 | --- | --- | --- |
 | mp4upload.com | `mp4upload` | works — direct MP4, played in the browser |
 | ok.ru | `okru` | works — direct MP4 at several renditions |
-| streamwish family | `streamwish` | works — covers embedwish, vidhidepro, morencius, FileLions, VidHide |
+| streamwish family | `streamwish` | works — covers embedwish, vidhidepro, morencius, FileLions, VidHide, luluvdo |
 | bysekoze.com | `byse` | works — AES-256-GCM player config from `/api/videos/<code>`; pinned by `npm run check:extractors` |
 | megaplay family | `megaplay` | works — HLS + subtitles; covers megaplay.buzz, vidtube.site and the rest of the white-labelled engine |
 | dailymotion.com | `dailymotion` | resolves to a master playlist; the manifest 403s intermittently — see below |
@@ -454,7 +450,79 @@ which is why lmanime and myanime still play.
 
 **Sources:** `lmanime` (AnimeStream theme), `mundodonghua` (custom PHP, packed-JS
 servers), `myanime` (WordPress REST API, no series pages), `anikoto` (AnimeKai
-family, signed AJAX, embeds on the MegaPlay engine).
+family, signed AJAX, embeds on the MegaPlay engine), `luciferdonghua`
+(AnimeStream theme again, but with series under `/anime/` — see below).
+
+**luciferdonghua.in is the second `animestream` site, and it is where two of the
+family's defaults turned out to be lmanime's habits rather than the theme's.**
+Both are now config, so lmanime is untouched:
+
+- **Its episode slug does not stem to its series slug**, and almost never does:
+  `perfect-world-wanmei-shijie-episode-284-…` lives under
+  `/anime/perfect-world-new/`, and `coiling-dragon-episode-18-to-20-…` under
+  `/anime/coiling-dragon-2026/`. Slug arithmetic yields a plausible id that names
+  no series — the duplicate-entry fault that never updates. A site may now declare
+  `seriesUrl`; where it does, `seriesIdFromUrl` returns null for anything else and
+  identity comes from `getPageInfo`'s breadcrumb, which is authoritative here.
+  lmanime declares no `seriesUrl` (series sit at the root, indistinguishable from
+  `/genres/`) and keeps the old best-guess behaviour.
+- **The theme's bare `iframe[src]` picks up an ad.** This site injects `t.co`
+  iframes in `div.megavid`, above the player, so `resolveServer` returned a link
+  shortener and the probe reported it as a missing extractor. The `playerIframe`
+  selector defaults to the old behaviour; this site sets
+  `div.player-embed > iframe[src]`. Its Dailymotion server has no iframe at all
+  and still falls through to `meta[itemprop=embedUrl]`.
+
+**A non-browser User-Agent is the probe's *other* blind spot, and it points the
+opposite way.** The documented one is the CLI being too strong — Node can set a
+`Referer` a browser cannot. Node's default `User-Agent` is the same blind spot
+reversed: luluvdo's CDN 403s it and serves a browser UA, 3/3 each way with a
+fresh token and no `Referer` or `Origin` involved. `scripts/probe-source.mts`
+now sends a browser UA from `browserHeaders()` for exactly this reason. A netRule
+would have been the wrong fix twice over: Chrome does not let an extension set a
+UA, and the real one is already browser-shaped.
+
+**Some CDNs bind a signed URL to the `Accept-Language` of the request that
+minted it.** luluvdo (StreamWish family, served from `tnmr.org`) does exactly
+that. Stating it precisely matters, because three wrong theories fit the symptom
+first. Measured 3/3 per cell, and perfectly deterministic once *both* sides are
+controlled:
+
+| mint sends | spend sends | result |
+| --- | --- | --- |
+| `en-US,en;q=0.9` | the same | 200 |
+| `en-US,en;q=0.9` | `es-ES,es;q=0.9,en;q=0.8` | 403 |
+| `en-US,en;q=0.9` | nothing | 403 |
+| nothing | nothing | 200 |
+| nothing | `en-US,en;q=0.9` | 403 |
+
+`Accept` is irrelevant, and so are Referer, Origin and Sec-Fetch: a Node-minted
+token fails from a browser page *even on luluvdo's own origin*, while the token
+luluvdo's own page mints for itself plays every segment at 200. The header
+experiments looked random for an afternoon only because each attempt minted and
+spent with different header sets — control both and the behaviour is stable. The
+403 body carries no `access-control-allow-origin`, so the player sees
+`TypeError: Failed to fetch` rather than a status, which reads like a dead host.
+
+Extractors mint through `createFetchCtx`, which sends `BASE_HEADERS`, so anything
+that later fetches that URL has to look the same. Two things follow:
+
+- **`playback:fetch`, `lab:fetch` and `coverPlaylistHosts` all send
+  `BASE_HEADERS`.** A bare fetch in the worker sends Chrome's own locale, which
+  is a different client as far as the CDN is concerned. The proxy is the same
+  client as the fetcher and has to look like it.
+- **Such a stream has to be `fetchVia: "background"`.** The page cannot match —
+  hls.js there sends Chrome's locale and nothing can rewrite `Accept-Language`
+  per request from the page — so only the proxy can spend the token.
+  `StreamWishExtractor.BOUND_TO_MINT_LANGUAGE` lists the hosts that need it; the
+  rest of the family keeps the cheaper page fetch.
+
+**This is also the one failure the Lab used to bless.** `lab:fetch` runs in the
+worker, so a stream pinned to `fetchVia: "page"` was vouched for on a path
+playback never takes — a green run and a dead server. `checkStreamReach` now
+warns for every stream it fetched from the worker that the player will fetch from
+the page, and the probe's `browserHeaders()` mirrors `BASE_HEADERS` so its own
+mint and spend agree.
 
 ## Phase status
 

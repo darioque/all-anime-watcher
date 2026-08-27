@@ -10,7 +10,15 @@ const DEFAULT_TIMEOUT_MS = 30_000
  * UA request header), but Accept and Accept-Language are, and several themes
  * behave differently without them.
  */
-const BASE_HEADERS: Record<string, string> = {
+/**
+ * Sent on every request this module makes — and, deliberately, by the playback
+ * proxy too. Some CDNs bind a signed URL to the `Accept-Language` of the request
+ * that minted it: luluvdo issues a token against the mint's value and answers 403
+ * to any spend carrying a different one, or none. The extractor mints through
+ * `createFetchCtx`, so anything that later fetches that URL has to look the same
+ * or the token is dead. Exported for `playback:fetch` and `lab:fetch`.
+ */
+export const BASE_HEADERS: Record<string, string> = {
     Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
     "Accept-Language": "en-US,en;q=0.9"
 }

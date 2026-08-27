@@ -4,8 +4,8 @@ import { send } from "~/shared/messages"
 import type { SourceDescriptor } from "~/shared/messages"
 import type { Episode } from "~/model/types"
 import type { SearchResult, Server } from "~/sources/types"
-import { checkAttributes, checkFetch, checkPage, checkSearch, checkSeries, checkServers } from "~/lab/checks"
-import type { ServerAttempt, Verdict } from "~/lab/checks"
+import { checkAttributes, checkPage, checkSearch, checkSeries, checkServers, checkStreamReach } from "~/lab/checks"
+import type { ServerAttempt, StreamReach, Verdict } from "~/lab/checks"
 import Outcome from "./Outcome.vue"
 
 /**
@@ -45,7 +45,11 @@ const PLAN: { id: StepId; name: string; hint: string }[] = [
     { id: "series", name: "Series and episodes", hint: "Order, numbering, and whether the URLs route back here." },
     { id: "page", name: "Episode page", hint: "Read as the content script reads it, but never as a watch signal." },
     { id: "streams", name: "Servers → streams", hint: "Every server the page offers, each through its extractor." },
-    { id: "fetch", name: "Stream reachable", hint: "The fetch a browser makes, with the rules the step above set." }
+    {
+        id: "fetch",
+        name: "Streams reachable",
+        hint: "Every extracted stream, fetched as a browser would, with the rules the step above set."
+    }
 ]
 
 const sources = ref<SourceDescriptor[]>([])
@@ -247,20 +251,55 @@ async function fromStreams() {
     })
     if (!verdict.ok) return
 
-    // The first server that actually extracted something is the one worth
-    // fetching: the last step tests the header rules that resolving it installed.
-    const winner = attempts.find(entry => entry.resolved?.extractorId)
-    const stream = winner?.resolved?.streams.find(candidate => candidate.kind !== "iframe")
-    if (!winner || !stream) return
+    /*
+     * Every stream of every server that extracted — not the first stream of the
+     * first one.
+     *
+     * This step exists to test the header rules resolving a server installed,
+     * and one stream could only ever test one server's. The player walks all of
+     * them, so a host that answers the terminal and refuses the browser sat
+     * behind a green Lab run until someone tried to watch it. Fetching them all
+     * costs a few seconds in a tool that is already deliberate about being slow.
+     */
+    const candidates = attempts
+        .filter(entry => entry.resolved?.extractorId)
+        .flatMap(entry =>
+            (entry.resolved?.streams ?? [])
+                .filter(stream => stream.kind !== "iframe")
+                .map(stream => ({ server: entry.server, stream }))
+        )
+    if (candidates.length === 0) return
 
-    const playlist = stream.kind === "hls" || stream.kind === "dash"
     await attempt(
         "fetch",
-        () => send("lab:fetch", { url: stream.url }),
-        report => {
-            const verdict = checkFetch(report, { playlist })
-            return { ...verdict, note: `${winner.server} — ${verdict.note}` }
-        }
+        async () => {
+            const started = Date.now()
+            const reaches: StreamReach[] = []
+
+            for (const [index, { server, stream }] of candidates.entries()) {
+                const position = candidates.length > 1 ? ` [${index + 1}/${candidates.length}]` : ""
+                const label = `${server}${position} — ${stream.label ?? stream.kind}`
+                const playlist = stream.kind === "hls" || stream.kind === "dash"
+
+                try {
+                    const answer = await send("lab:fetch", { url: stream.url })
+                    reaches.push({ label, playlist, fetchVia: stream.fetchVia, report: answer.result })
+                } catch (error) {
+                    // A throw here is the finding, not an error to abort on: it
+                    // is what a blocked or CORS-rejected request looks like, and
+                    // checkStreamReach reports it against this stream's name.
+                    reaches.push({
+                        label,
+                        playlist,
+                        fetchVia: stream.fetchVia,
+                        thrown: error instanceof Error ? error.message : String(error)
+                    })
+                }
+            }
+
+            return { ms: Date.now() - started, result: reaches }
+        },
+        checkStreamReach
     )
 }
 

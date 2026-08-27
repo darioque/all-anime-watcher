@@ -115,7 +115,20 @@ if (!source) {
 }
 
 const base = `https://${source.domains[0]}`
-const ctx = createFetchCtx({ baseUrl: base, defaultHeaders: { Referer: `${base}/` } })
+/*
+ * The browser UA goes on the *context*, not just the final fetch.
+ *
+ * Setting it only on the last request made ok.ru fail 8/8 with HTTP 400 where it
+ * had passed: its file URLs are bound to the client that minted them, and the
+ * probe minted them through this context under Node's default UA and then asked
+ * for them as a browser. Which UA is sent matters far less than sending the same
+ * one throughout, so it belongs here, where every source, extractor and stream
+ * fetch inherits it.
+ */
+const ctx = createFetchCtx({
+    baseUrl: base,
+    defaultHeaders: { Referer: `${base}/`, ...browserHeaders() }
+})
 
 let failures = 0
 
@@ -357,29 +370,43 @@ if (html) {
             // The manifest (or the file itself) is what the player loads first.
             // Simulate the DNR rewrites the extension applies, since Node can send
             // header sets that fetch() in the extension cannot.
-            const stream = streams?.[0]
-            if (stream && stream.kind !== "hls") {
+            /*
+             * Every stream, not just the first.
+             *
+             * The player walks renditions, so a extractor that returns one good
+             * stream and three dead ones is a server that fails partway through
+             * for reasons the probe used to call green. Reporting only
+             * `streams[0]` also hid the reverse — a host whose first rendition
+             * happens to answer while the rest 403 — and both read downstream as
+             * "the server is flaky" rather than as a fault with an address.
+             */
+            for (const [index, stream] of (streams ?? []).entries()) {
+                const label = (streams?.length ?? 0) > 1 ? ` #${index + 1}/${streams!.length}` : ""
+
+                if (stream.kind !== "hls") {
+                    await step(
+                        `media loads${label}`,
+                        async () => {
+                            const headers = {
+                                ...browserHeaders(),
+                                ...netHeadersFor(stream.url, extractor.netRules, stream),
+                                Range: "bytes=0-2000"
+                            }
+                            const response = await fetch(stream.url, { headers })
+                            return {
+                                status: response.status,
+                                type: response.headers.get("content-type") ?? "",
+                                ranges: response.headers.get("accept-ranges") ?? ""
+                            }
+                        },
+                        r => `HTTP ${r.status}, ${r.type}${r.ranges ? `, ranges: ${r.ranges}` : ""}`,
+                        r => (r.status >= 400 ? `HTTP ${r.status} — check the extractor's netRules` : null)
+                    )
+                    continue
+                }
+
                 await step(
-                    "media loads",
-                    async () => {
-                        const headers = {
-                            ...netHeadersFor(stream.url, extractor.netRules, stream),
-                            Range: "bytes=0-2000"
-                        }
-                        const response = await fetch(stream.url, { headers })
-                        return {
-                            status: response.status,
-                            type: response.headers.get("content-type") ?? "",
-                            ranges: response.headers.get("accept-ranges") ?? ""
-                        }
-                    },
-                    r => `HTTP ${r.status}, ${r.type}${r.ranges ? `, ranges: ${r.ranges}` : ""}`,
-                    r => (r.status >= 400 ? `HTTP ${r.status} — check the extractor's netRules` : null)
-                )
-            }
-            if (stream?.kind === "hls") {
-                await step(
-                    "manifest loads",
+                    `manifest loads${label}`,
                     async () => {
                         const rule = netRuleFor(stream.url, extractor.netRules)
                         const headers = netHeadersFor(stream.url, extractor.netRules, stream)
@@ -405,6 +432,34 @@ if (html) {
                 )
             }
         }
+    }
+}
+
+/**
+ * A browser-shaped User-Agent, because Node's default is a tell.
+ *
+ * The documented blind spot is this probe being *too strong* — Node can set a
+ * `Referer` a browser cannot, so a host that demands one passes here and fails
+ * in the extension. Node's default `User-Agent` is the same blind spot pointing
+ * the other way: luluvdo's CDN 403s it and serves a browser one, 3/3 each way,
+ * so the probe failed a stream the extension fetches fine and the obvious next
+ * move — adding a netRule — would have been wrong twice over, since Chrome does
+ * not let an extension set a UA and the real one is already browser-shaped.
+ * Sending one here keeps the probe's *weaknesses* the same as a browser's; the
+ * Lab is still what settles the strengths.
+ */
+function browserHeaders(): Record<string, string> {
+    return {
+        "User-Agent":
+            "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+        // Mirrors BASE_HEADERS in src/net/fetcher.ts on purpose. Some hosts bind
+        // a signed URL to the header set that minted it — luluvdo does — so a
+        // stream fetch that sends a different set than the extractor's fetch is a
+        // different client and gets a 403. Minting through `ctx` and spending
+        // through a bare fetch was exactly that mismatch, and it looked like a
+        // flaky CDN until the two were lined up.
+        Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+        "Accept-Language": "en-US,en;q=0.9"
     }
 }
 
@@ -456,7 +511,7 @@ async function fetchWithRule(
 ): Promise<{ status: number; body: string }> {
     const removals = (rule?.removeHeaders ?? []).map(h => h.toLowerCase())
     if (removals.length === 0) {
-        const response = await fetch(url, { headers })
+        const response = await fetch(url, { headers: { ...browserHeaders(), ...headers } })
         return { status: response.status, body: response.ok ? await response.text() : "" }
     }
 
@@ -465,6 +520,7 @@ async function fetchWithRule(
     const cookie = cookieHeaderFor(url)
     const sendHeaders: Record<string, string> = {
         accept: "*/*",
+        ...browserHeaders(),
         ...(cookie ? { cookie } : {}),
         ...headers
     }

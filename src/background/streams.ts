@@ -1,4 +1,5 @@
 import { ensureRefererRule } from "./dnr"
+import { BASE_HEADERS } from "~/net/fetcher"
 import { fetchCtxFor } from "~/library/library"
 import { sourceById } from "~/sources/registry"
 import { extractorFor } from "~/extractors/registry"
@@ -208,6 +209,9 @@ export async function coverPlaylistHosts(url: string, referer: string, depth = 0
     let text: string
     try {
         const response = await fetch(url, {
+            // Same client shape as the mint, or a token bound to the mint's
+            // Accept-Language 403s here and the walk silently covers nothing.
+            headers: { ...BASE_HEADERS },
             credentials: "include",
             redirect: "follow",
             signal: AbortSignal.timeout(15_000)

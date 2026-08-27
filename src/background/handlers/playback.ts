@@ -1,4 +1,5 @@
 import { on } from "../router"
+import { BASE_HEADERS } from "~/net/fetcher"
 import { getAnime } from "~/model/db"
 import { fetchSkipTimes } from "~/trackers/aniskip"
 import { orderServers } from "~/library/servers"
@@ -118,7 +119,16 @@ export function registerPlaybackHandlers() {
      * segment for such a stream comes through here.
      */
     on("playback:fetch", async ({ url, rangeStart, rangeEnd, responseType, headers }) => {
-        const requestHeaders: Record<string, string> = { ...headers }
+        /*
+         * The proxy must look like the fetcher that minted the URL. Some CDNs
+         * bind a signed token to the mint request's `Accept-Language` — luluvdo
+         * 403s any spend with a different value or none — and the extractor
+         * minted through `createFetchCtx`, which sends BASE_HEADERS. A bare
+         * fetch here sends Chrome's own locale instead, which is a different
+         * client as far as the CDN is concerned. The caller still wins on any
+         * header it sets explicitly.
+         */
+        const requestHeaders: Record<string, string> = { ...BASE_HEADERS, ...headers }
         if (rangeStart !== undefined) {
             requestHeaders["Range"] = `bytes=${rangeStart}-${rangeEnd !== undefined ? rangeEnd - 1 : ""}`
         }
