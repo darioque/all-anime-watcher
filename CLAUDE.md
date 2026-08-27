@@ -318,6 +318,27 @@ appears in the other. `openInTab` swaps the toolbar button to open the page
 directly; Chrome only fires `action.onClicked` when there is no popup, so the
 popup has to be *cleared* via `action.setPopup({ popup: "" })`, not just ignored.
 
+**Settings is a modal with a section rail** (`SettingsDialog.vue`), not the inline
+panel it began as. It had grown to eleven sections rendered at once — seven field
+groups from the descriptor table, plus Default schedule, the test notification,
+Lab, Backup, and the whole Sources list stacked underneath — which is a single
+scroll long enough that finding a toggle meant hunting for it. The grouping was
+already there and doing no work; each section was a `<h3>` you scrolled past.
+
+`SettingsPanel` now takes a `section` prop and renders one group. Two things
+about the split are worth knowing:
+
+- **The rail is in two parts, and the rule between them is not decoration.**
+  Above it are preferences, all served by the one descriptor-driven panel; below
+  it are the three that are not a form — a live list of sites, a data export, and
+  a tool that opens its own tab.
+- **A child component's root element takes the *parent's* scope attribute.**
+  `BackupPanel`'s root was `<div class="group">` and had been styled by
+  `SettingsPanel`'s scoped CSS the whole time it lived inside it. Moved into the
+  dialog it silently lost that and sat unstyled — no border, no padding, no
+  heading treatment. It carries those rules itself now. Anything else promoted
+  out of a parent panel needs the same check; nothing errors, it just looks wrong.
+
 Watch state (`watchState()` in `model/keys.ts`) drives the row stripe: `new`,
 `current`, `unstarted`, `paused`. Colour is never the only signal — the pill and
 the button label say the same thing.

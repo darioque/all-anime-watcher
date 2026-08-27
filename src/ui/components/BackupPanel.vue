@@ -235,6 +235,32 @@ function message(error: unknown): string {
 </template>
 
 <style scoped>
+/*
+ * Self-contained on purpose. This root was a `.group` inside SettingsPanel, and
+ * a child component's root picks up the *parent's* scope attribute — so it was
+ * being styled by SettingsPanel all along, invisibly. Rendered as its own
+ * section in the settings dialog it lost that and sat flush against the edges,
+ * unstyled. These are the rules it was borrowing, now its own.
+ */
+.group {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    margin: 16px;
+    padding: 12px 14px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+}
+
+h3 {
+    margin: 0 0 2px;
+    font-size: 11px;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+    color: var(--ink-3);
+}
+
 .lede {
     margin: 0 0 10px;
     font-size: 12px;

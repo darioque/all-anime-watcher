@@ -234,7 +234,9 @@ onMounted(load)
 
 <style scoped>
 .sources {
-    padding: 0 16px 16px;
+    /* Padded on all four sides now: it is a section of its own in the settings
+       dialog rather than a slab stacked under the settings form. */
+    padding: 16px;
     display: flex;
     flex-direction: column;
     gap: 10px;

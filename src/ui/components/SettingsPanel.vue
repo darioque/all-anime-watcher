@@ -4,12 +4,21 @@ import { onMounted, ref } from "vue"
 import { send } from "~/shared/messages"
 import type { GlobalSettings } from "~/settings/schema"
 import SchedulePicker from "./SchedulePicker.vue"
-import BackupPanel from "./BackupPanel.vue"
 
 /** Its own tab: probing a source is a sit-down job, not a settings toggle. */
 function openLab() {
     void send("tab:open", { url: browser.runtime.getURL("src/ui/lab/index.html"), active: true })
 }
+
+/**
+ * One section at a time, chosen by the dialog around it.
+ *
+ * The panel used to render all eleven at once, which is what made settings a
+ * single scroll long enough that finding a toggle meant hunting for it. The
+ * grouping was already here and doing nothing — every section was a `<h3>` you
+ * scrolled past.
+ */
+const props = defineProps<{ section: string }>()
 
 const settings = ref<GlobalSettings | null>(null)
 const saving = ref(false)
@@ -31,8 +40,9 @@ interface Field {
     step?: number
 }
 
-const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
+const GROUPS: { id: string; title: string; note?: string; fields: Field[] }[] = [
     {
+        id: "tracking",
         title: "Tracking",
         fields: [
             { key: "autoAddOnWatch", label: "Add a series when I open an episode", type: "toggle" },
@@ -62,6 +72,7 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
         ]
     },
     {
+        id: "checking",
         title: "Checking for new episodes",
         note: "Any series can override the schedule from its own row in the list.",
         fields: [
@@ -101,6 +112,7 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
         ]
     },
     {
+        id: "notifications",
         title: "Notifications",
         fields: [
             { key: "notifyNewEpisode", label: "Notify me about new episodes", type: "toggle" },
@@ -116,6 +128,7 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
         ]
     },
     {
+        id: "playback",
         title: "Playback",
         fields: [
             { key: "takeOverPage", label: "Replace the site's player with ours", type: "toggle" },
@@ -177,6 +190,7 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
         ]
     },
     {
+        id: "anilist",
         title: "AniList",
         note: "Read-only. Nothing is sent to AniList, and no sign-in is needed for either of these.",
         fields: [
@@ -195,6 +209,7 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
         ]
     },
     {
+        id: "domains",
         title: "Domains",
         note: "Sites here change address often; see the Sources section below to check or pin one.",
         fields: [
@@ -215,6 +230,7 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
         ]
     },
     {
+        id: "interface",
         title: "Interface",
         fields: [
             { key: "openInTab", label: "Toolbar button opens the full library", type: "toggle" },
@@ -287,16 +303,15 @@ onMounted(load)
 
 <template>
     <section class="settings">
-        <header>
-            <h2>Settings</h2>
-            <span v-if="saving" class="saving">saving…</span>
+        <header v-if="saving">
+            <span class="saving">saving…</span>
         </header>
 
         <p v-if="error" class="error">{{ error }}</p>
         <p v-if="!settings" class="muted">Loading…</p>
 
         <template v-else>
-            <div v-for="group in GROUPS" :key="group.title" class="group">
+            <div v-for="group in GROUPS.filter(g => g.id === props.section)" :key="group.title" class="group">
                 <h3>{{ group.title }}</h3>
                 <p v-if="group.note" class="note">{{ group.note }}</p>
 
@@ -356,7 +371,7 @@ onMounted(load)
                 </div>
             </div>
 
-            <div class="group">
+            <div v-if="props.section === 'notifications'" class="group">
                 <h3>Checking it works</h3>
                 <p class="note">
                     You can't make a site publish an episode, so this runs the real new-episode notification against a
@@ -373,7 +388,7 @@ onMounted(load)
                 </div>
             </div>
 
-            <div class="group">
+            <div v-if="props.section === 'lab'" class="group">
                 <h3>Lab</h3>
                 <p class="note">
                     Run one piece of a source or extractor on demand, inside the extension — same fetch context, same
@@ -389,9 +404,7 @@ onMounted(load)
                 </div>
             </div>
 
-            <BackupPanel />
-
-            <div class="group">
+            <div v-if="props.section === 'checking'" class="group">
                 <h3>Default schedule</h3>
                 <p class="note">What a series is checked on unless it says otherwise.</p>
                 <SchedulePicker

@@ -18,8 +18,7 @@ import {
 } from "~/model/keys"
 import { relativeFuture, relativePast } from "~/shared/time"
 import SchedulePicker from "./SchedulePicker.vue"
-import SettingsPanel from "./SettingsPanel.vue"
-import SourcesPanel from "./SourcesPanel.vue"
+import SettingsDialog from "./SettingsDialog.vue"
 import TrackerDialog from "./TrackerDialog.vue"
 import RowMenu, { type MenuItem } from "./RowMenu.vue"
 import ConfirmDialog from "./ConfirmDialog.vue"
@@ -591,11 +590,10 @@ function openSettings() {
         return
     }
     showSettings.value = !showSettings.value
+    // Settings are a modal now, so there is nothing to scroll to and nothing
+    // underneath competing for the same screen — the search panel can stay as
+    // the viewer left it.
     if (showSettings.value) showSearch.value = false
-    // Settings open above the list. Opening them from halfway down a long
-    // library otherwise puts you in the middle of a panel you have not seen the
-    // top of.
-    if (showSettings.value) window.scrollTo({ top: 0, behavior: "smooth" })
 }
 
 /** States the viewer needs to see even when they aren't acting on them. */
@@ -788,8 +786,7 @@ defineExpose({ load })
 
         <DownloadsPanel v-if="showDownloads && variant === 'page'" @close="showDownloads = false" />
 
-        <SettingsPanel v-if="showSettings && variant === 'page'" />
-        <SourcesPanel v-if="showSettings && variant === 'page'" />
+        <SettingsDialog v-if="showSettings && variant === 'page'" @close="showSettings = false" />
 
         <CategoryBar
             v-if="variant === 'page' && library.length > 0"
