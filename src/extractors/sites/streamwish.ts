@@ -49,7 +49,15 @@ export class StreamWishExtractor implements Extractor {
         "vidhidevip.com",
         "vidhidepre.com",
         "morencius.com",
-        "luluvdo.com"
+        "luluvdo.com",
+        // luciferdonghua's "VID HIDE" server rotated here from luluvdo.com.
+        // Listed on a working extraction, not on the family's URL shape, which
+        // this host does *not* match — no `.urlset/master.m3u8`, no `t`/`s`/`e`
+        // token, a different CDN (acek-cdn.com). What matches is the method:
+        // the embed unpacks with this unpacker to a jwplayer config, and the
+        // playlist it names fetches 200 with `ACAO: *`. That distinction is the
+        // whole bysekoze lesson — shape is not evidence, a fetched stream is.
+        "yurn.online"
     ]
 
     /**

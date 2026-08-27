@@ -57,10 +57,20 @@ export const luciferdonghua = new AnimeStream({
     selectors: {
         // The theme's default is a bare `iframe[src]`, which on this site picks
         // up an injected `t.co` ad iframe sitting in `div.megavid` well above
-        // the player. The real embed is always a *direct* child of
-        // `div.player-embed`, and the Dailymotion server has no iframe at all —
-        // it carries the URL in `meta[itemprop=embedUrl]`, which the family
-        // already falls through to when this selector finds nothing.
-        playerIframe: "div.player-embed > iframe[src]"
+        // the player. Anchoring on the player's own container fixes that.
+        //
+        // Descendant, not `>`. The child combinator was tried first and broke
+        // Dailymotion on some episodes: the site wraps that embed in an unnamed
+        // inner `<div>`, so the iframe is a grandchild of `.player-embed` and
+        // `resolveServer` reported "no embed URL found" for a server that was
+        // right there. Loosening it is safe because the ads live in
+        // `div.megavid` and `div.video-content`, never inside `.player-embed` —
+        // checked across every server page of two episodes, where this matches
+        // exactly one iframe and it is always the player.
+        //
+        // Some servers carry no iframe at all and put the URL in
+        // `meta[itemprop=embedUrl]`, which the family falls through to when this
+        // finds nothing.
+        playerIframe: "div.player-embed iframe[src]"
     }
 })
