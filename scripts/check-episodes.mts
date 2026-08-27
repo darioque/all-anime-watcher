@@ -9,7 +9,7 @@
  * viewer was on — and every one of them raised a "new episodes" notification.
  * The list diff was right. Calling that diff "new" was not.
  */
-import { latestEpisodeNumber, newReleases, positionDrift, unwatchedCount } from "~/model/keys"
+import { latestEpisodeNumber, newReleases, positionDrift, resumePositionFor, unwatchedCount } from "~/model/keys"
 import { marksOnOpen } from "~/settings/watching"
 import type { Episode } from "~/model/types"
 
@@ -172,6 +172,45 @@ eq("unless that signal was turned off too", marking(false, false, false), false)
  * turned off.
  */
 eq("our own player measures instead of assuming", marking(false, true, true), false)
+
+console.log("\n\x1b[1mwhere an episode resumes\x1b[0m\n")
+
+/** A stored progress entry. `completed` defaults on, which is the whole point. */
+const stopped = (positionSec: number, durationSec?: number, completed = true) => ({
+    positionSec,
+    ...(durationSec ? { durationSec } : {}),
+    completed,
+    updatedAt: 0
+})
+
+/*
+ * The bug this exists for. `completionThreshold` is a *tracking* setting and 0
+ * is a supported value — it marks an episode a second in, on purpose. Resume
+ * used to refuse on `completed`, so that one setting silently switched resuming
+ * off for the whole library, on every episode, and nothing connected the two.
+ */
+eq("a completed episode still resumes", resumePositionFor(stopped(600, 1440)), 600)
+eq("…and so does one marked a second in", resumePositionFor(stopped(430, 1440, true)), 430)
+
+eq("nothing stored starts at the beginning", resumePositionFor(undefined), null)
+eq("the first few seconds are not a position", resumePositionFor(stopped(4, 1440)), null)
+eq("but past the floor is", resumePositionFor(stopped(6, 1440)), 6)
+
+/*
+ * Watched to the end is the case the old `completed` test was reaching for, and
+ * the position says it without consulting any setting.
+ */
+eq("a position at the end starts over", resumePositionFor(stopped(1440, 1440)), null)
+eq("…and so does one inside the last few seconds", resumePositionFor(stopped(1430, 1440)), null)
+eq("just before that still resumes", resumePositionFor(stopped(1420, 1440)), 1420)
+
+/*
+ * No duration is the honest unknown: not every stream reports one. The position
+ * is then all there is, and resuming is the better guess — seeking back is one
+ * keypress, losing forty minutes is not.
+ */
+eq("an unknown duration resumes on the position alone", resumePositionFor(stopped(2400)), 2400)
+eq("a zero duration is not a duration", resumePositionFor(stopped(2400, 0)), 2400)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

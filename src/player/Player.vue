@@ -6,6 +6,7 @@ import { send } from "~/shared/messages"
 import type { PageIdentity } from "~/shared/messages"
 import type { Server } from "~/sources/types"
 import type { Episode, TrackedAnime } from "~/model/types"
+import { progressKey, resumePositionFor } from "~/model/keys"
 import { automaticCategoriesOf, categoriesOf } from "~/library/categories"
 import type { Category, SourceCategories } from "~/library/categories"
 import type { Stream } from "~/extractors/types"
@@ -795,11 +796,9 @@ async function restorePosition() {
     if (!trackedKey.value || !info.value || !video.value) return
     try {
         const anime = await send("library:get", { key: trackedKey.value })
-        const key = `${info.value.number}:${info.value.variant ?? ""}`
-        const saved = anime?.progress?.[key]
-        if (saved && !saved.completed && saved.positionSec > 5) {
-            video.value.currentTime = saved.positionSec
-        }
+        const saved = anime?.progress?.[progressKey(info.value.number, info.value.variant)]
+        const at = resumePositionFor(saved)
+        if (at !== null) video.value.currentTime = at
     } catch {
         // A failed resume is not worth interrupting playback over.
     }

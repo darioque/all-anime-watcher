@@ -1,4 +1,4 @@
-import type { Episode, TrackedAnime, Variant } from "./types"
+import type { Episode, EpisodeProgress, TrackedAnime, Variant } from "./types"
 
 /** The library key. Never derived from a URL — see model/types.ts. */
 export function animeKey(sourceId: string, seriesId: string): string {
@@ -12,6 +12,42 @@ export function progressKey(number: number, variant?: Variant): string {
 
 export function episodeProgressKey(ep: Episode): string {
     return progressKey(ep.number, ep.variant)
+}
+
+/** Below this, "where I left off" is just where the episode starts. */
+const RESUME_FLOOR_SEC = 5
+
+/**
+ * Within this of the end, the episode was finished rather than paused, so the
+ * next open starts it over.
+ */
+const RESUME_TAIL_SEC = 15
+
+/**
+ * Where to start this episode, or null to start at the beginning.
+ *
+ * Deliberately blind to `completed`. That flag answers a *tracking* question —
+ * "count this as watched" — and `completionThreshold` exists precisely so the
+ * viewer can redefine it; setting it to 0 marks an episode a second in, which is
+ * a supported choice and used. Resume asking `completed` therefore meant that
+ * one setting silently switched resume off for the whole library, on every
+ * episode, with nothing to connect the two. Same shape as rules 10 and 11 in
+ * CLAUDE.md: a stand-in value quietly answering a question about other state.
+ *
+ * The position is its own evidence. Someone who stopped in the middle has a
+ * position in the middle, and someone who watched to the end has one at the end,
+ * whatever any threshold was set to. Where the duration is unknown the position
+ * is all there is, and resuming is the better guess: it is one keypress to seek
+ * back, and losing forty minutes is not.
+ */
+export function resumePositionFor(saved: EpisodeProgress | undefined): number | null {
+    if (!saved) return null
+    if (saved.positionSec <= RESUME_FLOOR_SEC) return null
+
+    const duration = saved.durationSec
+    if (duration && duration > 0 && saved.positionSec >= duration - RESUME_TAIL_SEC) return null
+
+    return saved.positionSec
 }
 
 export function titleOf(anime: Pick<TrackedAnime, "title" | "displayTitle">): string {
