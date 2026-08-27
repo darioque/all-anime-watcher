@@ -3,8 +3,35 @@ import { onMounted, ref } from "vue"
 import { send } from "~/shared/messages"
 import type { SourceDescriptor } from "~/shared/messages"
 import { relativePast } from "~/shared/time"
+import { loadSettings, loadSourceSettings } from "~/settings/storage"
+import { resolve } from "~/settings/resolver"
+import type { SourceSettings } from "~/settings/schema"
+
+/**
+ * The settings a site can disagree with the global default about.
+ *
+ * Both are about a site that publishes an episode's page before it has the
+ * episode, which is a fact about the *site* — luciferdonghua.in does it, lmanime
+ * does not — so this is the level they most naturally belong at. A single series
+ * can still overrule this from its own row.
+ */
+const SOURCE_OVERRIDES = [
+    {
+        key: "verifyNewEpisodes" as const,
+        label: "Check a new episode is really out",
+        help: "Opens the episode page once before announcing it. Worth turning off for a site that never posts early — the check is a wasted request there."
+    },
+    {
+        key: "markOnlyWhenPlayable" as const,
+        label: "Only count it watched once something plays",
+        help: "Waits for a stream or an embed on screen before moving your position."
+    }
+] satisfies { key: keyof SourceSettings; label: string; help: string }[]
+
+type SourceKey = (typeof SOURCE_OVERRIDES)[number]["key"]
 
 const sources = ref<SourceDescriptor[]>([])
+const sourceSettings = ref<Record<string, SourceSettings>>({})
 const busy = ref<string | null>(null)
 const notice = ref<string | null>(null)
 const error = ref<string | null>(null)
@@ -13,9 +40,41 @@ const newDomain = ref("")
 
 async function load() {
     try {
+        // Settings come first: the toggles read the resolved global to label
+        // "Default", and a row rendered before that lands would say the wrong one.
+        await loadSettings()
+        sourceSettings.value = await loadSourceSettings()
         sources.value = await send("sources:list", {})
     } catch (e) {
         error.value = e instanceof Error ? e.message : String(e)
+    }
+}
+
+/** Whether this source says anything of its own, and what. */
+const overrideState = (sourceId: string, key: SourceKey): "inherit" | "on" | "off" => {
+    const own = sourceSettings.value[sourceId]?.[key]
+    return own === undefined ? "inherit" : own ? "on" : "off"
+}
+
+/**
+ * What "Default" resolves to — asked without a sourceId, so it reports the
+ * global rather than echoing this source's own override back at it.
+ */
+const inheritedValue = (key: SourceKey) => resolve(key, {})
+
+async function setOverride(sourceId: string, key: SourceKey, state: "inherit" | "on" | "off") {
+    busy.value = sourceId
+    try {
+        sourceSettings.value = await send("sources:setSettings", {
+            sourceId,
+            patch: { [key]: state === "inherit" ? null : state === "on" }
+        })
+        // The resolver reads a cache the background owns; this page has its own.
+        await loadSourceSettings()
+    } catch (e) {
+        error.value = e instanceof Error ? e.message : String(e)
+    } finally {
+        busy.value = null
     }
 }
 
@@ -137,6 +196,33 @@ onMounted(load)
                     <button class="btn" :disabled="!newDomain.trim()" @click="pin(source.id, newDomain)">Use</button>
                     <button class="btn" @click="((adding = null), (newDomain = ''))">Cancel</button>
                 </span>
+            </div>
+
+            <div class="source-settings">
+                <div v-for="option in SOURCE_OVERRIDES" :key="option.key" class="setting-row">
+                    <div class="setting-text">
+                        <span class="setting-label">{{ option.label }}</span>
+                        <span class="setting-help">{{ option.help }}</span>
+                    </div>
+                    <div class="setting-choice">
+                        <button
+                            v-for="choice in ['inherit', 'on', 'off'] as const"
+                            :key="choice"
+                            class="btn tiny"
+                            :class="{ on: overrideState(source.id, option.key) === choice }"
+                            :disabled="busy === source.id"
+                            @click="setOverride(source.id, option.key, choice)"
+                        >
+                            {{
+                                choice === "inherit"
+                                    ? `Default (${inheritedValue(option.key) ? "on" : "off"})`
+                                    : choice === "on"
+                                      ? "On"
+                                      : "Off"
+                            }}
+                        </button>
+                    </div>
+                </div>
             </div>
 
             <div class="actions">
@@ -279,6 +365,56 @@ h2 {
     display: inline-flex;
     gap: 4px;
     align-items: center;
+}
+
+.source-settings {
+    margin-top: 8px;
+    padding-top: 8px;
+    border-top: 1px solid var(--rule);
+}
+
+.setting-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 5px 0;
+}
+
+.setting-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.setting-label {
+    font-size: 12px;
+}
+
+.setting-help {
+    font-size: 11px;
+    color: var(--ink-3);
+}
+
+.setting-choice {
+    display: flex;
+    gap: 4px;
+    flex: none;
+}
+
+.btn.tiny {
+    font-size: 10px;
+    padding: 2px 6px;
+}
+
+/*
+ * The selected state carries weight as well as colour — the three buttons read
+ * as one control, and which is active is the only thing it says.
+ */
+.setting-choice .btn.on {
+    border-color: var(--accent);
+    font-weight: 600;
 }
 
 .addrow input {

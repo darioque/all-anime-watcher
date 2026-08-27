@@ -17,6 +17,7 @@ import {
     positionDrift,
     resumePositionFor,
     unwatchedCount,
+    pointerRetraction,
     verificationCandidates,
     watchState,
     wentLive
@@ -275,24 +276,57 @@ eq("…and watch next opens it", nextEpisode(wentUp)?.number, 13)
 
 console.log("\n\x1b[1mwhat is worth opening to check\x1b[0m\n")
 
+/** An episode already verified to have a player in it. */
+const seen = (number: number): Episode => ({ number, url: `https://x/ep-${number}`, available: true })
+
+const candidates = (over: Partial<Parameters<typeof verificationCandidates>[0]>) =>
+    verificationCandidates({ episodes: [], releases: [], sweep: 3, limit: 5, ...over })
+        .map(e => e.number)
+        .join()
+
 // Only the episodes about to be announced, and the ones whose answer can change.
 eq(
-    "a backfill is not verified — it is not announced either way",
-    verificationCandidates({ episodes: range(1, 20), releases: [], limit: 5 }).length,
-    0
+    "a backfill deep in a checked list is not verified",
+    candidates({ episodes: [...range(1, 17).map(e => seen(e.number)), ...range(18, 20)], releases: [] }),
+    "20,19,18"
 )
-eq(
-    "the ones about to be announced are",
-    verificationCandidates({ episodes: range(1, 13), releases: range(13, 13), limit: 5 })
-        .map(e => e.number)
-        .join(),
-    "13"
-)
+eq("the ones about to be announced are", candidates({ episodes: range(1, 13), releases: range(13, 13) }), "13,12,11")
 eq(
     "a known placeholder is re-checked even though nothing announced it",
-    verificationCandidates({ episodes: [...range(1, 12), soon(13)], releases: [], limit: 5 })
-        .map(e => e.number)
-        .join(),
+    candidates({ episodes: [...range(1, 12).map(e => seen(e.number)), soon(13)], releases: [] }),
+    "13"
+)
+
+/*
+ * ---------------------------------------------------------------------------
+ * The repair, and the reason the first version of this fixed nothing.
+ *
+ * A library that already holds the placeholder holds it as an ordinary episode.
+ * It is not in the diff — nothing about the list changed — and it carries no
+ * pending flag, because no code had ever looked. Both other clauses come back
+ * empty, and the countdown stays the newest episode: the feature worked
+ * perfectly on libraries that did not have the problem.
+ * ---------------------------------------------------------------------------
+ */
+eq(
+    "an already-stored placeholder is still reached, with nothing announced and nothing flagged",
+    candidates({ episodes: range(1, 13), releases: [] }),
+    "13,12,11"
+)
+
+/*
+ * And `available` is what stops that sweep repeating. Absent means *unknown*,
+ * not fine — without the distinction there is no way to tell "checked" from
+ * "never asked", and the top of every series would be re-fetched forever.
+ */
+eq(
+    "once checked, an episode is never opened again",
+    candidates({ episodes: range(1, 13).map(e => seen(e.number)), releases: [] }),
+    ""
+)
+eq(
+    "…so the sweep only reaches what is genuinely unknown",
+    candidates({ episodes: [...range(1, 12).map(e => seen(e.number)), ...range(13, 13)], releases: [] }),
     "13"
 )
 
@@ -302,9 +336,39 @@ eq(
  * first, because a site posts ahead of itself and never behind, so the ones the
  * cap drops are the least likely to be placeholders.
  */
-const wholeRun = verificationCandidates({ episodes: range(1, 400), releases: range(1, 400), limit: 5 })
-eq("an empty stored list does not open four hundred pages", wholeRun.length, 5)
-eq("…and it checks the newest, where a placeholder would be", wholeRun.map(e => e.number).join(), "400,399,398,397,396")
+eq(
+    "an empty stored list does not open four hundred pages",
+    candidates({ episodes: range(1, 400), releases: range(1, 400) }),
+    "400,399,398,397,396"
+)
+
+console.log("\n\x1b[1ma position left on something that is not out\x1b[0m\n")
+
+/*
+ * The mark can only have come from the on-open bug — nobody watched an episode
+ * with no video behind it — so it is the fault's footprint rather than
+ * information, and unlike `positionDrift` this is unambiguous enough to undo.
+ */
+const stuck = pointerRetraction({ episodes: [...range(1, 12), soon(13)], lastWatched: at(13) })
+eq("a position on a countdown is retracted", stuck?.from, 13)
+eq("…back to the newest episode that is actually out", stuck?.to, 12)
+
+eq(
+    "a position on a real episode is left alone",
+    pointerRetraction({ episodes: range(1, 13), lastWatched: at(13) }),
+    null
+)
+eq(
+    "…and so is one on an episode the list no longer carries — that is drift, not this",
+    pointerRetraction({ episodes: range(1, 12), lastWatched: at(476) }),
+    null
+)
+eq("no position, nothing to retract", pointerRetraction({ episodes: [soon(1)], lastWatched: null }), null)
+eq(
+    "a countdown with nothing watchable below it clears the position",
+    pointerRetraction({ episodes: [soon(1)], lastWatched: at(1) })?.to,
+    null
+)
 
 console.log("\n\x1b[1mwhen an on-open mark may be recorded\x1b[0m\n")
 

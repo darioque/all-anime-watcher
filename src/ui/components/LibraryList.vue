@@ -67,6 +67,7 @@ const categoriesFor = ref<string | null>(null)
 const controlsReady = ref(false)
 
 const scheduleFor = ref<string | null>(null)
+const trackingFor = ref<string | null>(null)
 const episodesFor = ref<string | null>(null)
 const showSettings = ref(false)
 const showSearch = ref(false)
@@ -397,6 +398,53 @@ const togglePoll = (a: TrackedAnime) =>
 const setSchedule = (a: TrackedAnime, schedule: SchedulePolicy) =>
     withBusy(a.key, async () => replace(await send("library:setSchedule", { key: a.key, schedule })))
 
+/**
+ * The boolean tracking settings a single series can disagree with.
+ *
+ * Listed rather than generated: every setting resolves through the three-level
+ * chain, but only a few are worth deciding *per show*, and a panel offering all
+ * thirty would bury the two that matter. Both of these are about a site that
+ * posts episodes before it has them, which is a per-series fact as often as a
+ * per-site one — one show on a site gets the early treatment and the rest do not.
+ */
+const TRACKING_OVERRIDES = [
+    {
+        key: "verifyNewEpisodes" as const,
+        label: "Check a new episode is really out",
+        help: "Opens the episode page once before announcing it. A page with only a countdown is announced later, when it goes live."
+    },
+    {
+        key: "markOnlyWhenPlayable" as const,
+        label: "Only count it watched once something plays",
+        help: "Opening a page happens before anything knows it has a video. This waits for a stream or an embed on screen."
+    }
+] satisfies { key: keyof GlobalSettings & keyof TrackedAnime["overrides"]; label: string; help: string }[]
+
+type TrackingKey = (typeof TRACKING_OVERRIDES)[number]["key"]
+
+/** Whether this series says anything of its own, and what. */
+const overrideState = (a: TrackedAnime, key: TrackingKey): "inherit" | "on" | "off" => {
+    const own = a.overrides[key]
+    return own === undefined ? "inherit" : own ? "on" : "off"
+}
+
+/**
+ * What "Default" resolves to here — deliberately asked *without* the anime, so
+ * it reports what would happen if this series stopped disagreeing rather than
+ * echoing the override back.
+ */
+const inheritedValue = (a: TrackedAnime, key: TrackingKey) => resolve(key, { sourceId: a.sourceId })
+
+const setOverride = (a: TrackedAnime, key: TrackingKey, state: "inherit" | "on" | "off") =>
+    withBusy(a.key, async () =>
+        replace(
+            await send("library:setOverrides", {
+                key: a.key,
+                patch: { [key]: state === "inherit" ? null : state === "on" }
+            })
+        )
+    )
+
 const catchUp = (a: TrackedAnime) =>
     withBusy(a.key, async () => {
         const latest = latestEpisode(a)
@@ -575,6 +623,12 @@ function menuFor(a: TrackedAnime): MenuItem[] {
             label: "Schedule…",
             checked: Boolean(a.overrides.schedule),
             action: () => (scheduleFor.value = scheduleFor.value === a.key ? null : a.key)
+        },
+        {
+            label: "Tracking…",
+            checked: TRACKING_OVERRIDES.some(o => a.overrides[o.key] !== undefined),
+            hint: "When this series counts as watched, and when a new episode is announced",
+            action: () => (trackingFor.value = trackingFor.value === a.key ? null : a.key)
         },
         {
             label: a.anilistId ? "Change AniList match…" : "Match on AniList…",
@@ -959,6 +1013,37 @@ defineExpose({ load })
                                 “auto” means a rule already files it there — usually what AniList says. Ticking or
                                 unticking overrules the rule, which is how a series it has never heard of gets on the
                                 right shelf.
+                            </p>
+                        </div>
+
+                        <div v-if="trackingFor === a.key" class="tracking">
+                            <div v-for="option in TRACKING_OVERRIDES" :key="option.key" class="tracking-row">
+                                <div class="tracking-text">
+                                    <span class="tracking-label">{{ option.label }}</span>
+                                    <span class="tracking-help">{{ option.help }}</span>
+                                </div>
+                                <div class="tracking-choice">
+                                    <button
+                                        v-for="choice in ['inherit', 'on', 'off'] as const"
+                                        :key="choice"
+                                        class="btn tiny"
+                                        :class="{ on: overrideState(a, option.key) === choice }"
+                                        :disabled="busy.has(a.key)"
+                                        @click="setOverride(a, option.key, choice)"
+                                    >
+                                        {{
+                                            choice === "inherit"
+                                                ? `Default (${inheritedValue(a, option.key) ? "on" : "off"})`
+                                                : choice === "on"
+                                                  ? "On"
+                                                  : "Off"
+                                        }}
+                                    </button>
+                                </div>
+                            </div>
+                            <p class="tracking-note">
+                                “Default” follows this source, and then the global setting. Set it for the whole site
+                                under Sources, or for everything under Settings.
                             </p>
                         </div>
 
@@ -1536,5 +1621,62 @@ h1 {
     background: var(--ground);
     border: 1px solid var(--rule);
     border-radius: var(--radius);
+}
+
+.tracking {
+    margin-top: 8px;
+    padding: 10px;
+    background: var(--ground);
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+}
+
+.tracking-row {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 6px 0;
+}
+
+.tracking-row + .tracking-row {
+    border-top: 1px solid var(--rule);
+}
+
+.tracking-text {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
+.tracking-label {
+    font-size: 12px;
+}
+
+.tracking-help {
+    font-size: 11px;
+    color: var(--ink-3);
+}
+
+.tracking-choice {
+    display: flex;
+    gap: 4px;
+    flex: none;
+}
+
+/*
+ * The selected state has to carry more than colour — the three buttons read as
+ * one control and "which one is active" is the only thing it says.
+ */
+.tracking-choice .btn.on {
+    border-color: var(--accent, currentColor);
+    font-weight: 600;
+}
+
+.tracking-note {
+    margin: 6px 0 0;
+    font-size: 11px;
+    color: var(--ink-3);
 }
 </style>

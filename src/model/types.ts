@@ -43,6 +43,16 @@ export interface Episode {
     pending?: true
     /** Why it is pending, for the UI and the log. Never load-bearing. */
     pendingReason?: string
+    /**
+     * Verified to have a video behind it, so it is never opened again.
+     *
+     * The third state, and the reason there is one: absent means *unknown*, not
+     * available. Without the distinction, "already in the stored list" and
+     * "checked and fine" are the same value — and every episode stored before
+     * this existed reads as checked, so the check never runs on the library that
+     * needs it. See `verificationCandidates`.
+     */
+    available?: true
 }
 
 export interface EpisodeProgress {

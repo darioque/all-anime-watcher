@@ -244,7 +244,7 @@ export function wentLive(previous: Episode[], current: Episode[]): Episode[] {
  * Which episodes are worth opening to check whether they are real.
  *
  * Verification costs one request each, so this decides what that budget buys.
- * Two kinds qualify and nothing else does:
+ * Three kinds qualify and nothing else does:
  *
  *  - **the ones about to be announced.** A backfill is never announced, so
  *    confirming a two-year-old post has a player in it buys nothing.
@@ -252,24 +252,91 @@ export function wentLive(previous: Episode[], current: Episode[]): Episode[] {
  *    answer can *change*, and re-asking is the only way a countdown ever becomes
  *    a release. Skipping them would trade one wrong notification for a missing
  *    one, which is the worse failure — it is silent.
+ *  - **the newest few nobody has ever asked about.** This is the one that is
+ *    easy to leave out and useless without.
+ *
+ * That third clause is a repair, and it exists because the first version of this
+ * shipped without it and fixed nothing. A library that already holds the
+ * placeholder holds it as an ordinary episode: it is not in the diff, because
+ * nothing about the list changed, and it carries no pending flag, because no
+ * code had ever looked. Both other clauses came back empty and the countdown
+ * stayed the newest episode — the feature worked perfectly on libraries that did
+ * not have the problem. Same family as rule 11 in CLAUDE.md: new behaviour that
+ * cannot reach the state already on disk.
+ *
+ * `available` is what stops that sweep repeating. Absent means *unknown*, so the
+ * sweep runs once per episode and then never again; without the flag there is no
+ * way to tell "checked and fine" from "never asked", and the top episodes of
+ * every series would be re-fetched on every single check forever.
  *
  * Highest number first, then capped. A site posts *ahead* of itself, never
- * behind, so the placeholders are always at the top of the numbering; if the cap
- * bites, the episodes it drops are the ones least likely to be placeholders. The
- * cap exists for the series whose stored list was empty — a failed first fetch,
- * a source that just came back — where every episode reads as a release and an
- * uncapped check would open four hundred pages in one wake-up.
+ * behind, so placeholders are always at the top of the numbering; if the cap
+ * bites, the episodes it drops are the least likely to be placeholders.
  */
 export function verificationCandidates(options: {
-    /** The freshly fetched list, carrying whatever pending flags were kept. */
+    /** The freshly fetched list, carrying whatever flags were kept. */
     episodes: Episode[]
     /** What would be announced if nothing were verified. */
     releases: Episode[]
+    /** How many never-checked episodes to sweep from the top of the numbering. */
+    sweep: number
     limit: number
 }): Episode[] {
-    const wanted = new Set(options.releases.map(episodeProgressKey))
-    const picked = options.episodes.filter(ep => !watchable(ep) || wanted.has(episodeProgressKey(ep)))
-    return picked.sort((a, b) => b.number - a.number).slice(0, Math.max(0, options.limit))
+    const byNumberDesc = (a: Episode, b: Episode) => b.number - a.number
+    const unknown = (ep: Episode) => ep.pending !== true && ep.available !== true
+
+    const announced = new Set(options.releases.map(episodeProgressKey))
+    const swept = new Set(
+        options.episodes.filter(unknown).sort(byNumberDesc).slice(0, Math.max(0, options.sweep)).map(episodeProgressKey)
+    )
+
+    const picked = options.episodes.filter(ep => {
+        // Settled, and settled the cheap way round: an episode with a player in
+        // it does not lose it.
+        if (ep.available === true) return false
+        if (ep.pending === true) return true
+        const key = episodeProgressKey(ep)
+        return announced.has(key) || swept.has(key)
+    })
+
+    return picked.sort(byNumberDesc).slice(0, Math.max(0, options.limit))
+}
+
+/**
+ * Where the watch pointer should go when it names an episode that is not out.
+ *
+ * Returns null when there is nothing to do, which is nearly always.
+ *
+ * This undoes damage rather than preventing it, and it is worth being clear
+ * about why that is allowed here when `positionDrift` deliberately refuses to
+ * reset anything. Drift is ambiguous — a site that renumbered, a season split, a
+ * back catalogue pulled — and "you are at episode 476" stays true whatever the
+ * site now lists, so throwing it away would discard real information.
+ *
+ * This is not ambiguous. The pointer names an episode that has been *positively
+ * verified* to have no video behind it, and nobody watched an episode that does
+ * not exist. The only thing that could have set it is the on-open mark firing
+ * before anything had been resolved — the bug `onOpenMark` now prevents — so the
+ * mark is not information, it is the fault's own footprint.
+ *
+ * It falls back to the highest watchable episode below, not to zero: the viewer
+ * really did watch those, and the episode list is the evidence.
+ */
+export function pointerRetraction(options: {
+    episodes: Episode[]
+    lastWatched?: { number: number } | null
+}): { from: number; to: number | null } | null {
+    const held = options.lastWatched?.number
+    if (held === undefined) return null
+
+    const names = options.episodes.find(ep => ep.number === held)
+    if (!names || watchable(names)) return null
+
+    const below = options.episodes
+        .filter(ep => watchable(ep) && ep.number < held)
+        .reduce<number | null>((hi, ep) => (hi === null || ep.number > hi ? ep.number : hi), null)
+
+    return { from: held, to: below }
 }
 
 /**

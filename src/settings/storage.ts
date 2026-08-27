@@ -53,11 +53,31 @@ export async function patchSettings(patch: Partial<GlobalSettings>): Promise<Glo
     return settings
 }
 
-export async function setSourceSettings(sourceId: string, patch: SourceSettings): Promise<void> {
+/**
+ * Merge a patch into one source's settings.
+ *
+ * `null` deletes a key, so a source can be handed back to the global default
+ * rather than being pinned to whatever it happened to say. Without that there is
+ * no way back: every override is sticky once written, and "inherit" stops being
+ * reachable from the UI.
+ */
+export async function setSourceSettings(
+    sourceId: string,
+    patch: { [K in keyof SourceSettings]?: SourceSettings[K] | null }
+): Promise<Record<string, SourceSettings>> {
     const all = await loadSourceSettings()
-    all[sourceId] = { ...(all[sourceId] ?? {}), ...patch }
+    const merged: SourceSettings = { ...(all[sourceId] ?? {}) }
+
+    for (const [key, value] of Object.entries(patch)) {
+        if (value === null) delete merged[key as keyof SourceSettings]
+        else Object.assign(merged, { [key]: value })
+    }
+
+    all[sourceId] = merged
+    sourceCache = all
     await browser.storage.local.set({ [SOURCE_KEY]: all })
     logger.debug(`set source settings for ${sourceId}`, patch)
+    return all
 }
 
 export async function resetSettings(): Promise<GlobalSettings> {

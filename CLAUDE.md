@@ -327,11 +327,24 @@ its `⋯` menu, and destructive actions go behind a `ConfirmDialog`. A row of si
 buttons stops being scannable the moment the library is real, and Remove should
 never sit next to Refresh.
 
-**Testing notifications:** you can't make a site publish an episode, so use
-“Forget newest episode” in a series' ⋯ menu (drops the top of the stored list)
-then “Check every series now”. The real path then runs: the source returns the
-episode, it counts as new, and it notifies. Settings has a plain test
-notification too, for checking the OS-level plumbing.
+**Testing notifications is awkward and there is no shortcut, so do not go looking
+for one.** You cannot make a site publish an episode, and **nothing in the UI
+drops the top of the stored episode list** — an earlier version of this file
+claimed a “Forget newest episode” item in the ⋯ menu, which has never existed in
+the shipping build and cost a debugging session to disprove. What is actually
+there: “Check every series now” (the ⟳ in the library header), “Refresh episode
+list” and “Reset watch status” per row, an “Episodes…” panel that sets the
+position by hand, and a plain test notification in Settings for the OS-level
+plumbing. None of them fabricates a release.
+
+To exercise the *release* path end to end you need a series that genuinely has
+something new, which mostly means waiting. The **pending** path is the easier one
+to test deliberately, because a placeholder sits on the live site for days at a
+time: find a series whose newest post has a countdown, then “Refresh episode
+list” on its row and read the log line — it names the episodes it held back.
+
+**Do not add an affordance to this file before it exists in `src/`.** Everything
+here is read as fact by whoever picks the project up next.
 
 ## Extractors and video hosts
 
@@ -493,7 +506,20 @@ and reading it as "premium" would suppress real episodes. It is worth knowing as
 a symptom and is not evidence.
 
 The evidence is on the episode page, so `refreshSeries` opens it — one request
-per *candidate release*, not per episode, decided by `verificationCandidates`.
+per *candidate*, not per episode, decided by `verificationCandidates`.
+
+**Which candidates is the part that was got wrong first, and it is worth knowing
+why.** The obvious answer — "the episodes about to be announced, plus the ones
+already flagged pending" — fixed nothing on the machine that reported the bug. A
+library that already holds the placeholder holds it as an *ordinary* episode: it
+is not in the diff, because nothing about the list changed, and it carries no
+flag, because no code had ever looked. Both clauses came back empty and the
+countdown stayed the newest episode. The feature worked perfectly on libraries
+that did not have the problem. That is rule 11's shape again — new behaviour that
+cannot reach the state already on disk — and the fix is a third clause: sweep the
+newest few episodes nobody has ever asked about. `Episode.available` is what
+stops the sweep repeating; **absent means unknown, not fine**, which is the whole
+reason availability is tri-state rather than a boolean.
 `AnimeSource.episodeAvailability(html, url)` is optional and answers from markup
 already in hand; `AnimeStream` implements it from a per-site `pending` config
 (`markers`, `text`, `reason`). Three rules hold it together:
@@ -538,6 +564,26 @@ servers, and one the source recognised as pending — so it holds with
 `takeOverPage` off too. `markOnlyWhenPlayable` is the opt-out and restores the
 old timing, but **not** for a recognised placeholder: "go back to marking on
 open" is not a request to mark episodes the source has said are not out.
+
+**The position may already be sitting on a placeholder**, put there by the same
+bug before it was fixed, and shipping the fix alone leaves it there — the series
+then reads as caught up at an episode that is not out, and stays that way when
+the real one lands. `pointerRetraction` undoes it at the moment verification
+first proves the episode has no video. This is allowed to rewrite history where
+`positionDrift` deliberately is not, and the difference is the evidence: drift is
+ambiguous (a renumbering, a season split, a pulled back catalogue) and "you are
+at episode 476" stays true regardless, whereas nobody watched an episode that
+does not exist — that mark is the fault's own footprint, not information.
+
+**Both settings are reachable at all three levels, and that took UI that did not
+exist.** Before this there was no per-source settings editor at all (SourcesPanel
+was domain management only) and the per-anime menu exposed nothing but Schedule,
+so the resolver chain was real and unreachable. Now: Settings for the global,
+Sources for per-site, and a series' ⋯ → "Tracking…" for per-show, each a
+three-way Default/On/Off. `library:setOverrides` and `sources:setSettings` are
+generic patch writers — **`null` clears a key**, because Chrome JSON-serialises
+messages and an `undefined` field simply vanishes, which reads as "leave it
+alone" and makes "inherit" unreachable once anything has been written.
 
 `npm run check:episodes` covers the rules; `npm run check:pending` covers
 reaching the verdict, against reduced fixtures of the three states the player

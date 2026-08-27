@@ -1,9 +1,9 @@
 import browser from "webextension-polyfill"
-import type { GlobalSettings } from "~/settings/schema"
+import type { GlobalSettings, SourceSettings } from "~/settings/schema"
 import type { PageInfo, Server } from "~/sources/types"
 import type { Stream } from "~/extractors/types"
 import type { DomainResolution } from "~/background/domains"
-import type { SchedulePolicy, TrackedAnime } from "~/model/types"
+import type { AnimeOverrides, SchedulePolicy, TrackedAnime } from "~/model/types"
 import type { ImportMode, ImportSummary } from "~/model/backup"
 import type { DownloadJob, DownloadProgress, FetchPlan } from "~/downloads/types"
 import type { LabFetchReport, LabSeriesReport } from "~/lab/types"
@@ -120,6 +120,17 @@ export interface MessageMap {
     "library:resetWatch": { req: { key: string }; res: TrackedAnime | null }
     "debug:testNotification": { req: Record<string, never>; res: boolean }
     "library:setSchedule": { req: { key: string; schedule: SchedulePolicy }; res: TrackedAnime | null }
+    /**
+     * Per-anime setting overrides, as a patch.
+     *
+     * `null` clears a key back to inheriting, which `undefined` cannot express —
+     * Chrome JSON-serialises messages, so an undefined field simply vanishes and
+     * would read as "leave it alone".
+     */
+    "library:setOverrides": {
+        req: { key: string; patch: { [K in keyof AnimeOverrides]?: AnimeOverrides[K] | null } }
+        res: TrackedAnime | null
+    }
     "scheduler:status": {
         req: Record<string, never>
         res: { running: boolean; lastRunAt: number; lastRunFound: number; paused: boolean }
@@ -170,6 +181,11 @@ export interface MessageMap {
 
     "sources:resolveDomains": { req: { sourceId?: string; force?: boolean }; res: DomainResolution[] }
     "sources:pinDomain": { req: { sourceId: string; host?: string }; res: boolean }
+    /** Per-source setting overrides. `null` clears a key back to the global. */
+    "sources:setSettings": {
+        req: { sourceId: string; patch: { [K in keyof SourceSettings]?: SourceSettings[K] | null } }
+        res: Record<string, SourceSettings>
+    }
 
     "sources:search": {
         req: { sourceId: string; query: string }

@@ -2,6 +2,7 @@ import { on } from "../router"
 import { allSources, sourceById } from "~/sources/registry"
 import { getAllSourceState } from "~/model/db"
 import { fetchCtxFor } from "~/library/library"
+import { setSourceSettings } from "~/settings/storage"
 import { pinDomain, resolveAllDomains, resolveDomains } from "../domains"
 import type { SourceDescriptor } from "~/shared/messages"
 
@@ -55,4 +56,6 @@ export function registerSourceHandlers() {
         const state = await pinDomain(sourceId, host)
         return state !== null
     })
+
+    on("sources:setSettings", async ({ sourceId, patch }) => setSourceSettings(sourceId, patch))
 }

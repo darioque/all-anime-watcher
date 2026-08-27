@@ -1,9 +1,10 @@
-import type { Episode, SchedulePolicy, SourceState, TrackedAnime } from "~/model/types"
+import type { AnimeOverrides, Episode, SchedulePolicy, SourceState, TrackedAnime } from "~/model/types"
 import {
     animeKey,
     episodeProgressKey,
     latestEpisodeNumber,
     newReleases,
+    pointerRetraction,
     progressKey,
     verificationCandidates,
     wentLive
@@ -268,6 +269,18 @@ export async function refreshSeries(
 const MAX_VERIFICATIONS_PER_REFRESH = 5
 
 /**
+ * How many never-checked episodes to sweep from the top of the numbering.
+ *
+ * This is what reaches a library that already stored a placeholder as an
+ * ordinary episode — the state the first version of this could not see, because
+ * such an episode is in neither the diff nor the pending set. Three, because a
+ * site posts an episode or two ahead of itself and never a season; each one is
+ * checked once and stamped `available`, so the sweep is a one-off per episode
+ * rather than a standing cost.
+ */
+const VERIFICATION_SWEEP = 3
+
+/**
  * Open the episodes about to be announced and check they have a video.
  *
  * The update loop reads the *series* page, where a post the site created ahead
@@ -308,14 +321,21 @@ async function verifyEpisodes(options: {
     const before = new Map(stored.map(ep => [episodeProgressKey(ep), ep]))
     for (const episode of episodes) {
         const previous = before.get(episodeProgressKey(episode))
-        if (previous?.pending !== true) continue
-        episode.pending = true
-        if (previous.pendingReason) episode.pendingReason = previous.pendingReason
+        if (!previous) continue
+        if (previous.pending === true) {
+            episode.pending = true
+            if (previous.pendingReason) episode.pendingReason = previous.pendingReason
+        } else if (previous.available === true) {
+            // Settled the cheap way round: an episode with a player in it does
+            // not lose one, and this is what keeps the sweep a one-off.
+            episode.available = true
+        }
     }
 
     const candidates = verificationCandidates({
         episodes,
         releases: candidateReleases,
+        sweep: VERIFICATION_SWEEP,
         limit: MAX_VERIFICATIONS_PER_REFRESH
     })
 
@@ -328,19 +348,43 @@ async function verifyEpisodes(options: {
             const verdict = source.episodeAvailability(html, episode.url)
             if (verdict.pending) {
                 episode.pending = true
+                delete episode.available
                 if (verdict.reason) episode.pendingReason = verdict.reason
                 else delete episode.pendingReason
             } else {
                 delete episode.pending
                 delete episode.pendingReason
+                episode.available = true
             }
         } catch (error) {
-            // Fail open, and say so — a series that stops announcing episodes
-            // because of a network blip is exactly the silent failure above.
+            /*
+             * Fail open, and say so — a series that stops announcing episodes
+             * because of a network blip is exactly the silent failure above.
+             * Deliberately not stamped `available`: the question was not
+             * answered, so it stays unknown and the sweep asks again next time.
+             */
             delete episode.pending
             delete episode.pendingReason
             logger.warn(`${anime.key}: could not verify E${episode.number}, treating it as out`, error)
         }
+    }
+
+    /*
+     * The position may already be sitting on a placeholder, put there by the
+     * on-open mark firing before any server had been resolved. Verification is
+     * the first moment anything can know that, so it is the moment to undo it —
+     * otherwise the series reads as caught up at an episode that is not out, and
+     * stays that way when the real one lands. See `pointerRetraction` for why
+     * this is allowed to rewrite history where `positionDrift` is not.
+     */
+    const retraction = pointerRetraction({ episodes, lastWatched: anime.lastWatched })
+    if (retraction) {
+        logger.warn(
+            `${anime.key}: position was on E${retraction.from}, which is not out — ` +
+                `moving back to ${retraction.to === null ? "nothing watched" : `E${retraction.to}`}`
+        )
+        if (retraction.to === null) delete anime.lastWatched
+        else anime.lastWatched = { number: retraction.to, at: Date.now() }
     }
 }
 
@@ -490,6 +534,35 @@ export async function setSchedule(key: string, schedule: SchedulePolicy): Promis
     anime.updatedAt = Date.now()
     await db.putAnime(anime)
     logger.info(`${key}: schedule → ${schedule.mode}`)
+    return anime
+}
+
+/**
+ * Patch one series' setting overrides.
+ *
+ * `null` clears a key, which is the only way to say "go back to inheriting" —
+ * `undefined` cannot cross the message boundary (Chrome JSON-serialises), where
+ * it would arrive as an absent key and read as "leave this one alone".
+ *
+ * Generic rather than one writer per setting, unlike `setSchedule`. Schedule
+ * earned its own because setting it has a consequence — `nextCheckAt` has to be
+ * recomputed — and nothing here does.
+ */
+export async function setOverrides(
+    key: string,
+    patch: { [K in keyof AnimeOverrides]?: AnimeOverrides[K] | null }
+): Promise<TrackedAnime | null> {
+    const anime = await db.getAnime(key)
+    if (!anime) return null
+
+    for (const [name, value] of Object.entries(patch)) {
+        if (value === null) delete anime.overrides[name as keyof AnimeOverrides]
+        else Object.assign(anime.overrides, { [name]: value })
+    }
+
+    anime.updatedAt = Date.now()
+    await db.putAnime(anime)
+    logger.info(`${key}: overrides → ${JSON.stringify(patch)}`)
     return anime
 }
 

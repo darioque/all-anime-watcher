@@ -10,6 +10,7 @@ import {
     remove,
     rename,
     setCategories,
+    setOverrides,
     shelve,
     bulkCategory,
     resetWatchStatus,
@@ -98,6 +99,12 @@ export function registerLibraryHandlers() {
     on("library:setSchedule", async ({ key, schedule }) => {
         const anime = await setSchedule(key, schedule)
         libraryChanged("schedule", key)
+        return anime
+    })
+
+    on("library:setOverrides", async ({ key, patch }) => {
+        const anime = await setOverrides(key, patch)
+        libraryChanged("overrides", key)
         return anime
     })
 
