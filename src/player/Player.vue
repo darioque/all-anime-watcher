@@ -31,6 +31,8 @@ const props = defineProps<{
 }>()
 
 const video = ref<HTMLVideoElement | null>(null)
+/** The picture and everything drawn over it — the thing F makes fullscreen. */
+const stage = ref<HTMLElement | null>(null)
 const hls = shallowRef<Hls | null>(null)
 
 const status = ref<"idle" | "resolving" | "ready" | "error">("idle")
@@ -631,11 +633,31 @@ function nudgeVolume(delta: number) {
     element.muted = element.volume === 0
 }
 
+/**
+ * Fullscreen the picture, not our chrome.
+ *
+ * This used to request it on `#aaw-root`, which is the whole player — header,
+ * stage and control bar — so "fullscreen" produced a maximised *page* with a
+ * title bar and a server picker still taking up room, and read like F11 rather
+ * than like the video going fullscreen.
+ *
+ * `.stage` is the right element rather than the `<video>` itself: it is the
+ * picture edge to edge either way, but the skip-intro button and the loading and
+ * error overlays are positioned inside it, and fullscreening the video element
+ * would leave them behind — losing skip intro at exactly the moment someone is
+ * most likely to be sitting back. It also covers the embedded-iframe case, where
+ * there is no video element of ours to ask.
+ *
+ * Exit is deliberately not element-specific: double-clicking the picture gives
+ * the *video* fullscreen through the native controls, and F should still take
+ * you out of that.
+ */
 async function toggleFullscreen() {
-    const root = document.getElementById("aaw-root")
-    if (!root) return
-    if (document.fullscreenElement) await document.exitFullscreen()
-    else await root.requestFullscreen().catch(() => undefined)
+    if (document.fullscreenElement) {
+        await document.exitFullscreen().catch(() => undefined)
+        return
+    }
+    await stage.value?.requestFullscreen().catch(() => undefined)
 }
 
 async function togglePip() {
@@ -1034,7 +1056,7 @@ onBeforeUnmount(() => {
             <a v-if="info" class="tag link" :href="info.seriesUrl">All episodes</a>
         </header>
 
-        <div class="stage">
+        <div ref="stage" class="stage">
             <iframe
                 v-if="embedded"
                 :src="embedded"
