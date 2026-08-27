@@ -5,7 +5,9 @@ import type { Level } from "hls.js"
 import { send } from "~/shared/messages"
 import type { PageIdentity } from "~/shared/messages"
 import type { Server } from "~/sources/types"
-import type { Episode } from "~/model/types"
+import type { Episode, TrackedAnime } from "~/model/types"
+import { automaticCategoriesOf, categoriesOf } from "~/library/categories"
+import type { Category, SourceCategories } from "~/library/categories"
 import type { Stream } from "~/extractors/types"
 import { BackgroundLoader } from "./backgroundLoader"
 import { loadTrack, releaseTracks, type LoadedTrack } from "./subtitles"
@@ -688,6 +690,82 @@ async function addToLibrary() {
     }
 }
 
+// ------------------------------------------------------------------- shelves
+
+/*
+ * Shelving the series you are watching, without leaving the episode.
+ *
+ * The moment you know a show belongs on "dropped" or "rewatching" is usually
+ * three minutes into an episode, not next time the library page is open — and
+ * by then the thought is gone. This is the same edit the library page's row
+ * offers, against the same `library:shelve`, so the two cannot drift.
+ *
+ * Everything is loaded on first open rather than at mount. Most sessions never
+ * touch it, and the player already makes enough calls before the first frame.
+ */
+const shelvesOpen = ref(false)
+const shelves = ref<Category[]>([])
+const shelfClaims = ref<SourceCategories>({})
+const shelfAnime = ref<TrackedAnime | null>(null)
+const shelvesLoading = ref(false)
+const shelfError = ref<string | null>(null)
+
+async function toggleShelves() {
+    if (!trackedKey.value) return
+    shelvesOpen.value = !shelvesOpen.value
+    if (shelvesOpen.value) await loadShelves()
+}
+
+async function loadShelves() {
+    const key = trackedKey.value
+    if (!key) return
+
+    shelvesLoading.value = true
+    shelfError.value = null
+    try {
+        const [settings, sources, anime] = await Promise.all([
+            send("settings:get", {}),
+            send("sources:list", {}),
+            send("library:get", { key })
+        ])
+        shelves.value = settings.categories ?? []
+        shelfClaims.value = Object.fromEntries(sources.map(source => [source.id, source.categories]))
+        shelfAnime.value = anime
+    } catch (error) {
+        shelfError.value = error instanceof Error ? error.message : String(error)
+    } finally {
+        shelvesLoading.value = false
+    }
+}
+
+/** Rules and the user's corrections together — what a tick actually reflects. */
+const shelfMembership = computed(() =>
+    shelfAnime.value ? categoriesOf(shelfAnime.value, shelves.value, shelfClaims.value) : []
+)
+
+/** Where the rules alone would file it, which is what the "auto" tag marks. */
+const shelfAutomatic = computed(() =>
+    shelfAnime.value ? automaticCategoriesOf(shelfAnime.value, shelves.value, shelfClaims.value) : []
+)
+
+/**
+ * Stated rather than toggled, and the background decides what to store: ticking
+ * a shelf whose rule already covers the series records nothing, so the entry
+ * never carries a redundant tag that would outlive the rule.
+ */
+async function setShelf(categoryId: string, on: boolean) {
+    const key = trackedKey.value
+    if (!key) return
+
+    shelfError.value = null
+    try {
+        const updated = await send("library:shelve", { key, categoryId, on })
+        if (updated) shelfAnime.value = updated
+    } catch (error) {
+        shelfError.value = error instanceof Error ? error.message : String(error)
+    }
+}
+
 // ------------------------------------------------------------------ progress
 
 /** Resume where the viewer left off, if they were more than a few seconds in. */
@@ -784,6 +862,16 @@ const SHORTCUTS: { keys: string[]; label: string; run: () => void }[] = []
 
 function onKey(event: KeyboardEvent) {
     if (event.ctrlKey || event.altKey || event.metaKey) return
+
+    // Escape closes the shelves panel wherever focus is — including on one of
+    // its own checkboxes, which the input guard below would otherwise skip.
+    if (event.key === "Escape" && shelvesOpen.value) {
+        shelvesOpen.value = false
+        event.preventDefault()
+        event.stopPropagation()
+        return
+    }
+
     const target = event.target as HTMLElement | null
     if (target && /^(input|textarea|select)$/i.test(target.tagName)) return
 
@@ -905,6 +993,43 @@ onBeforeUnmount(() => {
             <button v-if="info && !trackedKey" class="follow" :disabled="adding" @click="addToLibrary">
                 {{ adding ? "Adding…" : "+ Follow this series" }}
             </button>
+
+            <div v-if="trackedKey" class="shelves">
+                <button
+                    class="chip"
+                    :aria-expanded="shelvesOpen"
+                    title="Put this series on a shelf"
+                    @click="toggleShelves"
+                >
+                    Shelves ▾
+                </button>
+
+                <div v-if="shelvesOpen" class="shelf-backdrop" @click="shelvesOpen = false"></div>
+
+                <div v-if="shelvesOpen" class="shelf-panel">
+                    <p v-if="shelvesLoading" class="shelf-note">Loading…</p>
+                    <p v-else-if="shelfError" class="shelf-note bad">{{ shelfError }}</p>
+
+                    <template v-else>
+                        <div v-if="shelves.length > 0" class="shelf-picks">
+                            <label v-for="category in shelves" :key="category.id" class="shelf-pick">
+                                <input
+                                    type="checkbox"
+                                    :checked="shelfMembership.includes(category.id)"
+                                    @change="setShelf(category.id, ($event.target as HTMLInputElement).checked)"
+                                />
+                                <span class="shelf-name">{{ category.name }}</span>
+                                <span v-if="shelfAutomatic.includes(category.id)" class="shelf-auto">auto</span>
+                            </label>
+                        </div>
+                        <p v-else class="shelf-note">No shelves yet — make one on the library page.</p>
+
+                        <p v-if="shelves.length > 0" class="shelf-note">
+                            “auto” means a rule already files it there. Ticking or unticking overrules it.
+                        </p>
+                    </template>
+                </div>
+            </div>
 
             <a v-if="info" class="tag link" :href="info.seriesUrl">All episodes</a>
         </header>
@@ -1054,6 +1179,94 @@ onBeforeUnmount(() => {
 }
 
 /*
+ * The shelves dropdown. Anchored to its button rather than centred like the help
+ * overlay: it is an edit to the row you are already looking at, not a mode.
+ */
+.shelves {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+/*
+ * Catches the click that dismisses the panel. Fixed and transparent rather than
+ * a document listener, which would have to know about the button that opened it
+ * to avoid closing and reopening on the same click.
+ */
+.shelf-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 1;
+}
+
+.shelf-panel {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 2;
+    width: 240px;
+    max-height: 320px;
+    overflow-y: auto;
+    padding: 10px;
+    background: var(--surface);
+    border: 1px solid var(--rule);
+    border-radius: 6px;
+    box-shadow: 0 10px 28px rgb(0 0 0 / 45%);
+}
+
+.shelf-picks {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.shelf-pick {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 4px 2px;
+    font-size: 12px;
+    color: var(--ink);
+    cursor: pointer;
+}
+
+.shelf-pick:hover {
+    color: var(--accent);
+}
+
+.shelf-name {
+    flex: 1 1 auto;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.shelf-auto {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 9px;
+    letter-spacing: 0.04em;
+    color: var(--ink-3);
+    border: 1px solid var(--rule);
+    border-radius: 3px;
+    padding: 1px 4px;
+}
+
+.shelf-note {
+    margin: 8px 0 0;
+    font-size: 11px;
+    line-height: 1.45;
+    color: var(--ink-3);
+}
+
+.shelf-picks + .shelf-note {
+    border-top: 1px solid var(--rule);
+    padding-top: 8px;
+}
+
+.shelf-note.bad {
+    color: var(--danger);
+}
+
+/*
  * Self-contained: the host page's stylesheet is stripped before we mount, but
  * anything left behind must not be able to reach in, so every value is literal
  * and nothing inherits.
@@ -1091,6 +1304,15 @@ header {
     background: var(--surface);
     border-bottom: 1px solid var(--rule);
     flex: 0 0 auto;
+
+    /*
+     * Lifts the header, and with it the shelves dropdown, above the stage.
+     * `.stage` is a later sibling, so without a stacking context here the panel
+     * paints *behind* the video — and against a black frame that reads as the
+     * menu simply not opening.
+     */
+    position: relative;
+    z-index: 5;
 }
 
 .mark {
