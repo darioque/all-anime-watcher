@@ -105,21 +105,16 @@ export async function identifyEpisode(options: {
          * server has been resolved yet, so "the viewer opened an episode" and
          * "the viewer opened something watchable" are still the same event here.
          * Where our player is taking the page over, the mark is handed to it and
-         * lands when there is a picture; where it is not, this is the last
-         * moment anything will happen at all and it lands here.
+         * lands when there is a picture; where it is not, nothing of ours will
+         * ever attach to that video, so this is the last moment anything can
+         * happen and it lands here.
          */
         const marks = marksOnOpen({
             markWatchedOnOpen: resolve("markWatchedOnOpen", where),
             takeOverPage: resolve("takeOverPage", where),
             markWatchedOnEmbed: resolve("markWatchedOnEmbed", where)
         })
-        const timing = onOpenMark({
-            marks,
-            takeOverPage: resolve("takeOverPage", where),
-            markOnlyWhenPlayable: resolve("markOnlyWhenPlayable", where),
-            pending,
-            hasServers: servers.length > 0
-        })
+        const timing = onOpenMark({ marks, takeOverPage: resolve("takeOverPage", where) })
 
         const markedHere = options.track && entry !== undefined && timing === "now"
         if (markedHere && entry) {

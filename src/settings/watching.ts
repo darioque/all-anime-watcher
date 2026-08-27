@@ -28,57 +28,39 @@ export function marksOnOpen(settings: {
 }
 
 /**
- * Where an on-open mark is recorded, and whether it is recorded at all.
+ * Where an on-open mark is recorded: at page-read time, or by the player once it
+ * has something on screen.
  *
- * Opening an episode page is a tracking signal that arrives *before* anyone
- * knows whether the page has a video behind it, and on a site that posts
- * episodes ahead of the release that gap is the whole bug: the position moves to
- * an episode that does not exist yet, and because the pointer never moves
- * backwards, the real episode is already "watched" by the time it airs.
+ * Not a setting, and deliberately not one. Opening an episode page is a tracking
+ * signal that arrives *before* anyone knows whether the page has a video behind
+ * it — no server has been resolved yet, so "opened an episode" and "opened
+ * something watchable" are still the same event. Waiting for a picture is not a
+ * preference about that, it is the difference between recording a fact and
+ * recording a guess, and nobody wants the guess.
  *
- * So the signal is kept and its timing is moved. Three answers:
+ * So the signal is kept and only its timing moves:
  *
- *  - `never`      there is demonstrably nothing to watch here.
+ *  - `never`       opening does not count for this viewer at all.
  *  - `whenPlaying` our player is taking the page over and will say when it has a
- *                 stream or an embed on screen. This is the normal answer.
- *  - `now`        no better moment is coming — the site's own player is being
- *                 left alone, so nothing of ours will ever report back.
+ *                  stream or an embed up. Everything that could go wrong follows
+ *                  from this on its own — a page with no servers, a page that is
+ *                  a countdown, five servers that all resolve to nothing — none
+ *                  of them ever attaches anything, so none of them ever marks.
+ *                  That is why there are no special cases here.
+ *  - `now`         the site's own player is being left alone. Nothing of ours
+ *                  attaches to that video, so no later moment is coming and no
+ *                  completion threshold can ever be reached; the page read is
+ *                  the only signal there will ever be, which is exactly what
+ *                  `markWatchedOnEmbed` already decides above.
  *
- * `pending` and `hasServers` are the two things that can be known for free, from
- * markup already in hand, and they are the only ones that can answer `never`
- * without a player: a page with no servers listed, and a page the source
- * recognises as a countdown. Everything else waits for evidence rather than
- * guessing at it.
- *
- * Pure on purpose — `npm run check:episodes` covers the table.
+ * Pure — `npm run check:episodes` covers the table.
  */
 export function onOpenMark(settings: {
     /** `marksOnOpen` above: does opening count for this viewer at all? */
     marks: boolean
     /** "Replace the site's player with ours." */
     takeOverPage: boolean
-    /** "Only count it if something actually played." */
-    markOnlyWhenPlayable: boolean
-    /** The source recognised the page as a countdown or a placeholder. */
-    pending: boolean
-    /** The page listed at least one video server. */
-    hasServers: boolean
 }): "never" | "now" | "whenPlaying" {
     if (!settings.marks) return "never"
-
-    /*
-     * A recognised placeholder is refused whatever the timing rules say, and
-     * before `markOnlyWhenPlayable` is consulted. Turning that setting off means
-     * "go back to marking on open", not "mark episodes the source has told me
-     * are not out yet" — nobody asking for the first is asking for the second.
-     */
-    if (settings.pending) return "never"
-
-    if (!settings.markOnlyWhenPlayable) return "now"
-
-    // Nothing listed means nothing to fall through to: the player will walk an
-    // empty list and show an error. No evidence is coming, and the answer is no.
-    if (!settings.hasServers) return "never"
-
     return settings.takeOverPage ? "whenPlaying" : "now"
 }

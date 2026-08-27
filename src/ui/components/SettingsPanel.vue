@@ -51,12 +51,6 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
                 type: "toggle"
             },
             {
-                key: "markOnlyWhenPlayable",
-                label: "Only count an episode once something plays",
-                help: "Opening a page happens before anyone knows whether it has a video behind it. With this on, the mark waits until there is a stream or an embed on screen — so an episode a site has posted but not released is never recorded as watched.",
-                type: "toggle"
-            },
-            {
                 key: "completionThreshold",
                 label: "Count an episode as watched at",
                 help: "A fraction of its length. 0.85 means 85% in. 0 counts it as soon as our player starts playing it — for “watched the moment I open it”, use the setting above instead, which does not need the video to play.",
@@ -74,7 +68,7 @@ const GROUPS: { title: string; note?: string; fields: Field[] }[] = [
             {
                 key: "verifyNewEpisodes",
                 label: "Check a new episode is really out before telling me",
-                help: "Some sites post an episode's page ahead of the video, with a countdown where the player goes. This opens the page once to look. A page with only a countdown is remembered and announced later, when it actually goes live.",
+                help: "Some sites post an episode's page ahead of the video, with a countdown where the player goes. This opens the page once to look, which costs a request per new episode — so it is off unless you turn it on for the sites that do it, under Sources or on a single series.",
                 type: "toggle"
             },
             {

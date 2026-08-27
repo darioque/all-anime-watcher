@@ -508,6 +508,12 @@ a symptom and is not evidence.
 The evidence is on the episode page, so `refreshSeries` opens it — one request
 per *candidate*, not per episode, decided by `verificationCandidates`.
 
+**`verifyNewEpisodes` is off by default and that is deliberate.** It is a request
+per candidate on top of the series page, and a library of several hundred
+followed series pays that on every check run — real weight, for a habit only some
+sites have. It is opt-in per source and per series, which is the level the fact
+belongs at: luciferdonghua.in posts ahead, lmanime does not.
+
 **Which candidates is the part that was got wrong first, and it is worth knowing
 why.** The obvious answer — "the episodes about to be announced, plus the ones
 already flagged pending" — fixed nothing on the machine that reported the bug. A
@@ -558,29 +564,25 @@ timing moved — `onOpenMark` (pure, in `settings/watching.ts`) answers `never` 
 `now` / `whenPlaying`, and where our player is taking the page over the mark is
 handed to it and spent at the first frame (`markOnScreen`, at the three points
 where `status` becomes `ready`). Every server failing with no embed to fall back
-on therefore records nothing, which is the rule the user asked for. `never` is
-reachable for free, without a player, in exactly two cases: a page listing no
-servers, and one the source recognised as pending — so it holds with
-`takeOverPage` off too. `markOnlyWhenPlayable` is the opt-out and restores the
-old timing, but **not** for a recognised placeholder: "go back to marking on
-open" is not a request to mark episodes the source has said are not out.
+on therefore records nothing.
 
-**The position may already be sitting on a placeholder**, put there by the same
-bug before it was fixed, and shipping the fix alone leaves it there — the series
-then reads as caught up at an episode that is not out, and stays that way when
-the real one lands. `pointerRetraction` undoes it at the moment verification
-first proves the episode has no video. This is allowed to rewrite history where
-`positionDrift` deliberately is not, and the difference is the evidence: drift is
-ambiguous (a renumbering, a season split, a pulled back catalogue) and "you are
-at episode 476" stays true regardless, whereas nobody watched an episode that
-does not exist — that mark is the fault's own footprint, not information.
+**This is not a setting, and an attempt to make it one was removed.** Waiting for
+a picture is not a preference — it is the difference between recording a fact and
+recording a guess, and nobody wants the guess. It is also why the rule takes two
+inputs and has no special cases: a page with no servers, a page that is a
+countdown, and five servers that all resolve to nothing each reach the same place
+on their own, because none of them ever attaches anything. With `takeOverPage`
+off the answer is still `now` — nothing of ours attaches to the site's own
+player, so no later moment is coming and the page read is the only signal there
+will ever be, exactly as `markWatchedOnEmbed` already says.
 
-**Both settings are reachable at all three levels, and that took UI that did not
-exist.** Before this there was no per-source settings editor at all (SourcesPanel
-was domain management only) and the per-anime menu exposed nothing but Schedule,
-so the resolver chain was real and unreachable. Now: Settings for the global,
-Sources for per-site, and a series' ⋯ → "Tracking…" for per-show, each a
-three-way Default/On/Off. `library:setOverrides` and `sources:setSettings` are
+**Reaching it at all three levels took UI that did not exist.** Before this there
+was no per-source settings editor at all (SourcesPanel was domain management
+only) and the per-anime menu exposed nothing but Schedule, so the resolver chain
+was real and unreachable — a setting can be "per source and per series" in
+`resolve()` and still be settable nowhere. Now: Settings for the global, Sources
+for per-site, and a series' ⋯ → "Tracking…" for per-show, each a three-way
+Default/On/Off. `library:setOverrides` and `sources:setSettings` are
 generic patch writers — **`null` clears a key**, because Chrome JSON-serialises
 messages and an `undefined` field simply vanishes, which reads as "leave it
 alone" and makes "inherit" unreachable once anything has been written.

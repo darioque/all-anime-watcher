@@ -10,21 +10,16 @@ import type { SourceSettings } from "~/settings/schema"
 /**
  * The settings a site can disagree with the global default about.
  *
- * Both are about a site that publishes an episode's page before it has the
- * episode, which is a fact about the *site* — luciferdonghua.in does it, lmanime
- * does not — so this is the level they most naturally belong at. A single series
- * can still overrule this from its own row.
+ * Publishing an episode's page before the episode is a fact about the *site* —
+ * luciferdonghua.in does it, lmanime does not — so this is the level the check
+ * most naturally belongs at, and why it is off globally rather than on. A single
+ * series can still overrule it from its own row.
  */
 const SOURCE_OVERRIDES = [
     {
         key: "verifyNewEpisodes" as const,
         label: "Check a new episode is really out",
         help: "Opens the episode page once before announcing it. Worth turning off for a site that never posts early — the check is a wasted request there."
-    },
-    {
-        key: "markOnlyWhenPlayable" as const,
-        label: "Only count it watched once something plays",
-        help: "Waits for a stream or an embed on screen before moving your position."
     }
 ] satisfies { key: keyof SourceSettings; label: string; help: string }[]
 

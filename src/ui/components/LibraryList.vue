@@ -402,21 +402,16 @@ const setSchedule = (a: TrackedAnime, schedule: SchedulePolicy) =>
  * The boolean tracking settings a single series can disagree with.
  *
  * Listed rather than generated: every setting resolves through the three-level
- * chain, but only a few are worth deciding *per show*, and a panel offering all
- * thirty would bury the two that matter. Both of these are about a site that
- * posts episodes before it has them, which is a per-series fact as often as a
- * per-site one — one show on a site gets the early treatment and the rest do not.
+ * chain, but only some are worth deciding *per show*, and a panel offering all
+ * thirty would bury the one that matters. Verification is here as well as on the
+ * source because posting ahead is as often a per-series habit as a per-site one —
+ * one show on a site gets the early treatment and the rest do not.
  */
 const TRACKING_OVERRIDES = [
     {
         key: "verifyNewEpisodes" as const,
         label: "Check a new episode is really out",
         help: "Opens the episode page once before announcing it. A page with only a countdown is announced later, when it goes live."
-    },
-    {
-        key: "markOnlyWhenPlayable" as const,
-        label: "Only count it watched once something plays",
-        help: "Opening a page happens before anything knows it has a video. This waits for a stream or an embed on screen."
     }
 ] satisfies { key: keyof GlobalSettings & keyof TrackedAnime["overrides"]; label: string; help: string }[]
 

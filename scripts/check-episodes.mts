@@ -17,7 +17,6 @@ import {
     positionDrift,
     resumePositionFor,
     unwatchedCount,
-    pointerRetraction,
     verificationCandidates,
     watchState,
     wentLive
@@ -342,66 +341,31 @@ eq(
     "400,399,398,397,396"
 )
 
-console.log("\n\x1b[1ma position left on something that is not out\x1b[0m\n")
-
-/*
- * The mark can only have come from the on-open bug — nobody watched an episode
- * with no video behind it — so it is the fault's footprint rather than
- * information, and unlike `positionDrift` this is unambiguous enough to undo.
- */
-const stuck = pointerRetraction({ episodes: [...range(1, 12), soon(13)], lastWatched: at(13) })
-eq("a position on a countdown is retracted", stuck?.from, 13)
-eq("…back to the newest episode that is actually out", stuck?.to, 12)
-
-eq(
-    "a position on a real episode is left alone",
-    pointerRetraction({ episodes: range(1, 13), lastWatched: at(13) }),
-    null
-)
-eq(
-    "…and so is one on an episode the list no longer carries — that is drift, not this",
-    pointerRetraction({ episodes: range(1, 12), lastWatched: at(476) }),
-    null
-)
-eq("no position, nothing to retract", pointerRetraction({ episodes: [soon(1)], lastWatched: null }), null)
-eq(
-    "a countdown with nothing watchable below it clears the position",
-    pointerRetraction({ episodes: [soon(1)], lastWatched: at(1) })?.to,
-    null
-)
-
 console.log("\n\x1b[1mwhen an on-open mark may be recorded\x1b[0m\n")
 
-const opened = (over: Partial<Parameters<typeof onOpenMark>[0]> = {}) =>
-    onOpenMark({
-        marks: true,
-        takeOverPage: true,
-        markOnlyWhenPlayable: true,
-        pending: false,
-        hasServers: true,
-        ...over
-    })
-
-eq("normally the player says when there is a picture", opened(), "whenPlaying")
-eq("a recognised countdown is never marked", opened({ pending: true }), "never")
-eq("a page listing no servers is never marked", opened({ hasServers: false }), "never")
-eq("opening not counting at all still wins", opened({ marks: false }), "never")
+/*
+ * Deliberately a two-input rule with no special cases. Everything that could go
+ * wrong on the page — no servers listed, a countdown where the player goes, five
+ * servers that each resolve to nothing — reaches the same place on its own: the
+ * player never attaches anything, so `whenPlaying` never arrives and nothing is
+ * marked. Encoding those separately here would be three more chances to get one
+ * of them wrong, for no behaviour that this does not already produce.
+ */
+eq(
+    "with our player on the page, the mark waits for a picture",
+    onOpenMark({ marks: true, takeOverPage: true }),
+    "whenPlaying"
+)
 
 /*
- * With the site's own player left in place nothing of ours ever attaches, so no
- * later moment is coming and the page read is the only one there is.
+ * With the site's own player left in place, nothing of ours ever attaches to the
+ * video, so no later moment is coming — the page read is the only signal there
+ * will ever be, which is what `marksOnOpen` decided above.
  */
-eq("with no player of ours, the page read is the moment", opened({ takeOverPage: false }), "now")
-eq("…but a countdown is still refused there", opened({ takeOverPage: false, pending: true }), "never")
+eq("with the site's own player, the page read is the moment", onOpenMark({ marks: true, takeOverPage: false }), "now")
 
-/*
- * Turning the guard off means "go back to marking on open" — it does not mean
- * "mark episodes the source has said are not out". Nobody asking for the first
- * is asking for the second.
- */
-eq("the opt-out restores the old timing", opened({ markOnlyWhenPlayable: false }), "now")
-eq("…but not for a countdown", opened({ markOnlyWhenPlayable: false, pending: true }), "never")
-eq("…and it does not need a server list to do it", opened({ markOnlyWhenPlayable: false, hasServers: false }), "now")
+eq("opening not counting at all wins either way", onOpenMark({ marks: false, takeOverPage: true }), "never")
+eq("…including with no player of ours", onOpenMark({ marks: false, takeOverPage: false }), "never")
 
 console.log("\n\x1b[1mwhere an episode resumes\x1b[0m\n")
 

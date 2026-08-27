@@ -4,7 +4,6 @@ import {
     episodeProgressKey,
     latestEpisodeNumber,
     newReleases,
-    pointerRetraction,
     progressKey,
     verificationCandidates,
     wentLive
@@ -367,24 +366,6 @@ async function verifyEpisodes(options: {
             delete episode.pendingReason
             logger.warn(`${anime.key}: could not verify E${episode.number}, treating it as out`, error)
         }
-    }
-
-    /*
-     * The position may already be sitting on a placeholder, put there by the
-     * on-open mark firing before any server had been resolved. Verification is
-     * the first moment anything can know that, so it is the moment to undo it —
-     * otherwise the series reads as caught up at an episode that is not out, and
-     * stays that way when the real one lands. See `pointerRetraction` for why
-     * this is allowed to rewrite history where `positionDrift` is not.
-     */
-    const retraction = pointerRetraction({ episodes, lastWatched: anime.lastWatched })
-    if (retraction) {
-        logger.warn(
-            `${anime.key}: position was on E${retraction.from}, which is not out — ` +
-                `moving back to ${retraction.to === null ? "nothing watched" : `E${retraction.to}`}`
-        )
-        if (retraction.to === null) delete anime.lastWatched
-        else anime.lastWatched = { number: retraction.to, at: Date.now() }
     }
 }
 

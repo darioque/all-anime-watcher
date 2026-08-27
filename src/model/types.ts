@@ -87,7 +87,6 @@ export interface AnimeOverrides {
     markWatchedOnOpen?: boolean
     markWatchedOnEmbed?: boolean
     verifyNewEpisodes?: boolean
-    markOnlyWhenPlayable?: boolean
     releaseDelayMin?: number
     takeOverPage?: boolean
     notifyNewEpisode?: boolean

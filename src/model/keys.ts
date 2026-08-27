@@ -303,43 +303,6 @@ export function verificationCandidates(options: {
 }
 
 /**
- * Where the watch pointer should go when it names an episode that is not out.
- *
- * Returns null when there is nothing to do, which is nearly always.
- *
- * This undoes damage rather than preventing it, and it is worth being clear
- * about why that is allowed here when `positionDrift` deliberately refuses to
- * reset anything. Drift is ambiguous — a site that renumbered, a season split, a
- * back catalogue pulled — and "you are at episode 476" stays true whatever the
- * site now lists, so throwing it away would discard real information.
- *
- * This is not ambiguous. The pointer names an episode that has been *positively
- * verified* to have no video behind it, and nobody watched an episode that does
- * not exist. The only thing that could have set it is the on-open mark firing
- * before anything had been resolved — the bug `onOpenMark` now prevents — so the
- * mark is not information, it is the fault's own footprint.
- *
- * It falls back to the highest watchable episode below, not to zero: the viewer
- * really did watch those, and the episode list is the evidence.
- */
-export function pointerRetraction(options: {
-    episodes: Episode[]
-    lastWatched?: { number: number } | null
-}): { from: number; to: number | null } | null {
-    const held = options.lastWatched?.number
-    if (held === undefined) return null
-
-    const names = options.episodes.find(ep => ep.number === held)
-    if (!names || watchable(names)) return null
-
-    const below = options.episodes
-        .filter(ep => watchable(ep) && ep.number < held)
-        .reduce<number | null>((hi, ep) => (hi === null || ep.number > hi ? ep.number : hi), null)
-
-    return { from: held, to: below }
-}
-
-/**
  * How far the watch pointer sits above the newest episode the source lists.
  *
  * 0 when all is well, which is nearly always. It goes positive when a source

@@ -34,21 +34,6 @@ export interface GlobalSettings {
      * never be marked at all, however much of it you watched.
      */
     markWatchedOnEmbed: boolean
-    /**
-     * Never record an episode as watched unless something actually played.
-     *
-     * `markWatchedOnOpen` fires when the page is *read*, which is before anyone
-     * knows whether it has a video behind it. On a site that posts an episode
-     * ahead of the release that is a position moved to an episode that does not
-     * exist yet — and it moves the pointer past the real one, so it never shows
-     * as unwatched when it arrives.
-     *
-     * With this on, opening still counts, but the mark waits for the player to
-     * have a stream or an embed on screen. Nothing to play, nothing recorded,
-     * whatever the completion threshold says. Off restores the old behaviour of
-     * marking the moment the page is recognised.
-     */
-    markOnlyWhenPlayable: boolean
 
     // --- update scheduling
     schedule: SchedulePolicy
@@ -67,12 +52,15 @@ export interface GlobalSettings {
      * Open a newly-seen episode's page to confirm it has a video before calling
      * it a release.
      *
-     * One extra request per *new* episode, which is a handful a day across a
-     * whole library, and only on sources that can actually tell (see
-     * `episodeAvailability`). It buys the difference between "episode 13 is out"
-     * and "episode 13 has a countdown on it", which the series list cannot
-     * express. A placeholder is remembered rather than dropped and announced
-     * later, when it goes live.
+     * **Off by default, and it has to be.** It is a request per candidate
+     * episode on top of the series page, and a library of several hundred
+     * followed series pays that on every check run — real weight, for a habit
+     * only some sites have. Most never post an episode before they have it, and
+     * on those the check is pure cost with nothing to find.
+     *
+     * So it is opt-in, per source and per series, for the sites that actually do
+     * it. Only sources implementing `episodeAvailability` can answer at all, and
+     * turning it on for a source that cannot is a no-op rather than a waste.
      */
     verifyNewEpisodes: boolean
     /** Give up on a single series' check after this long. */
@@ -174,7 +162,6 @@ export interface SourceSettings {
     enabled?: boolean
     takeOverPage?: boolean
     markWatchedOnEmbed?: boolean
-    markOnlyWhenPlayable?: boolean
     /**
      * Worth turning off for a source that never posts an episode early — the
      * check is a wasted request there — and the level at which it belongs, since
@@ -205,10 +192,6 @@ export function defaultSettings(): GlobalSettings {
         pollOnAdd: true,
         markWatchedOnOpen: true,
         markWatchedOnEmbed: true,
-        // Recording an episode you could not watch is never what anyone meant by
-        // "mark watched on open", so this defaults on and the old behaviour is
-        // the opt-out.
-        markOnlyWhenPlayable: true,
 
         // Plain interval polling by default: it is what you would expect and it
         // never surprises you. Schedule-aware polling is opt-in, per anime.
@@ -220,7 +203,7 @@ export function defaultSettings(): GlobalSettings {
         maxParallelSources: 3,
         maxChecksPerRun: 60,
         checkTimeoutSec: 60,
-        verifyNewEpisodes: true,
+        verifyNewEpisodes: false,
 
         takeOverPage: true,
         preferredQuality: "1080p",
