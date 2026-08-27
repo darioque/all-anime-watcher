@@ -13,6 +13,7 @@ import {
     latestEpisode,
     latestEpisodeNumber,
     newReleases,
+    pointerRollback,
     nextEpisode,
     positionDrift,
     resumePositionFor,
@@ -366,6 +367,58 @@ eq("with the site's own player, the page read is the moment", onOpenMark({ marks
 
 eq("opening not counting at all wins either way", onOpenMark({ marks: false, takeOverPage: true }), "never")
 eq("…including with no player of ours", onOpenMark({ marks: false, takeOverPage: false }), "never")
+
+console.log("\n\x1b[1ma position on something that cannot be watched\x1b[0m\n")
+
+/*
+ * Two situations, one answer, on purpose. The episode is gone from the list, or
+ * it is still listed with nothing behind it — either way the pointer names
+ * something the viewer cannot be sitting at, and the difference is invisible
+ * where it matters: the row says "Up to date" at an episode that does not exist,
+ * the badge stays dark and "watch next" returns nothing.
+ */
+const gone = pointerRollback({ episodes: range(1, 12), lastWatched: at(13) })
+eq("a position on an episode the list no longer carries rolls back", gone?.from, 13)
+eq("…to the newest one that is actually there", gone?.to, 12)
+
+const onCountdown = pointerRollback({ episodes: [...range(1, 12), soon(13)], lastWatched: at(13) })
+eq("a position on a countdown rolls back the same way", onCountdown?.from, 13)
+eq("…to the same place", onCountdown?.to, 12)
+
+// A renumbering is the same shape, just a bigger gap. It rolls back one step to
+// the top of the list rather than to zero: the viewer really did watch what is
+// below, and marking a whole run unwatched would invent a backlog.
+eq(
+    "a renumbering lands on the top of the new list, not on zero",
+    pointerRollback({ episodes: range(1, 12), lastWatched: at(476) })?.to,
+    12
+)
+
+eq("a position on a real episode is left alone", pointerRollback({ episodes: range(1, 13), lastWatched: at(13) }), null)
+eq("no position, nothing to roll back", pointerRollback({ episodes: range(1, 12), lastWatched: null }), null)
+
+/*
+ * An empty list is a failed or pending fetch, not a renumbering. Acting on it
+ * would wipe the pointer of every series the moment a site had a bad minute.
+ */
+eq("an empty list changes nothing", pointerRollback({ episodes: [], lastWatched: at(13) }), null)
+
+// Nothing watchable below at all — the pointer has nowhere to go and is cleared.
+eq(
+    "a first episode that is only a countdown clears the position",
+    pointerRollback({ episodes: [soon(1)], lastWatched: at(1) })?.to,
+    null
+)
+
+/*
+ * And the rollback is what puts the row back in a state that tells the truth:
+ * before it, a pointer at E13 over a pending E13 reads as caught up, and stays
+ * that way when the real episode lands.
+ */
+const rolled = { episodes: [...range(1, 12), soon(13)], lastWatched: at(12), follow: true }
+eq("after rolling back, the countdown still does not light the badge", unwatchedCount(rolled), 0)
+eq("…and once it goes live, it does", unwatchedCount({ ...rolled, episodes: range(1, 13) }), 1)
+eq("…and watch next opens it", nextEpisode({ ...rolled, episodes: range(1, 13) })?.number, 13)
 
 console.log("\n\x1b[1mwhere an episode resumes\x1b[0m\n")
 

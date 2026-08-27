@@ -69,6 +69,22 @@ const controlsReady = ref(false)
 const scheduleFor = ref<string | null>(null)
 const trackingFor = ref<string | null>(null)
 const episodesFor = ref<string | null>(null)
+
+/**
+ * The row panels the ⋯ menu opens, as one list.
+ *
+ * Named together so "is anything open for this row" and "close it" are one
+ * statement each. Opening a panel from the menu and then having to reopen the
+ * menu to close it again made setting one option a three-click round trip, and
+ * every panel added another place to forget the close path.
+ */
+const ROW_PANELS = [episodesFor, categoriesFor, scheduleFor, trackingFor]
+
+const panelOpen = (key: string) => ROW_PANELS.some(panel => panel.value === key)
+
+function closePanels() {
+    for (const panel of ROW_PANELS) panel.value = null
+}
 const showSettings = ref(false)
 const showSearch = ref(false)
 const showDownloads = ref(false)
@@ -212,10 +228,17 @@ function episodeSpan(anime: TrackedAnime): { label: string; heading: string } {
  * the failure this exists to prevent — a renumbered series reads as "Up to date"
  * forever, which looks exactly like being up to date.
  */
+/**
+ * The pointer sitting above everything the source lists.
+ *
+ * No tolerance any more: `pointerRollback` brings the pointer down on every
+ * refresh, so a single episode of drift is already enough to act on and a
+ * threshold would only delay saying so. This is now the residual surface — the
+ * window between an imported backup and the next check — rather than the main
+ * handling.
+ */
 function driftNote(a: TrackedAnime): string | null {
-    const drift = positionDrift(a)
-    if (drift === 0) return null
-    if (drift <= resolve("positionDriftTolerance", { anime: a, sourceId: a.sourceId })) return null
+    if (positionDrift(a) === 0) return null
     return `You are at E${a.lastWatched?.number}, past everything this source lists (newest is E${latestEpisodeNumber(a)}).`
 }
 
@@ -931,6 +954,15 @@ defineExpose({ load })
                             </button>
                             <span v-if="isBusy(a.key)" class="working">working…</span>
                             <span class="grow"></span>
+                            <button
+                                v-if="panelOpen(a.key)"
+                                class="icon-btn"
+                                title="Close this panel"
+                                aria-label="Close this panel"
+                                @click="closePanels()"
+                            >
+                                ✕
+                            </button>
                             <RowMenu :items="menuFor(a)" :label="`Actions for ${titleOf(a)}`" />
                         </div>
 
@@ -1616,6 +1648,27 @@ h1 {
     background: var(--ground);
     border: 1px solid var(--rule);
     border-radius: var(--radius);
+}
+
+/*
+ * Sits beside the ⋯ and only while a panel is open, so the row's resting state
+ * is unchanged — one action button and one menu, as before.
+ */
+.icon-btn {
+    flex: none;
+    padding: 2px 7px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: var(--ink-3);
+    background: none;
+    border: 1px solid var(--rule);
+    border-radius: var(--radius);
+    cursor: pointer;
+}
+
+.icon-btn:hover {
+    color: var(--ink);
+    border-color: var(--ink-3);
 }
 
 .tracking {

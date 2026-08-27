@@ -4,6 +4,7 @@ import {
     episodeProgressKey,
     latestEpisodeNumber,
     newReleases,
+    pointerRollback,
     progressKey,
     verificationCandidates,
     wentLive
@@ -223,6 +224,24 @@ export async function refreshSeries(
         ]
 
         anime.episodes = episodes
+
+        /*
+         * The pointer may now name an episode that cannot be watched — gone from
+         * the list, or still listed with nothing behind it. Same answer to both,
+         * and deliberately outside `verifyEpisodes`: the missing-episode case
+         * has nothing to do with countdowns and must keep working for every
+         * source, whether or not verification is switched on for it.
+         */
+        const rollback = pointerRollback({ episodes, lastWatched: anime.lastWatched })
+        if (rollback) {
+            logger.warn(
+                `${key}: position was on E${rollback.from}, which cannot be watched — ` +
+                    `moving back to ${rollback.to === null ? "nothing watched" : `E${rollback.to}`}`
+            )
+            if (rollback.to === null) delete anime.lastWatched
+            else anime.lastWatched = { number: rollback.to, at: Date.now() }
+        }
+
         anime.url = url
         anime.lastCheckedAt = Date.now()
         anime.updatedAt = Date.now()

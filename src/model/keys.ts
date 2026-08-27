@@ -305,23 +305,10 @@ export function verificationCandidates(options: {
 /**
  * How far the watch pointer sits above the newest episode the source lists.
  *
- * 0 when all is well, which is nearly always. It goes positive when a source
- * renumbers — an absolutely-numbered run split into seasons, a parse regression,
- * a site that dropped its back catalogue — and the position we hold no longer
- * has anywhere to point.
- *
- * AMR resets to zero in the equivalent situation, and it is right to: its
- * position *is* a chapter URL (`chapPath`), so a path that disappeared means the
- * position is genuinely gone and zero is the only value left. Ours is a number,
- * deliberately (see model/types.ts), and "you are at episode 476" stays true and
- * useful whether or not a post numbered 476 is still on the site. Resetting
- * would discard information we still hold, and do real damage doing it: every
- * episode becomes unwatched, the badge lights up, and "watch next" points at the
- * bottom of the list.
- *
- * So nothing is reset automatically. The drift is reported instead, and the
- * episode picker sets the position deliberately — which is the only actor that
- * actually knows where the viewer got to.
+ * 0 when all is well, which is now nearly always: `pointerRollback` runs on
+ * every refresh and brings the pointer back down, so this can only be positive
+ * in the window before the next check — a freshly imported backup, a list edited
+ * by hand. It stays as the surface for exactly that residual case.
  */
 export function positionDrift(anime: Pick<TrackedAnime, "episodes" | "lastWatched">): number {
     if (!anime.lastWatched) return 0
@@ -329,4 +316,51 @@ export function positionDrift(anime: Pick<TrackedAnime, "episodes" | "lastWatche
     // An empty list is a failed or pending fetch, not a renumbering.
     if (newest === null) return 0
     return Math.max(0, anime.lastWatched.number - newest)
+}
+
+/**
+ * Where the watch pointer should go when the episode it names cannot be watched.
+ *
+ * **Two situations, one answer.** The episode is gone from the list — the site
+ * renumbered, pulled a post, re-uploaded under a different number — or it is
+ * still listed but has nothing behind it, a countdown or a placeholder. Either
+ * way the pointer names something the viewer cannot be sitting at, and the
+ * distinction between the two is invisible from where it matters: the row says
+ * "Up to date" at an episode that does not exist, the badge stays dark, and
+ * "watch next" returns nothing. Treating them alike is a deliberate choice, not
+ * a shortcut — a rule that rolled back one and reported the other would leave
+ * the same broken row half the time, for a difference the viewer cannot see.
+ *
+ * It falls back to the highest watchable episode *below* the one held, rather
+ * than to zero. AMR resets to zero and is right to for its own model — its
+ * position **is** a chapter URL, so a path that disappeared means the position
+ * is genuinely gone. Ours is a number and the episode list is evidence: the
+ * viewer really did watch everything below, and throwing that away would mark a
+ * whole run unwatched, light the badge for all of it and point "watch next" at
+ * the bottom of the list. Rolling back one step surfaces the problem — the row
+ * goes from "Up to date" to having an episode waiting — without inventing a
+ * backlog that was already watched.
+ *
+ * **An empty list is not a renumbering.** A failed or pending fetch returns no
+ * episodes, and acting on that would wipe the pointer of every series the moment
+ * a site had a bad minute. Nothing happens until there is a list to reason from.
+ *
+ * Returns null when there is nothing to do, which is nearly always.
+ */
+export function pointerRollback(options: {
+    episodes: Episode[]
+    lastWatched?: { number: number } | null
+}): { from: number; to: number | null } | null {
+    const held = options.lastWatched?.number
+    if (held === undefined) return null
+    if (options.episodes.length === 0) return null
+
+    const names = options.episodes.find(ep => ep.number === held)
+    if (names && watchable(names)) return null
+
+    const below = options.episodes
+        .filter(ep => watchable(ep) && ep.number < held)
+        .reduce<number | null>((hi, ep) => (hi === null || ep.number > hi ? ep.number : hi), null)
+
+    return { from: held, to: below }
 }

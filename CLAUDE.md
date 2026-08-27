@@ -576,6 +576,36 @@ off the answer is still `now` — nothing of ours attaches to the site's own
 player, so no later moment is coming and the page read is the only signal there
 will ever be, exactly as `markWatchedOnEmbed` already says.
 
+**A pointer on an episode that cannot be watched rolls back, and that is a
+decided rule rather than a side effect of this feature.** Two situations reach
+it: the episode is gone from the list (the site renumbered, pulled a post,
+re-uploaded under another number) or it is still listed with nothing behind it.
+They get the same answer, deliberately — the difference is invisible where it
+matters. Either way the row reads "Up to date" at an episode that does not
+exist, the badge stays dark, and `wentLive` can announce the real episode later
+while "watch next" still returns nothing.
+
+`pointerRollback` moves to the highest watchable episode *below* the one held,
+not to zero. AMR resets to zero and is right to for its model — its position
+**is** a chapter URL, so a vanished path means the position is genuinely gone.
+Ours is a number and the episode list is evidence: the viewer did watch what is
+below, and zeroing would mark a whole run unwatched, light the badge for all of
+it and point "watch next" at the bottom. One step back surfaces the problem —
+the row goes from "Up to date" to having something waiting — without inventing a
+backlog. **An empty list is not a renumbering**: a failed fetch returns no
+episodes, and acting on that would wipe every series' pointer the moment a site
+had a bad minute.
+
+It runs in `refreshSeries`, **outside `verifyEpisodes` and unconditional**. The
+missing-episode case has nothing to do with countdowns and has to keep working
+for every source whether or not `verifyNewEpisodes` is switched on for it.
+
+`positionDriftTolerance` is gone with it. It existed to sit out a site pulling
+its newest episode for a re-upload, but that is now exactly the case the rollback
+handles, and a threshold could only delay saying so. `positionDrift` survives as
+the residual surface for the window before the next check — an imported backup,
+a list edited by hand — and fires at any drift at all.
+
 **Reaching it at all three levels took UI that did not exist.** Before this there
 was no per-source settings editor at all (SourcesPanel was domain management
 only) and the per-anime menu exposed nothing but Schedule, so the resolver chain
