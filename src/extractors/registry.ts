@@ -6,6 +6,7 @@ import { MegaPlayExtractor } from "./sites/megaplay"
 import { StreamWishExtractor } from "./sites/streamwish"
 import { ByseExtractor } from "./sites/byse"
 import { DirectStreamExtractor } from "./sites/directStream"
+import { RumbleExtractor } from "./sites/rumble"
 import { hostOf } from "~/shared/url"
 import { log } from "~/shared/logger"
 
@@ -25,6 +26,7 @@ const ALL: Extractor[] = [
     new MegaPlayExtractor(),
     new ByseExtractor(),
     new StreamWishExtractor(),
+    new RumbleExtractor(),
     new DirectStreamExtractor()
 ]
 
