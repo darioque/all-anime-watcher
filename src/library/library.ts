@@ -6,8 +6,7 @@ import {
     newReleases,
     pointerRollback,
     progressKey,
-    verificationCandidates,
-    wentLive
+    verificationCandidates
 } from "~/model/keys"
 import { resolve, resolveSchedule } from "~/settings/resolver"
 import { nextCheckAt } from "~/background/schedule"
@@ -209,60 +208,46 @@ export async function refreshSeries(
     const url = swapOrigin(anime.url, ctx.baseUrl)
 
     try {
-        const episodes = await episodeList(source, url, ctx)
+        const fetched = await episodeList(source, url, ctx)
         const known = new Set(anime.episodes.map(e => progressKey(e.number, e.variant)))
-        const added = episodes.filter(e => !known.has(progressKey(e.number, e.variant)))
+        const isNew = (e: Episode) => !known.has(progressKey(e.number, e.variant))
 
         // Read before the list is replaced: it is the whole basis for telling a
         // release apart from a backfill.
         const previousHighest = latestEpisodeNumber(anime)
+        const watchedUpTo = anime.lastWatched ? { watchedUpTo: anime.lastWatched.number } : {}
 
         /*
-         * Confirm the episodes about to be announced actually have a video
-         * behind them. See `verifyEpisodes` — it mutates `episodes` in place,
-         * flagging the ones that turn out to be countdowns, so everything below
-         * this line works on a verified list.
+         * Drop the posts that have no video behind them, *before* the diff runs.
+         *
+         * Order is the whole trick. A placeholder that never enters the list is
+         * absent now and present the day it airs, which is precisely what the
+         * diff below already knows how to announce — no second announcement path,
+         * no flag for the rest of the codebase to remember to skip.
          */
-        const stored = anime.episodes
-        await verifyEpisodes({
+        const episodes = await verifiedEpisodes({
             source,
             ctx,
             anime,
-            episodes,
-            stored,
-            candidateReleases: newReleases({
-                added,
-                previousHighest,
-                ...(anime.lastWatched ? { watchedUpTo: anime.lastWatched.number } : {})
-            })
+            episodes: fetched,
+            stored: anime.episodes,
+            // What would be announced if nothing were verified — the budget for
+            // opening episode pages is spent on exactly these.
+            candidateReleases: newReleases({ added: fetched.filter(isNew), previousHighest, ...watchedUpTo })
         })
+        const dropped = fetched.length - episodes.length
 
-        /*
-         * Two ways an episode becomes a release, and both are needed.
-         *
-         * The diff catches an episode that appeared in the list. `wentLive`
-         * catches one that was already in it as a placeholder and has now got a
-         * video — which the diff cannot see, because nothing about the list
-         * changed. Without the second, suppressing a countdown would suppress
-         * the real episode along with it.
-         */
-        const releases = [
-            ...newReleases({
-                added,
-                previousHighest,
-                ...(anime.lastWatched ? { watchedUpTo: anime.lastWatched.number } : {})
-            }),
-            ...wentLive(stored, episodes)
-        ]
+        const added = episodes.filter(isNew)
+        const releases = newReleases({ added, previousHighest, ...watchedUpTo })
 
         anime.episodes = episodes
 
         /*
-         * The pointer may now name an episode that cannot be watched — gone from
-         * the list, or still listed with nothing behind it. Same answer to both,
-         * and deliberately outside `verifyEpisodes`: the missing-episode case
-         * has nothing to do with countdowns and must keep working for every
-         * source, whether or not verification is switched on for it.
+         * The pointer may now name an episode that is not in the list — pulled,
+         * renumbered, or dropped just above as a placeholder. Deliberately
+         * outside verification: the missing-episode case has nothing to do with
+         * countdowns and must keep working for every source, whether or not
+         * verification is switched on for it.
          */
         const rollback = pointerRollback({ episodes, lastWatched: anime.lastWatched })
         if (rollback) {
@@ -286,13 +271,10 @@ export async function refreshSeries(
 
         await db.putAnime(anime)
 
-        const pending = episodes.filter(e => e.pending === true)
-        const backfilled = added.length - releases.length - pending.length
+        const backfilled = added.length - releases.length
         logger.info(
             `refreshed ${key} — ${episodes.length} episodes, ${releases.length} new` +
-                (pending.length > 0
-                    ? `, ${pending.length} posted but not out (E${pending.map(e => e.number).join(", E")})`
-                    : "") +
+                (dropped > 0 ? `, ${dropped} posted but not out` : "") +
                 (backfilled > 0
                     ? ` (${backfilled} older episode(s) appeared too, at or below E${previousHighest ?? 0}` +
                       `${anime.lastWatched ? `/E${anime.lastWatched.number} watched` : ""} — not announced)`
@@ -323,15 +305,15 @@ const MAX_VERIFICATIONS_PER_REFRESH = 5
  *
  * This is what reaches a library that already stored a placeholder as an
  * ordinary episode — the state the first version of this could not see, because
- * such an episode is in neither the diff nor the pending set. Three, because a
- * site posts an episode or two ahead of itself and never a season; each one is
- * checked once and stamped `available`, so the sweep is a one-off per episode
- * rather than a standing cost.
+ * nothing about such an episode appears in the diff. Three, because a site posts
+ * an episode or two ahead of itself and never a season; each one is checked once
+ * and stamped `available`, so the sweep is a one-off per episode rather than a
+ * standing cost.
  */
 const VERIFICATION_SWEEP = 3
 
 /**
- * Open the episodes about to be announced and check they have a video.
+ * The fetched list with the posts that have no video behind them removed.
  *
  * The update loop reads the *series* page, where a post the site created ahead
  * of the release is indistinguishable from one it has: same markup, same server
@@ -339,47 +321,48 @@ const VERIFICATION_SWEEP = 3
  * difference, so the only way to tell is to look — one request per candidate,
  * and `verificationCandidates` decides which candidates are worth it.
  *
- * Mutates `episodes` in place. That is deliberate: the caller's `newReleases`
- * diff, `wentLive` transition and stored list must all see one list in one
- * state, and returning a copy would leave three chances to use the wrong one.
+ * **Removed, not flagged.** An earlier version kept such posts in the list under
+ * a `pending` flag, which made "is this a real episode?" a question every reader
+ * of `anime.episodes` had to think about — and one of them, the player's own
+ * episode navigator, did not, so the next-episode arrow lit up for a countdown.
+ * A list that contains only episodes cannot be read wrongly. It also costs a
+ * function: keeping the placeholder meant the day it went live nothing about the
+ * list changed, so a second announcement path had to exist to notice; dropping
+ * it makes going live an ordinary appearance in the diff.
  *
- * **Every failure path leaves the episode announced.** A source with no opinion,
- * the setting off, a fetch that times out, a parse that throws — all of them fall
- * through to "watchable", because the cost of the two mistakes is not
- * symmetrical. Announcing a countdown is a notification the viewer dismisses;
- * suppressing a real episode is one they never learn they missed.
+ * The price is honest and small. A dropped placeholder is in the diff again on
+ * the next check, so it is re-opened once per check for as long as the countdown
+ * stands — the same request the old "already known to be pending" clause spent.
+ * And where the old flag survived a failed fetch, this cannot: a blip on the
+ * placeholder's page falls through to "out" and may announce it a second time.
+ * That is the cheap mistake, deliberately — see below.
+ *
+ * **Every failure path leaves the episode in.** A source with no opinion, the
+ * setting off, a fetch that times out, a parse that throws — all of them keep the
+ * episode, because the cost of the two mistakes is not symmetrical. Announcing a
+ * countdown is a notification the viewer dismisses; suppressing a real episode is
+ * one they never learn they missed.
  */
-async function verifyEpisodes(options: {
+async function verifiedEpisodes(options: {
     source: AnimeSource
     ctx: Awaited<ReturnType<typeof fetchCtxFor>>
     anime: TrackedAnime
     episodes: Episode[]
     stored: Episode[]
     candidateReleases: Episode[]
-}): Promise<void> {
+}): Promise<Episode[]> {
     const { source, ctx, anime, episodes, stored, candidateReleases } = options
-    if (!source.episodeAvailability) return
-    if (!resolve("verifyNewEpisodes", { anime, sourceId: anime.sourceId })) return
+    if (!source.episodeAvailability) return episodes
+    if (!resolve("verifyNewEpisodes", { anime, sourceId: anime.sourceId })) return episodes
 
     /*
-     * Carry the previous verdict onto the fresh list first, so an episode known
-     * to be a placeholder is still known as one before anything is fetched. A
-     * check run that never gets to it — the cap, a failed request — must not
-     * quietly promote it back to a release; the flag comes off only when a page
-     * is actually read and found to have a player.
+     * Carry the `available` memos onto the fresh list first. Settled the cheap
+     * way round: an episode with a player in it does not lose one, and this is
+     * what keeps the sweep a one-off per episode rather than a standing cost.
      */
     const before = new Map(stored.map(ep => [episodeProgressKey(ep), ep]))
     for (const episode of episodes) {
-        const previous = before.get(episodeProgressKey(episode))
-        if (!previous) continue
-        if (previous.pending === true) {
-            episode.pending = true
-            if (previous.pendingReason) episode.pendingReason = previous.pendingReason
-        } else if (previous.available === true) {
-            // Settled the cheap way round: an episode with a player in it does
-            // not lose one, and this is what keeps the sweep a one-off.
-            episode.available = true
-        }
+        if (before.get(episodeProgressKey(episode))?.available === true) episode.available = true
     }
 
     const candidates = verificationCandidates({
@@ -389,6 +372,8 @@ async function verifyEpisodes(options: {
         limit: MAX_VERIFICATIONS_PER_REFRESH
     })
 
+    const notOut = new Set<string>()
+
     // Sequential on purpose. This runs inside a scheduled check of a whole
     // library; the politeness the scheduler buys between series is not worth
     // spending five parallel requests against one site to save a second.
@@ -397,13 +382,12 @@ async function verifyEpisodes(options: {
             const html = await ctx.text(episode.url, { noCache: true })
             const verdict = source.episodeAvailability(html, episode.url)
             if (verdict.pending) {
-                episode.pending = true
-                delete episode.available
-                if (verdict.reason) episode.pendingReason = verdict.reason
-                else delete episode.pendingReason
+                notOut.add(episodeProgressKey(episode))
+                logger.info(
+                    `${anime.key}: E${episode.number} is posted but not out` +
+                        `${verdict.reason ? ` — ${verdict.reason}` : ""}`
+                )
             } else {
-                delete episode.pending
-                delete episode.pendingReason
                 episode.available = true
             }
         } catch (error) {
@@ -413,11 +397,11 @@ async function verifyEpisodes(options: {
              * Deliberately not stamped `available`: the question was not
              * answered, so it stays unknown and the sweep asks again next time.
              */
-            delete episode.pending
-            delete episode.pendingReason
             logger.warn(`${anime.key}: could not verify E${episode.number}, treating it as out`, error)
         }
     }
+
+    return notOut.size === 0 ? episodes : episodes.filter(ep => !notOut.has(episodeProgressKey(ep)))
 }
 
 /**

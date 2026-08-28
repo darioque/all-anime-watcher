@@ -19,8 +19,7 @@ import {
     resumePositionFor,
     unwatchedCount,
     verificationCandidates,
-    watchState,
-    wentLive
+    watchState
 } from "~/model/keys"
 import { marksOnOpen, onOpenMark } from "~/settings/watching"
 import type { Episode } from "~/model/types"
@@ -195,63 +194,24 @@ eq("our own player measures instead of assuming", marking(false, true, true), fa
  * new — and calling it a release was not: the notification opened a page whose
  * five servers each resolved to nothing, and the watch position had already
  * moved to it on the way in.
+ *
+ * The answer is that such a post is not in the episode list at all. The check
+ * run opens it, sees a countdown, and drops it *before* the diff — so there is
+ * nothing here to test beyond that: every function below is looking at a list of
+ * episodes, which is the only thing it has ever had to handle.
+ *
+ * The version that kept the post under a `pending` flag needed a rule in every
+ * one of these functions, plus a second announcement path for the moment the
+ * flag came off, plus the same rule again in the player, the shelves and the
+ * group aggregates — where it was missed, and the next-episode arrow lit up for
+ * a countdown. What follows is the whole of what replaced all of that.
  * ---------------------------------------------------------------------------
  */
 console.log("\n\x1b[1mposted, but not out\x1b[0m\n")
 
-/** An episode the site has posted with nothing behind it. */
-const soon = (number: number): Episode => ({
-    number,
-    url: `https://x/ep-${number}`,
-    pending: true,
-    pendingReason: "a countdown"
-})
-
-// --- the case that shipped
-eq(
-    "a countdown post is not a release",
-    newReleases({ added: [soon(13)], previousHighest: 12, watchedUpTo: 12 }).length,
-    0
-)
-eq(
-    "…even when a real episode arrives beside it",
-    newReleases({ added: [soon(14), ...range(13, 13)], previousHighest: 12, watchedUpTo: 12 })
-        .map(e => e.number)
-        .join(),
-    "13"
-)
-
-// --- and the release it must not swallow
-//
-// The placeholder is in the stored list from the first check that saw it, so
-// when the video goes up nothing about the list changes. Only `wentLive` sees it.
-eq(
-    "the countdown announces when it finally goes live",
-    wentLive([soon(13)], range(13, 13))
-        .map(e => e.number)
-        .join(),
-    "13"
-)
-eq("…and only then, not on every check in between", wentLive([soon(13)], [soon(13)]).length, 0)
-eq("an episode that was never pending is not announced twice", wentLive(range(12, 12), range(12, 13)).length, 0)
-eq(
-    "a placeholder that turns into a *different* episode number is not it",
-    wentLive([soon(13)], range(14, 14)).length,
-    0
-)
-
-// The list is re-fetched whole and this site reorders it — the placeholder is
-// backdated below episode 1 — so the match has to be by number, not by position.
-eq(
-    "the transition is matched by number, whatever order the site returns",
-    wentLive([soon(13), ...range(1, 12)], [...range(1, 13)].reverse())
-        .map(e => e.number)
-        .join(),
-    "13"
-)
-
-// --- what the rest of the library sees meanwhile
-const withCountdown = { episodes: [...range(1, 12), soon(13)], lastWatched: at(12), follow: true }
+// The list as the check run stores it while the countdown stands: E13 dropped,
+// so the newest thing there is E12 and the viewer is on it.
+const withCountdown = { episodes: range(1, 12), lastWatched: at(12), follow: true }
 
 eq("a countdown is not the newest episode", latestEpisodeNumber(withCountdown), 12)
 eq("…so the position is not adrift from it", positionDrift(withCountdown), 0)
@@ -260,19 +220,41 @@ eq("the row reads as caught up, not as new", watchState(withCountdown), "current
 eq('"watch next" does not open it', nextEpisode(withCountdown), undefined)
 eq("nor does the newest-episode link", latestEpisode(withCountdown)?.number, 12)
 
-// A series whose whole list is placeholders has nothing to watch yet, which is
-// "unstarted" — the state for a source that returned nothing — not "new".
+// A series whose only post is a placeholder stores an empty list, which reads as
+// "unstarted" — the same state as a source that returned nothing, because it is.
 eq(
     "a series of nothing but countdowns is unstarted",
-    watchState({ episodes: [soon(1)], lastWatched: undefined, follow: true }),
+    watchState({ episodes: [], lastWatched: undefined, follow: true }),
     "unstarted"
 )
 
-// And once it goes live everything reverses, with no other state changed.
+/*
+ * And the day it airs it is simply an episode that was not in the stored list
+ * and is now — which is what the diff has always announced. This is the release
+ * the old `wentLive` had to exist to catch: with the placeholder stored, nothing
+ * about the list changed when the video went up, so the diff could not see it.
+ */
 const wentUp = { episodes: range(1, 13), lastWatched: at(12), follow: true }
-eq("once it is out, the badge lights", unwatchedCount(wentUp), 1)
+eq(
+    "once it is out it is an ordinary new release",
+    newReleases({ added: range(13, 13), previousHighest: 12, watchedUpTo: 12 })
+        .map(e => e.number)
+        .join(),
+    "13"
+)
+eq("the badge lights", unwatchedCount(wentUp), 1)
 eq("…and the row says so", watchState(wentUp), "new")
 eq("…and watch next opens it", nextEpisode(wentUp)?.number, 13)
+
+// The floor is still what keeps a backfill quiet, and dropping the placeholder
+// does not move it: E13 never entered the list, so the previous highest is 12.
+eq(
+    "a backfill arriving beside it is still not announced",
+    newReleases({ added: [...range(4, 4), ...range(13, 13)], previousHighest: 12, watchedUpTo: 12 })
+        .map(e => e.number)
+        .join(),
+    "13"
+)
 
 console.log("\n\x1b[1mwhat is worth opening to check\x1b[0m\n")
 
@@ -291,9 +273,16 @@ eq(
     "20,19,18"
 )
 eq("the ones about to be announced are", candidates({ episodes: range(1, 13), releases: range(13, 13) }), "13,12,11")
+
+/*
+ * A placeholder dropped last time is in the diff again this time, so it is
+ * announced-in-waiting again, so it is a candidate again. That is what re-checks
+ * a standing countdown until it goes live, and it costs the same one request the
+ * removed "already known to be pending" clause did.
+ */
 eq(
-    "a known placeholder is re-checked even though nothing announced it",
-    candidates({ episodes: [...range(1, 12).map(e => seen(e.number)), soon(13)], releases: [] }),
+    "a dropped placeholder comes back round as a candidate",
+    candidates({ episodes: [...range(1, 12).map(e => seen(e.number)), ...range(13, 13)], releases: range(13, 13) }),
     "13"
 )
 
@@ -371,19 +360,18 @@ eq("…including with no player of ours", onOpenMark({ marks: false, takeOverPag
 console.log("\n\x1b[1ma position on something that cannot be watched\x1b[0m\n")
 
 /*
- * Two situations, one answer, on purpose. The episode is gone from the list, or
- * it is still listed with nothing behind it — either way the pointer names
- * something the viewer cannot be sitting at, and the difference is invisible
- * where it matters: the row says "Up to date" at an episode that does not exist,
- * the badge stays dark and "watch next" returns nothing.
+ * Two situations that turned out to be one. The episode was pulled or
+ * renumbered, or it was a countdown the check run has just dropped — by the time
+ * this reads the list, both are "the pointer names something that is not there",
+ * and there is nothing here that could tell them apart even if it wanted to.
+ * That is the point: the pointer names something the viewer cannot be sitting
+ * at, and the difference is invisible where it matters — the row says "Up to
+ * date" at an episode that does not exist, the badge stays dark and "watch next"
+ * returns nothing.
  */
 const gone = pointerRollback({ episodes: range(1, 12), lastWatched: at(13) })
 eq("a position on an episode the list no longer carries rolls back", gone?.from, 13)
 eq("…to the newest one that is actually there", gone?.to, 12)
-
-const onCountdown = pointerRollback({ episodes: [...range(1, 12), soon(13)], lastWatched: at(13) })
-eq("a position on a countdown rolls back the same way", onCountdown?.from, 13)
-eq("…to the same place", onCountdown?.to, 12)
 
 // A renumbering is the same shape, just a bigger gap. It rolls back one step to
 // the top of the list rather than to zero: the viewer really did watch what is
@@ -403,20 +391,25 @@ eq("no position, nothing to roll back", pointerRollback({ episodes: range(1, 12)
  */
 eq("an empty list changes nothing", pointerRollback({ episodes: [], lastWatched: at(13) }), null)
 
-// Nothing watchable below at all — the pointer has nowhere to go and is cleared.
+/*
+ * Nothing below at all — the pointer has nowhere to go and is cleared. This is
+ * the shape a series takes when its only post turns out to be a countdown: the
+ * check run drops it, the stored list is E2 upwards, and a pointer at E1 names
+ * nothing.
+ */
 eq(
-    "a first episode that is only a countdown clears the position",
-    pointerRollback({ episodes: [soon(1)], lastWatched: at(1) })?.to,
+    "a position below everything the list holds is cleared",
+    pointerRollback({ episodes: range(2, 3), lastWatched: at(1) })?.to,
     null
 )
 
 /*
- * And the rollback is what puts the row back in a state that tells the truth:
- * before it, a pointer at E13 over a pending E13 reads as caught up, and stays
- * that way when the real episode lands.
+ * And the rollback is what puts the row back in a state that tells the truth: a
+ * pointer left on a dropped E13 reads as caught up at an episode that is not
+ * there, and stays that way when the real one lands.
  */
-const rolled = { episodes: [...range(1, 12), soon(13)], lastWatched: at(12), follow: true }
-eq("after rolling back, the countdown still does not light the badge", unwatchedCount(rolled), 0)
+const rolled = { episodes: range(1, 12), lastWatched: at(12), follow: true }
+eq("after rolling back, the dropped post still does not light the badge", unwatchedCount(rolled), 0)
 eq("…and once it goes live, it does", unwatchedCount({ ...rolled, episodes: range(1, 13) }), 1)
 eq("…and watch next opens it", nextEpisode({ ...rolled, episodes: range(1, 13) })?.number, 13)
 

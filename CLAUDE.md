@@ -536,17 +536,18 @@ sites have. It is opt-in per source and per series, which is the level the fact
 belongs at: luciferdonghua.in posts ahead, lmanime does not.
 
 **Which candidates is the part that was got wrong first, and it is worth knowing
-why.** The obvious answer — "the episodes about to be announced, plus the ones
-already flagged pending" — fixed nothing on the machine that reported the bug. A
-library that already holds the placeholder holds it as an *ordinary* episode: it
-is not in the diff, because nothing about the list changed, and it carries no
-flag, because no code had ever looked. Both clauses came back empty and the
-countdown stayed the newest episode. The feature worked perfectly on libraries
-that did not have the problem. That is rule 11's shape again — new behaviour that
-cannot reach the state already on disk — and the fix is a third clause: sweep the
-newest few episodes nobody has ever asked about. `Episode.available` is what
-stops the sweep repeating; **absent means unknown, not fine**, which is the whole
-reason availability is tri-state rather than a boolean.
+why.** The obvious answer — "the episodes about to be announced" — fixed nothing
+on the machine that reported the bug. A library that already holds the
+placeholder holds it as an ordinary episode: it is not in the diff, because
+nothing about the list changed, and no code had ever looked at it. The clause
+came back empty and the countdown stayed the newest episode. The feature worked
+perfectly on libraries that did not have the problem. That is rule 11's shape
+again — new behaviour that cannot reach the state already on disk — and the fix is
+a second clause: sweep the newest few episodes nobody has ever asked about.
+`Episode.available` is what stops the sweep repeating; **absent means unknown,
+not fine**, which is the whole reason it is tri-state rather than a boolean. It
+is also the migration path — the sweep is what reaches a placeholder already
+sitting in someone's library and drops it on the next check.
 `AnimeSource.episodeAvailability(html, url)` is optional and answers from markup
 already in hand; `AnimeStream` implements it from a per-site `pending` config
 (`markers`, `text`, `reason`). Three rules hold it together:
@@ -563,20 +564,36 @@ already in hand; `AnimeStream` implements it from a per-site `pending` config
   two mistakes are not symmetrical: announcing a countdown is a notification you
   dismiss, suppressing a real episode is one you never learn you missed. That is
   also why `pending` is opt-in per site and `lmanime` declares nothing.
-- **The placeholder is remembered, not dropped.** Dropping it would make the
-  episode new again on every check. Stored with `Episode.pending`, it is known —
-  so the diff stays quiet — while `latestEpisodeNumber`, `unwatchedCount`,
-  `nextEpisode`, `latestEpisode` and `watchState` all skip it via `watchable()`.
-  One predicate on purpose: getting it wrong in one place only is silent and
-  specific (the badge lights, "watch next" opens a dead page).
+- **The placeholder is dropped, not flagged, and ordering is what makes that
+  work.** `verifiedEpisodes` removes it *before* the diff runs, so the stored
+  list contains episodes and nothing else. Everything downstream —
+  `latestEpisodeNumber`, `unwatchedCount`, `nextEpisode`, `watchState`, the
+  shelves, the group aggregates, the player's own navigator — is then correct
+  without knowing the concept exists.
 
-**Suppressing the countdown must not suppress the release, and that needs a
-second rule.** A placeholder is in the stored list from the first check that saw
-it, so when the video finally goes up it is *not* in the diff — nothing about the
-list changed. `wentLive(previous, current)` reads that transition instead, by
-`progressKey` rather than array position, because the list is refetched whole and
-this site reorders it. Without it the placeholder would absorb the one
-announcement the episode was ever going to get.
+**This replaced a design that kept the post under an `Episode.pending` flag, and
+the reason is worth keeping.** That version needed every reader of
+`anime.episodes` to remember to skip flagged entries, via a `watchable()`
+predicate. One of them didn't: the player built its episode navigator straight
+off the stored list, so the next-episode arrow lit up for a countdown and the
+picker offered it — the same bug the flag existed to prevent, one layer down. **A
+rule that has to be repeated at every call site will be missed at one of them.**
+A list that contains only episodes cannot be read wrongly.
+
+It also deleted a function. With the placeholder stored, the day the video went
+up *nothing about the list changed*, so the diff could not see it and a second
+announcement path (`wentLive`) had to exist to catch the transition. Drop the
+placeholder and going live is an ordinary appearance in the diff, which is what
+`newReleases` has always announced.
+
+**The price, stated honestly.** A dropped placeholder is in the diff again on the
+next check, so it is re-opened once per check while the countdown stands — the
+same request the old "already known to be pending" clause spent, so no
+regression. And where the old flag survived a failed fetch, this cannot: a
+network blip on the placeholder's page falls through to "out" and may announce it
+a second time. That is the cheap mistake by the asymmetry above, it self-corrects
+on the next successful check, and it is the trade for deleting a rule that had to
+be obeyed in nine places.
 
 **And the watch position moved before anything was known to be playable.** That
 is a second bug with the same root: `markWatchedOnOpen` fired when the page was
@@ -641,13 +658,14 @@ threshold — and any successful check sets `failCount` back to 0 and clears
 **A pointer on an episode that cannot be watched rolls back, and that is a
 decided rule rather than a side effect of this feature.** Two situations reach
 it: the episode is gone from the list (the site renumbered, pulled a post,
-re-uploaded under another number) or it is still listed with nothing behind it.
-They get the same answer, deliberately — the difference is invisible where it
-matters. Either way the row reads "Up to date" at an episode that does not
-exist, the badge stays dark, and `wentLive` can announce the real episode later
-while "watch next" still returns nothing.
+re-uploaded under another number) or it was a countdown the check run has just
+dropped. They get the same answer, deliberately — and since a placeholder is not
+in the list at all, by the time `pointerRollback` reads it they are literally the
+same situation, which is one more thing dropping bought. Either way the row reads
+"Up to date" at an episode that does not exist, the badge stays dark, and "watch
+next" returns nothing.
 
-`pointerRollback` moves to the highest watchable episode *below* the one held,
+`pointerRollback` moves to the highest episode *below* the one held,
 not to zero. AMR resets to zero and is right to for its model — its position
 **is** a chapter URL, so a vanished path means the position is genuinely gone.
 Ours is a number and the episode list is evidence: the viewer did watch what is

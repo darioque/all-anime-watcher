@@ -30,27 +30,18 @@ export interface Episode {
     /** Epoch ms, when the site publishes a release date. */
     airedAt?: number
     /**
-     * The post exists but there is nothing to watch behind it — a countdown, a
-     * premium early-access window, a placeholder the site pre-created.
-     *
-     * Stored rather than dropped, and that is the whole point. Dropping it would
-     * make the episode "new" again on every single check, and re-announce it the
-     * moment it finally went live *and* every cycle in between. Kept with this
-     * flag, it is known — so the diff stays quiet — while every rule that asks
-     * "is there a new episode" skips it. When a later check finds it playable
-     * the flag comes off, and *that* transition is the release.
-     */
-    pending?: true
-    /** Why it is pending, for the UI and the log. Never load-bearing. */
-    pendingReason?: string
-    /**
      * Verified to have a video behind it, so it is never opened again.
      *
-     * The third state, and the reason there is one: absent means *unknown*, not
-     * available. Without the distinction, "already in the stored list" and
-     * "checked and fine" are the same value — and every episode stored before
-     * this existed reads as checked, so the check never runs on the library that
-     * needs it. See `verificationCandidates`.
+     * A memo, not a state anything has to respect: an episode in the list is an
+     * episode, and a reader that ignores this field entirely is still correct.
+     * That is the difference between this and the `pending` flag that used to sit
+     * beside it — see `verifiedEpisodes` in the library for why a post with
+     * nothing behind it is now simply not in the list.
+     *
+     * Absent means *unknown*, not unavailable. Without the distinction, "already
+     * in the stored list" and "checked and fine" are the same value — and every
+     * episode stored before this existed would read as checked, so the sweep
+     * would never run on the library that needs it. See `verificationCandidates`.
      */
     available?: true
 }

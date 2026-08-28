@@ -50,45 +50,28 @@ export function resumePositionFor(saved: EpisodeProgress | undefined): number | 
     return saved.positionSec
 }
 
-/**
- * Is there actually something to watch behind this episode?
+/*
+ * There is deliberately no `watchable(episode)` predicate here, and there was
+ * one. A post the site has created but not aired — a countdown, a premium
+ * window, a backdated placeholder — is not in the episode list at all; the check
+ * run drops it before storing (see `verifiedEpisodes`). Everything below can
+ * therefore treat every entry as a real episode.
  *
- * A site can publish the post before the video: a countdown widget where the
- * player goes, a premium early-access window, a placeholder pre-created with a
- * backdated timestamp. The post is real, the episode is not — and every question
- * the library asks about "the newest episode" means the newest *watchable* one.
- *
- * One predicate, used by all of them on purpose. The failure of getting this
- * wrong in one place only is silent and specific: the badge lights up, "watch
- * next" opens a page with no player, and the notification that brought you there
- * was for something that does not exist yet. Three separate `!ep.pending` tests
- * would be three chances for one of them to be forgotten.
+ * The version that kept such posts with a `pending` flag needed every reader of
+ * `anime.episodes` to remember to skip them, and the cost of that showed up
+ * exactly where you would expect: the player's own episode list forgot, so the
+ * next-episode arrow lit up for a countdown. A rule that has to be repeated at
+ * every call site is a rule that will be missed at one of them.
  */
-export function watchable(episode: Pick<Episode, "pending">): boolean {
-    return episode.pending !== true
-}
-
-/** The episodes that can actually be played, in the order given. */
-export function watchableEpisodes(episodes: Episode[]): Episode[] {
-    return episodes.filter(watchable)
-}
 
 export function titleOf(anime: Pick<TrackedAnime, "title" | "displayTitle">): string {
     return anime.displayTitle && anime.displayTitle.trim() !== "" ? anime.displayTitle : anime.title
 }
 
-/**
- * Highest *watchable* episode number the source currently lists, or null when it
- * lists none.
- *
- * Pending posts are skipped, which is what keeps a countdown out of the release
- * floor: a placeholder for episode 13 must not make the real episode 13 look
- * like something already seen when it finally airs.
- */
+/** Highest episode number the source currently lists, or null when it lists none. */
 export function latestEpisodeNumber(anime: Pick<TrackedAnime, "episodes">): number | null {
     let max: number | null = null
     for (const ep of anime.episodes) {
-        if (!watchable(ep)) continue
         if (max === null || ep.number > max) max = ep.number
     }
     return max
@@ -100,10 +83,9 @@ export function latestEpisodeNumber(anime: Pick<TrackedAnime, "episodes">): numb
  * comparison that AMR needs `chapPath` and `findProbableChapter` to survive.
  */
 export function unwatchedCount(anime: Pick<TrackedAnime, "episodes" | "lastWatched">): number {
-    const episodes = watchableEpisodes(anime.episodes)
-    if (!anime.lastWatched) return episodes.length
+    if (!anime.lastWatched) return anime.episodes.length
     const from = anime.lastWatched.number
-    return episodes.reduce((n, ep) => (ep.number > from ? n + 1 : n), 0)
+    return anime.episodes.reduce((n, ep) => (ep.number > from ? n + 1 : n), 0)
 }
 
 /**
@@ -135,18 +117,14 @@ export function nextEpisode(anime: Pick<TrackedAnime, "episodes" | "lastWatched"
     const lowest = (candidates: Episode[]) =>
         candidates.reduce<Episode | undefined>((lo, ep) => (!lo || ep.number < lo.number ? ep : lo), undefined)
 
-    const episodes = watchableEpisodes(anime.episodes)
     const from = anime.lastWatched?.number
-    if (from === undefined) return lowest(episodes)
-    return lowest(episodes.filter(ep => ep.number > from))
+    if (from === undefined) return lowest(anime.episodes)
+    return lowest(anime.episodes.filter(ep => ep.number > from))
 }
 
-/** The newest episode the source lists that can actually be played. */
+/** The newest episode the source lists. */
 export function latestEpisode(anime: Pick<TrackedAnime, "episodes">): Episode | undefined {
-    return watchableEpisodes(anime.episodes).reduce<Episode | undefined>(
-        (hi, ep) => (!hi || ep.number > hi.number ? ep : hi),
-        undefined
-    )
+    return anime.episodes.reduce<Episode | undefined>((hi, ep) => (!hi || ep.number > hi.number ? ep : hi), undefined)
 }
 
 /**
@@ -163,9 +141,7 @@ export type WatchState = "new" | "current" | "unstarted" | "paused"
 
 export function watchState(anime: Pick<TrackedAnime, "episodes" | "lastWatched" | "follow">): WatchState {
     if (!anime.follow) return "paused"
-    // A list of nothing but countdowns is a series with nothing to watch yet,
-    // which reads as "unstarted" rather than as an episode waiting for you.
-    if (watchableEpisodes(anime.episodes).length === 0) return "unstarted"
+    if (anime.episodes.length === 0) return "unstarted"
     if (unwatchedCount(anime) > 0) return "new"
     return "current"
 }
@@ -205,64 +181,45 @@ export function newReleases(options: {
         options.watchedUpTo ?? Number.NEGATIVE_INFINITY
     )
 
-    // A post with nothing behind it is not a release, whatever its number. It
-    // is announced later, by `wentLive`, at the moment it becomes watchable.
-    const real = watchableEpisodes(options.added)
-
     // Nothing to compare against — a series being seen for the first time. The
     // caller decides whether that is worth announcing; here everything counts.
-    if (!Number.isFinite(floor)) return real
+    if (!Number.isFinite(floor)) return options.added
 
-    return real.filter(episode => episode.number > floor)
+    return options.added.filter(episode => episode.number > floor)
 }
 
-/**
- * Episodes that were pending last time and are watchable now.
- *
- * This is the second half of `newReleases`, and it exists because the two halves
- * answer to different evidence. A countdown post is in the stored list from the
- * first check that saw it, so when the video finally goes up it is *not* in the
- * diff — nothing about the list changed. The only thing that changed is the
- * episode page, and this is the transition that reads it.
- *
- * Without it, suppressing the countdown would suppress the real episode too:
- * the placeholder would absorb the one announcement the episode was ever going
- * to get. That failure is worse than the notification being fixed here, because
- * it is silent — the episode simply never arrives.
- *
- * Matched by `progressKey`, not by array position: the list is re-fetched whole
- * and a site is free to reorder it, which luciferdonghua.in in fact does — its
- * placeholder is backdated, so it sorts below episode 1 until it goes live.
+/*
+ * `newReleases` is the only announcement path, and a countdown needs no second
+ * one. There was a `wentLive(previous, current)` here that announced an episode
+ * whose placeholder had finally got a video, and it was necessary only because
+ * the placeholder was in the stored list: when the video went up, nothing about
+ * the list changed, so the diff could not see it. Dropping the placeholder
+ * instead puts the transition back where it belongs — the episode is absent, then
+ * it is present, which is exactly what the diff is for.
  */
-export function wentLive(previous: Episode[], current: Episode[]): Episode[] {
-    const wasPending = new Set(previous.filter(ep => !watchable(ep)).map(episodeProgressKey))
-    if (wasPending.size === 0) return []
-    return current.filter(ep => watchable(ep) && wasPending.has(episodeProgressKey(ep)))
-}
 
 /**
  * Which episodes are worth opening to check whether they are real.
  *
  * Verification costs one request each, so this decides what that budget buys.
- * Three kinds qualify and nothing else does:
+ * Two kinds qualify and nothing else does:
  *
  *  - **the ones about to be announced.** A backfill is never announced, so
- *    confirming a two-year-old post has a player in it buys nothing.
- *  - **the ones already known to be pending.** These are the only episodes whose
- *    answer can *change*, and re-asking is the only way a countdown ever becomes
- *    a release. Skipping them would trade one wrong notification for a missing
- *    one, which is the worse failure — it is silent.
+ *    confirming a two-year-old post has a player in it buys nothing. This is
+ *    also what keeps re-checking a standing countdown: the placeholder was
+ *    dropped last time, so it is in the diff again, so it is a candidate again —
+ *    which is the only way it is ever noticed going live.
  *  - **the newest few nobody has ever asked about.** This is the one that is
  *    easy to leave out and useless without.
  *
  * That third clause is a repair, and it exists because the first version of this
  * shipped without it and fixed nothing. A library that already holds the
  * placeholder holds it as an ordinary episode: it is not in the diff, because
- * nothing about the list changed, and it carries no pending flag, because no
- * code had ever looked. Both other clauses came back empty and the countdown
- * stayed the newest episode — the feature worked perfectly on libraries that did
- * not have the problem. Same family as rule 11 in CLAUDE.md: new behaviour that
- * cannot reach the state already on disk.
+ * nothing about the list changed, and no code had ever looked at it. The other
+ * clause came back empty and the countdown stayed the newest episode — the
+ * feature worked perfectly on libraries that did not have the problem. Same
+ * family as rule 11 in CLAUDE.md: new behaviour that cannot reach the state
+ * already on disk.
  *
  * `available` is what stops that sweep repeating. Absent means *unknown*, so the
  * sweep runs once per episode and then never again; without the flag there is no
@@ -274,7 +231,7 @@ export function wentLive(previous: Episode[], current: Episode[]): Episode[] {
  * bites, the episodes it drops are the least likely to be placeholders.
  */
 export function verificationCandidates(options: {
-    /** The freshly fetched list, carrying whatever flags were kept. */
+    /** The freshly fetched list, carrying whatever `available` memos were kept. */
     episodes: Episode[]
     /** What would be announced if nothing were verified. */
     releases: Episode[]
@@ -283,7 +240,7 @@ export function verificationCandidates(options: {
     limit: number
 }): Episode[] {
     const byNumberDesc = (a: Episode, b: Episode) => b.number - a.number
-    const unknown = (ep: Episode) => ep.pending !== true && ep.available !== true
+    const unknown = (ep: Episode) => ep.available !== true
 
     const announced = new Set(options.releases.map(episodeProgressKey))
     const swept = new Set(
@@ -294,7 +251,6 @@ export function verificationCandidates(options: {
         // Settled, and settled the cheap way round: an episode with a player in
         // it does not lose it.
         if (ep.available === true) return false
-        if (ep.pending === true) return true
         const key = episodeProgressKey(ep)
         return announced.has(key) || swept.has(key)
     })
@@ -323,15 +279,17 @@ export function positionDrift(anime: Pick<TrackedAnime, "episodes" | "lastWatche
  *
  * **Two situations, one answer.** The episode is gone from the list — the site
  * renumbered, pulled a post, re-uploaded under a different number — or it is
- * still listed but has nothing behind it, a countdown or a placeholder. Either
- * way the pointer names something the viewer cannot be sitting at, and the
- * distinction between the two is invisible from where it matters: the row says
- * "Up to date" at an episode that does not exist, the badge stays dark, and
- * "watch next" returns nothing. Treating them alike is a deliberate choice, not
- * a shortcut — a rule that rolled back one and reported the other would leave
- * the same broken row half the time, for a difference the viewer cannot see.
+ * was a countdown all along and the check run has dropped it. Either way the
+ * pointer names something the viewer cannot be sitting at, and the distinction
+ * is invisible from where it matters: the row says "Up to date" at an episode
+ * that does not exist, the badge stays dark, and "watch next" returns nothing.
+ * Treating them alike is a deliberate choice, not a shortcut — a rule that
+ * rolled back one and reported the other would leave the same broken row half
+ * the time, for a difference the viewer cannot see. It is also the whole reason
+ * this needs no notion of a pending episode: a placeholder is simply not in the
+ * list, which is the first case.
  *
- * It falls back to the highest watchable episode *below* the one held, rather
+ * It falls back to the highest episode *below* the one held, rather
  * than to zero. AMR resets to zero and is right to for its own model — its
  * position **is** a chapter URL, so a path that disappeared means the position
  * is genuinely gone. Ours is a number and the episode list is evidence: the
@@ -355,11 +313,10 @@ export function pointerRollback(options: {
     if (held === undefined) return null
     if (options.episodes.length === 0) return null
 
-    const names = options.episodes.find(ep => ep.number === held)
-    if (names && watchable(names)) return null
+    if (options.episodes.some(ep => ep.number === held)) return null
 
     const below = options.episodes
-        .filter(ep => watchable(ep) && ep.number < held)
+        .filter(ep => ep.number < held)
         .reduce<number | null>((hi, ep) => (hi === null || ep.number > hi ? ep.number : hi), null)
 
     return { from: held, to: below }
