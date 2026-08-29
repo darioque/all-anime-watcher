@@ -22,6 +22,18 @@ export interface SeriesInfo {
     altTitles?: string[]
 }
 
+/**
+ * One way of naming a series: the id, and the page that groups it.
+ *
+ * A source normally has exactly one of these per series. Some have more — see
+ * `PageInfo.aliases`.
+ */
+export interface SeriesIdentity {
+    seriesId: string
+    /** The grouping page for that id, where the source can name one. */
+    seriesUrl?: string
+}
+
 /** What the content script learned by being on the page. */
 export interface PageInfo {
     /** Series title as shown on the episode page. */
@@ -33,6 +45,21 @@ export interface PageInfo {
     number: number
     variant?: Variant
     episodeUrl: string
+    /**
+     * Other identities *this page itself states* for the same series.
+     *
+     * `seriesId` above is the one identity the source picked; a page can carry
+     * more than one, and which one the library holds depends on where the series
+     * was added from. A myanime.live post is titled in English and tagged with
+     * the romanised Chinese name, so the same episode is both
+     * "a-record-of-a-mortals-journey-to-immortality" and
+     * "fan-ren-xiu-xian-chuan" — nothing about either string suggests the other.
+     *
+     * These are matched exactly, never fuzzily, which is what makes them safe to
+     * consult before `sameSeries`: the page is not being guessed about, it is
+     * being read. List every id the page names; the picked one may repeat.
+     */
+    aliases?: SeriesIdentity[]
 }
 
 /**

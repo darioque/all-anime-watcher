@@ -99,6 +99,11 @@ export class MyAnime implements AnimeSource {
      * "yi-nian-yong-heng-a-will-eternal". Without this the second kind of page
      * reports a followed series as unknown, and offers to follow it again.
      *
+     * This covers only the pair that *look* alike. Where the two names share no
+     * letters at all — an English slug against a romanised Chinese tag — nothing
+     * here can help and `PageInfo.aliases` carries the tag instead, which is both
+     * exact and asked first.
+     *
      * The bare call is the pure rule in `myanime.parse.ts` — a prefix relation
      * that refuses to cross a season marker — not this method.
      */
@@ -188,7 +193,8 @@ export class MyAnime implements AnimeSource {
 
         const fromSlug = seriesSlugOf(postSlug)
         const fromTitle = seriesTitleOf(pageTitle)
-        const tag = this.postTags($).find(candidate => postSlug.startsWith(candidate.slug))
+        const tags = this.postTags($)
+        const tag = tags.find(candidate => postSlug.startsWith(candidate.slug))
 
         /*
          * Not used: the post's own "All Episodes" button.
@@ -218,13 +224,33 @@ export class MyAnime implements AnimeSource {
             throw new Error(`${url} does not say which episode it is`)
         }
 
+        /*
+         * Every tag on the post, as a second name for this series.
+         *
+         * The id above comes from the slug wherever the slug names an episode,
+         * and a post's slug is its English title while its tag is the romanised
+         * Chinese one: "a-record-of-a-mortals-journey-to-immortality" against
+         * "fan-ren-xiu-xian-chuan". Whichever a series was added under, the other
+         * kind of page has to be able to find it, and only the page knows both.
+         *
+         * Unfiltered on purpose. The tag whose slug prefixes the post slug is the
+         * one trusted to *name* the series above; a tag that fails that test is
+         * exactly the case this exists for, and there is nothing to weigh — an
+         * alias only ever matches a series someone already chose to follow.
+         */
+        const aliases = tags.map(candidate => ({
+            seriesId: candidate.slug,
+            seriesUrl: `${ctx.baseUrl}/tag/${candidate.slug}/`
+        }))
+
         return {
             title,
             seriesId,
             seriesUrl,
             number,
             variant: "sub",
-            episodeUrl: url
+            episodeUrl: url,
+            ...(aliases.length > 0 ? { aliases } : {})
         }
     }
 

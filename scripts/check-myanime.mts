@@ -228,5 +228,80 @@ eq(
     bar.key
 )
 
+console.log("\n\x1b[1mtwo names that share no letters\x1b[0m\n")
+
+/*
+ * The real entry and the real page that exposed the rest of it, on 2026-08-29.
+ *
+ * The prefix rule above fixed the case where the two ids look alike. This is the
+ * same bug where they do not: the post's slug is the English title and the post's
+ * tag is the romanised Chinese one, and the library holds the tag. No rule over
+ * the two strings could join them — but the page names both, so it is asked.
+ */
+const mortal = {
+    key: "myanime/fan-ren-xiu-xian-chuan",
+    seriesId: "fan-ren-xiu-xian-chuan",
+    url: "https://myanime.live/tag/fan-ren-xiu-xian-chuan/"
+}
+const mortalPage = {
+    seriesId: "a-record-of-a-mortals-journey-to-immortality",
+    seriesUrl: "https://myanime.live/?s=A%20Record%20of%20a%20Mortals%20Journey%20to%20Immortality",
+    aliases: [
+        {
+            seriesId: "fan-ren-xiu-xian-chuan",
+            seriesUrl: "https://myanime.live/tag/fan-ren-xiu-xian-chuan/"
+        }
+    ]
+}
+
+eq("the page's own tag finds the followed entry", findFollowed([mortal], mortalPage, sameSeries)?.key, mortal.key)
+eq("and it does not need the source's opinion to do it", findFollowed([mortal], mortalPage)?.key, mortal.key)
+
+/* What the earlier fix could do, pinned: nothing. This is the miss it left. */
+const { aliases: _mortalAliases, ...mortalPageWithoutTag } = mortalPage
+eq(
+    "without the alias no rule can bridge the two names",
+    findFollowed([mortal], mortalPageWithoutTag, sameSeries),
+    undefined
+)
+
+/* Aliases are read, not guessed, so they are matched exactly — seasons included. */
+eq(
+    "an alias is exact, so a season is still not its parent",
+    findFollowed(
+        [tdg],
+        {
+            seriesId: "unrelated",
+            seriesUrl: "https://myanime.live/?s=Unrelated",
+            aliases: [{ seriesId: "tales-of-demons-and-gods-10th-season" }]
+        },
+        sameSeries
+    ),
+    undefined
+)
+
+/* Strength order holds across the whole set: the picked id outranks any alias. */
+eq(
+    "the id the page picked wins over its own aliases",
+    findFollowed(
+        [mortal, { key: "myanime/english", seriesId: mortalPage.seriesId, url: "https://myanime.live/?s=x" }],
+        mortalPage,
+        sameSeries
+    )?.key,
+    "myanime/english"
+)
+eq(
+    "and every exact id outranks the source's inexact opinion",
+    findFollowed(
+        [
+            { key: "myanime/prefix", seriesId: "wan-jie-du-zun", url: "https://myanime.live/?s=Wan%20Jie%20Du%20Zun" },
+            mortal
+        ],
+        { ...mortalPage, seriesId: "wan-jie-du-zun-ten-thousand-worlds" },
+        sameSeries
+    )?.key,
+    mortal.key
+)
+
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)
