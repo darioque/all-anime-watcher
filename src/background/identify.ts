@@ -147,6 +147,7 @@ export async function identifyEpisode(options: {
             markOnEmbed: resolve("markWatchedOnEmbed", where),
             markOnOpen: marks && timing !== "never",
             markedOnOpen: markedHere,
+            recoverStalledPlayback: resolve("recoverStalledPlayback", where),
             pending,
             ...(availability?.reason ? { pendingReason: availability.reason } : {})
         }

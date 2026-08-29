@@ -58,6 +58,13 @@ export interface PageIdentity {
      */
     markedOnOpen?: boolean
     /**
+     * Whether a fatal error mid-playback is a hiccup to ride out or a dead
+     * server. Resolved here with the rest of them, so the player never has to
+     * know the settings chain — and so the in-place episode swap picks up the
+     * series' own answer along with its new identity.
+     */
+    recoverStalledPlayback?: boolean
+    /**
      * The source recognised this page as posted-but-not-watchable: a countdown,
      * a premium window, a placeholder. The player says so instead of walking
      * five servers that each resolve to nothing.

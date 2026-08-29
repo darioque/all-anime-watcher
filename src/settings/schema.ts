@@ -75,6 +75,18 @@ export interface GlobalSettings {
     /** Fraction of the episode that counts as watched. */
     completionThreshold: number
     autoAdvance: boolean
+    /**
+     * Treat a fatal mid-playback error as a hiccup to recover from rather than a
+     * dead server.
+     *
+     * On by default, and the default is the fix: hls.js reports a stalled buffer
+     * or an exhausted segment retry as "fatal", and taking that at face value is
+     * what made a working server jump to the next one three minutes into an
+     * episode. Off restores the old behaviour, which is the right answer for
+     * someone whose sites are more reliable than their connection and who would
+     * rather change server than wait.
+     */
+    recoverStalledPlayback: boolean
     skipIntro: "off" | "button" | "auto"
     skipOutro: "off" | "button" | "auto"
     /** How often the player reports position back to the background. */
@@ -163,6 +175,8 @@ export interface SourceSettings {
     preferredServers?: string[]
     variantPref?: Variant
     subtitleLanguages?: string[]
+    /** Some sites' CDNs stall routinely; whether to ride it out is per-site. */
+    recoverStalledPlayback?: boolean
     notifyNewEpisode?: boolean
     /** Per-source politeness, overriding sourceRequestDelaySec. */
     sourceRequestDelaySec?: number
@@ -199,6 +213,7 @@ export function defaultSettings(): GlobalSettings {
         subtitleLanguages: ["en"],
         completionThreshold: 0.85,
         autoAdvance: true,
+        recoverStalledPlayback: true,
         skipIntro: "button",
         skipOutro: "button",
         progressTickSec: 5,

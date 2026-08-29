@@ -61,8 +61,6 @@ export async function considerUrl(url: string, tabId: number): Promise<void> {
         return
     }
 
-    logger.info(`${source.id}: episode page detected, injecting — ${url}`)
-
     try {
         // Bail if we are already in this tab. The content script sets the marker,
         // so an SPA route change reuses the existing instance instead of stacking.
@@ -72,6 +70,14 @@ export async function considerUrl(url: string, tabId: number): Promise<void> {
         })
 
         if (already?.result === true) {
+            /*
+             * Said apart from the injection line on purpose. Both used to log
+             * "injecting", so a site that fires a stray history event produced
+             * two identical lines and looked like a double injection — which is
+             * how a real duplicate would look too, leaving nothing to tell them
+             * apart in the one place anyone goes looking.
+             */
+            logger.debug(`${source.id}: already injected here, re-identifying — ${url}`)
             await browser.scripting.executeScript({
                 target: { tabId },
                 func: () => {
@@ -82,6 +88,7 @@ export async function considerUrl(url: string, tabId: number): Promise<void> {
             return
         }
 
+        logger.info(`${source.id}: episode page detected, injecting — ${url}`)
         await browser.scripting.executeScript({ target: { tabId }, files: ["content.js"] })
     } catch (error) {
         logger.warn(`injection failed in tab ${tabId}`, error)

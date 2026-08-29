@@ -20,6 +20,11 @@ const SOURCE_OVERRIDES = [
         key: "verifyNewEpisodes" as const,
         label: "Check a new episode is really out",
         help: "Opens the episode page once before announcing it. Worth turning off for a site that never posts early — the check is a wasted request there."
+    },
+    {
+        key: "recoverStalledPlayback" as const,
+        label: "Ride out a stream that stalls",
+        help: "Whose CDNs stall is a fact about the site. A stream that has been playing and then stumbles is reloaded where it stopped before the next server is tried."
     }
 ] satisfies { key: keyof SourceSettings; label: string; help: string }[]
 

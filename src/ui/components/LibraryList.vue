@@ -434,6 +434,11 @@ const TRACKING_OVERRIDES = [
         key: "verifyNewEpisodes" as const,
         label: "Check a new episode is really out",
         help: "Opens the episode page once before announcing it. A page with only a countdown is announced later, when it goes live."
+    },
+    {
+        key: "recoverStalledPlayback" as const,
+        label: "Ride out a stream that stalls",
+        help: "A stream that has been playing and then stumbles is reloaded where it stopped, a few times, before the next server is tried."
     }
 ] satisfies { key: keyof GlobalSettings & keyof TrackedAnime["overrides"]; label: string; help: string }[]
 

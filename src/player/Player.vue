@@ -10,6 +10,7 @@ import { progressKey, resumePositionFor } from "~/model/keys"
 import { automaticCategoriesOf, categoriesOf } from "~/library/categories"
 import type { Category, SourceCategories } from "~/library/categories"
 import type { Stream } from "~/extractors/types"
+import { decideFatal, fatalKind, MAX_RECOVERIES, STARTED_AFTER_SEC } from "~/shared/playback"
 import { BackgroundLoader } from "./backgroundLoader"
 import { loadTrack, releaseTracks, type LoadedTrack } from "./subtitles"
 
@@ -50,6 +51,51 @@ const servers = ref<Server[]>(props.identity.servers ?? [])
 const activeServer = ref<number>(-1)
 /** Servers that already failed this session, so fallback doesn't loop over them. */
 const failedServers = ref(new Set<number>())
+
+/*
+ * Recovery bookkeeping for the stream attached right now.
+ *
+ * Plain `let`s rather than refs: nothing renders them, and a ref that nothing
+ * renders is a ref that will eventually be read one tick late. The rule that
+ * consumes them is `decideFatal` in `~/shared/playback`, which is where the
+ * reasoning lives; these are only the three facts it cannot work out for itself.
+ */
+
+/** When the current stream first showed a picture. 0 while it never has. */
+let streamPlayingSince = 0
+/** Recoveries spent on the current stream since the last time it settled. */
+let recoveries = 0
+/** When the last recovery was attempted, so a clean run can earn the budget back. */
+let lastRecoveryAt = 0
+/**
+ * Where the picture was when the stream we just left stopped.
+ *
+ * `restorePosition` otherwise asks the library, which is the right source on a
+ * fresh page load and the wrong one here: an unfollowed series has no stored
+ * progress at all, so changing server mid-episode dropped the viewer back to
+ * the start of it.
+ */
+let resumeAt: number | null = null
+
+/** Seconds the current stream has been showing a picture. */
+function playedOnStream(): number {
+    return streamPlayingSince === 0 ? 0 : (Date.now() - streamPlayingSince) / 1000
+}
+
+/**
+ * The stream is showing a picture.
+ *
+ * This one flag is what separates "this server cannot play" from "this server
+ * hiccuped", and every fatal error is read differently on either side of it.
+ */
+function onPlaying() {
+    if (streamPlayingSince === 0) streamPlayingSince = Date.now()
+}
+
+function rememberPosition() {
+    const at = video.value?.currentTime
+    if (typeof at === "number" && Number.isFinite(at) && at > 0) resumeAt = at
+}
 /**
  * Whether this episode's on-open mark has been spent.
  *
@@ -164,6 +210,10 @@ async function swapTo(episode: Episode, identity: PageIdentity) {
     skipped.value = new Set()
     inSkip.value = null
     lastReported = -1
+    recoveries = 0
+    lastRecoveryAt = 0
+    streamPlayingSince = 0
+    resumeAt = null
     prepared.value = null
     openMarkSpent.value = false
     status.value = "resolving"
@@ -274,6 +324,8 @@ async function playServer(index: number, auto = false): Promise<void> {
     if (!server || !info.value || !current.value.sourceId) return
 
     activeServer.value = index
+    recoveries = 0
+    lastRecoveryAt = 0
     status.value = "resolving"
     message.value = auto ? `Trying ${server.name}…` : `Resolving ${server.name}…`
     teardown()
@@ -379,6 +431,11 @@ async function attach(stream: Stream, index: number, viaProxy = false) {
 
     embedded.value = null
 
+    // A fresh attach has shown nothing yet, re-attach through the proxy
+    // included. The recovery *budget* deliberately survives that re-attach —
+    // moving a stream onto the proxy is one of the attempts.
+    streamPlayingSince = 0
+
     const element = video.value
     if (!element) return
 
@@ -386,7 +443,32 @@ async function attach(stream: Stream, index: number, viaProxy = false) {
         // A progressive file plays straight from the element; a DNR rule
         // supplies whatever Referer the file host insists on.
         element.onerror = () => {
+            const played = playedOnStream()
+
+            /*
+             * A file that played and then broke gets the same benefit of the
+             * doubt as a stalled HLS stream: reload it where it stopped rather
+             * than condemning a server that was working a second ago.
+             */
+            const canRecover =
+                played >= STARTED_AFTER_SEC &&
+                recoveries < MAX_RECOVERIES &&
+                current.value.recoverStalledPlayback !== false
+            if (canRecover) {
+                recoveries += 1
+                lastRecoveryAt = Date.now()
+                rememberPosition()
+                streamPlayingSince = 0
+                console.debug(
+                    `[AAW] ${stream.url} broke after ${Math.round(played)}s of playback; reloading it in place`
+                )
+                element.addEventListener("loadedmetadata", () => void restorePosition(), { once: true })
+                element.src = stream.url
+                return
+            }
+
             failedServers.value = new Set(failedServers.value).add(index)
+            rememberPosition()
             void tryNextServer(`media error on ${stream.url}`).then(moved => {
                 if (moved) return
                 status.value = "error"
@@ -431,30 +513,58 @@ async function attach(stream: Stream, index: number, viaProxy = false) {
         currentLevel.value = data.level
     })
 
+    /*
+     * "Fatal" is hls.js's word for "I have stopped", not for "this stream is
+     * dead". A buffer its nudge loop could not clear, or a fragment whose
+     * retries ran out, arrives here fatal and is recoverable in place — and
+     * treating every one of them as a verdict on the server is what walked a
+     * viewer three minutes into an episode onto a different server, and then
+     * onto a third, on a stream that was fine. The rule lives in
+     * `~/shared/playback` so it can be reasoned about and checked; this only
+     * carries it out.
+     */
     instance.on(Hls.Events.ERROR, (_event, data) => {
         if (!data.fatal) return
         const detail = `${data.details}${data.response?.code ? ` (HTTP ${data.response.code})` : ""}`
+        const name = servers.value[index]?.name ?? `server ${index}`
 
-        /*
-         * Escalate to the proxy before giving up on the server.
-         *
-         * Loading straight from the page is the fast path — no base64 round trip
-         * per segment — but it only works where the CDN accepts what the page
-         * sends. A header rewrite the extension installs may not reach a request
-         * the page makes itself, and the symptom is a 403 that looks exactly
-         * like a dead server. One retry through the background settles which it
-         * was, and costs a second on a stream that was going to fail anyway.
-         */
-        if (!viaProxy && stream.fetchVia !== "background") {
-            console.debug(
-                `[AAW] ${detail} loading directly; retrying "${servers.value[index]?.name}" through the proxy`
-            )
-            teardown()
-            void attach({ ...stream, fetchVia: "background" }, index, true)
-            return
+        const decision = decideFatal({
+            kind: fatalKind(data.type),
+            playedSec: playedOnStream(),
+            attempts: recoveries,
+            sinceLastRecoveryMs: lastRecoveryAt === 0 ? Number.POSITIVE_INFINITY : Date.now() - lastRecoveryAt,
+            viaProxy,
+            proxyRequested: stream.fetchVia === "background",
+            recoverEnabled: current.value.recoverStalledPlayback !== false
+        })
+
+        recoveries = decision.attempts
+        if (decision.remedy.do !== "nextServer") lastRecoveryAt = Date.now()
+        console.debug(`[AAW] ${name}: ${detail} — ${decision.reason}`)
+
+        switch (decision.remedy.do) {
+            case "recoverMedia":
+                // Swapping the codec is hls.js's own second move when a flush
+                // alone does not clear it; doing it first would break streams a
+                // plain recovery would have fixed.
+                if (decision.remedy.swapAudioCodec) instance.swapAudioCodec()
+                instance.recoverMediaError()
+                return
+
+            case "restartLoad":
+                // From where the picture is, not from the top.
+                instance.startLoad(video.value?.currentTime ?? -1)
+                return
+
+            case "viaProxy":
+                rememberPosition()
+                teardown()
+                void attach({ ...stream, fetchVia: "background" }, index, true)
+                return
         }
 
-        failedServers.value = new Set(failedServers.value).add(index)
+        if (decision.markFailed) failedServers.value = new Set(failedServers.value).add(index)
+        rememberPosition()
         void tryNextServer(detail).then(moved => {
             if (moved) return
             status.value = "error"
@@ -843,12 +953,26 @@ async function setShelf(categoryId: string, on: boolean) {
 
 /** Resume where the viewer left off, if they were more than a few seconds in. */
 async function restorePosition() {
-    if (!trackedKey.value || !info.value || !video.value) return
+    const element = video.value
+    if (!element) return
+
+    /*
+     * A position carried over from the stream we just left wins. It is exact,
+     * where the library's is up to a progress tick old, and it exists for an
+     * unfollowed series, where the library's does not.
+     */
+    if (resumeAt !== null) {
+        element.currentTime = resumeAt
+        resumeAt = null
+        return
+    }
+
+    if (!trackedKey.value || !info.value) return
     try {
         const anime = await send("library:get", { key: trackedKey.value })
         const saved = anime?.progress?.[progressKey(info.value.number, info.value.variant)]
         const at = resumePositionFor(saved)
-        if (at !== null) video.value.currentTime = at
+        if (at !== null) element.currentTime = at
     } catch {
         // A failed resume is not worth interrupting playback over.
     }
@@ -1133,6 +1257,7 @@ onBeforeUnmount(() => {
                 playsinline
                 autoplay
                 @ended="onEnded"
+                @playing="onPlaying"
                 @timeupdate="checkSkip"
             >
                 <track

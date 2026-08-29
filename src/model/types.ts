@@ -74,6 +74,7 @@ export interface AnimeOverrides {
     skipIntro?: "off" | "button" | "auto"
     skipOutro?: "off" | "button" | "auto"
     autoAdvance?: boolean
+    recoverStalledPlayback?: boolean
     completionThreshold?: number
     markWatchedOnOpen?: boolean
     markWatchedOnEmbed?: boolean

@@ -32,6 +32,19 @@ if (globals[MARKER]) {
 }
 
 let lastHandledUrl = ""
+/**
+ * A run is already under way.
+ *
+ * Identification is a round trip to the background that reads the episode list,
+ * the server list and then resolves a server — a second or two, and every bit of
+ * it network. `isPlayerMounted()` only becomes true at the very end of that, so
+ * the guard below used to let a route hook arriving *during* the round trip
+ * straight through: same URL, no player yet. anikoto fires one, which is why its
+ * logs show every `ajax/*` call and every resolved stream exactly twice, and why
+ * a player that had just started was replaced by a second one built from the
+ * same page.
+ */
+let identifying = false
 
 /**
  * The player moved to another episode in place.
@@ -48,9 +61,18 @@ function adoptUrl(url: string) {
 
 async function identify() {
     const url = location.href
-    if (url === lastHandledUrl && isPlayerMounted()) return
+    if (url === lastHandledUrl && (isPlayerMounted() || identifying)) return
     lastHandledUrl = url
+    identifying = true
+    try {
+        await identifyNow()
+    } finally {
+        identifying = false
+    }
+}
 
+async function identifyNow() {
+    const url = location.href
     await waitForBody()
 
     // Read the DOM before taking it over — the server list is in the page.

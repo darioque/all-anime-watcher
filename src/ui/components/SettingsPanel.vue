@@ -151,6 +151,12 @@ const GROUPS: { id: string; title: string; note?: string; fields: Field[] }[] = 
             },
             { key: "autoAdvance", label: "Play the next episode automatically", type: "toggle" },
             {
+                key: "recoverStalledPlayback",
+                label: "Ride out a stream that stalls",
+                help: "A stream that has been playing and then stumbles is reloaded where it stopped, a few times, before the next server is tried. Off changes server on the first stumble.",
+                type: "toggle"
+            },
+            {
                 key: "skipIntro",
                 label: "Opening",
                 help: "Timings come from the site when it publishes them, otherwise from AniSkip — which needs the series matched on AniList.",
