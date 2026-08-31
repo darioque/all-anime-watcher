@@ -26,7 +26,8 @@ const SECTIONS = [
     { id: "interface", label: "Interface" },
     { id: "sources", label: "Sources", apart: true },
     { id: "backup", label: "Backup" },
-    { id: "lab", label: "Lab" }
+    { id: "lab", label: "Lab" },
+    { id: "database", label: "Database" }
 ] as const
 
 type SectionId = (typeof SECTIONS)[number]["id"]

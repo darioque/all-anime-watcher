@@ -540,6 +540,35 @@ async function checkAll() {
 
 const open = (url: string) => void send("tab:open", { url })
 
+/**
+ * AMR's Debug item, which copies the manga object — with the piece AMR does not
+ * need. A manga's behaviour is mostly in the manga; a series' behaviour is
+ * decided three levels up (`resolve()`), so an entry pasted on its own cannot
+ * explain why it never notified, or why the player was replaced, or why it is
+ * checked every six hours. The report carries the resolved settings beside the
+ * entry, and the build version, which is otherwise unanswerable from a paste.
+ */
+async function copyDebugReport(a: TrackedAnime) {
+    let text: string
+    try {
+        text = JSON.stringify(await send("debug:report", { key: a.key }), null, 2)
+    } catch (e) {
+        error.value = e instanceof Error ? e.message : String(e)
+        return
+    }
+    try {
+        await navigator.clipboard.writeText(text)
+        flash(`Debug report for ${titleOf(a)} copied — ${text.length.toLocaleString()} characters`)
+    } catch {
+        // The report exists and the clipboard refused it — which a popup makes
+        // easy, since a write is denied the moment the page loses focus. Losing
+        // the payload is the worst outcome available; the console is a poor
+        // second place but it is a place.
+        console.info(text)
+        flash("The clipboard refused it — the report is in this page's console instead")
+    }
+}
+
 /** The full library owns the search panel; the popup is too narrow for results. */
 function openSearch() {
     if (props.variant !== "page") {
@@ -659,6 +688,11 @@ function menuFor(a: TrackedAnime): MenuItem[] {
             action: () => (trackerFor.value = a)
         },
         { label: "Open series page", action: () => open(a.url) },
+        {
+            label: "Copy debug report",
+            hint: "The stored entry, plus every setting in force for it",
+            action: () => void copyDebugReport(a)
+        },
         {
             label: "Reset watch status",
             disabled: !a.lastWatched,

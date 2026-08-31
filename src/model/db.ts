@@ -107,6 +107,19 @@ export async function putSourceState(state: SourceState): Promise<void> {
     await (await db()).put("sourceState", state)
 }
 
+/**
+ * Only the Database page does this. Dropping the row is not "reset this source"
+ * — it forgets the host the site was last found at, and the next resolution
+ * starts from the source's own `domains[0]` again.
+ */
+export async function deleteSourceState(sourceId: string): Promise<void> {
+    await (await db()).delete("sourceState", sourceId)
+}
+
+export async function countSourceState(): Promise<number> {
+    return (await db()).count("sourceState")
+}
+
 /** Wipe everything. Used by import-replace and by the debug page. */
 export async function clearAll(): Promise<void> {
     const database = await db()

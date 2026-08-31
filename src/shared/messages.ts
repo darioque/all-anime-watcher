@@ -7,6 +7,7 @@ import type { AnimeOverrides, SchedulePolicy, TrackedAnime } from "~/model/types
 import type { ImportMode, ImportSummary } from "~/model/backup"
 import type { DownloadJob, DownloadProgress, FetchPlan } from "~/downloads/types"
 import type { LabFetchReport, LabSeriesReport } from "~/lab/types"
+import type { DebugReport, Row, StoreId } from "~/model/inspect"
 import type { SearchResult } from "~/sources/types"
 
 /** A source as the UI sees it — no functions, safe to structured-clone. */
@@ -303,6 +304,22 @@ export interface MessageMap {
             removeHeaders: string[]
         }[]
     }
+
+    /*
+     * The Database page: the stored state, unformatted and editable.
+     *
+     * Routed through the background rather than opening IndexedDB in the page —
+     * which is what AMR's equivalent does — because a write here has to reach
+     * everything else. An edit made behind the background's back leaves an open
+     * library tab showing the old value, which defeats a page whose whole job is
+     * showing what is really stored.
+     */
+    "db:stores": { req: Record<string, never>; res: { id: StoreId; count: number }[] }
+    "db:rows": { req: { store: StoreId }; res: Row[] }
+    "db:put": { req: { store: StoreId; row: Row }; res: boolean }
+    "db:delete": { req: { store: StoreId; keys: string[] }; res: number }
+    /** One series and everything that decides how it behaves. Goes to the clipboard. */
+    "debug:report": { req: { key: string }; res: DebugReport }
 
     "tab:open": { req: { url: string; active?: boolean }; res: boolean }
     "tab:openLibrary": { req: Record<string, never>; res: boolean }

@@ -57,7 +57,8 @@ export default defineConfig({
                 popup: resolve(root, "src/ui/popup/index.html"),
                 library: resolve(root, "src/ui/library/index.html"),
                 offscreen: resolve(root, "src/offscreen/index.html"),
-                lab: resolve(root, "src/ui/lab/index.html")
+                lab: resolve(root, "src/ui/lab/index.html"),
+                db: resolve(root, "src/ui/db/index.html")
             },
             output: {
                 entryFileNames: "[name].js",

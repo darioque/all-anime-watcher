@@ -10,6 +10,7 @@ import { registerTrackerHandlers } from "./handlers/tracker"
 import { registerBackupHandlers } from "./handlers/backup"
 import { registerDownloadHandlers, resumeInterruptedDownloads } from "./downloads"
 import { registerLabHandlers } from "./handlers/lab"
+import { registerDbHandlers } from "./handlers/db"
 import { installRules } from "./dnr"
 import { installScheduler } from "./scheduler"
 import { installNotificationListeners } from "./notifications"
@@ -64,6 +65,7 @@ registerTrackerHandlers()
 registerBackupHandlers()
 registerDownloadHandlers()
 registerLabHandlers()
+registerDbHandlers()
 
 /**
  * Offer built-in shelves added since this profile was set up.

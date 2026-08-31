@@ -10,6 +10,11 @@ function openLab() {
     void send("tab:open", { url: browser.runtime.getURL("src/ui/lab/index.html"), active: true })
 }
 
+/** Also its own tab: reading raw rows next to a 380px popup is not a thing. */
+function openDb() {
+    void send("tab:open", { url: browser.runtime.getURL("src/ui/db/index.html"), active: true })
+}
+
 /**
  * One section at a time, chosen by the dialog around it.
  *
@@ -406,6 +411,23 @@ onMounted(load)
                     </div>
                     <div class="control">
                         <button id="open-lab" class="btn" @click="openLab">Open</button>
+                    </div>
+                </div>
+            </div>
+
+            <div v-if="props.section === 'database'" class="group">
+                <h3>Database</h3>
+                <p class="note">
+                    Everything the extension has stored, as it is stored: the library, each site's resolved domain, and
+                    the settings themselves. Rows are editable JSON. It is the place to look when the library page and
+                    the truth have drifted apart — and the place to copy a series' debug report from.
+                </p>
+                <div class="field">
+                    <div class="text">
+                        <label for="open-db">Open the Database</label>
+                    </div>
+                    <div class="control">
+                        <button id="open-db" class="btn" @click="openDb">Open</button>
                     </div>
                 </div>
             </div>

@@ -174,6 +174,7 @@ src/
   extractors/            embed URL → playable streams (shared across sources)
   net/                   fetch with the escalation ladder behind one interface
   ui/popup/              Vue 3, no UI framework
+  ui/db/                 the Database page; model/inspect.ts holds its pure half
 scripts/probe-source.mts the CLI Lab page
 ```
 
@@ -347,6 +348,37 @@ A row shows **one** action button (the watch button); everything else lives in
 its `⋯` menu, and destructive actions go behind a `ConfirmDialog`. A row of six
 buttons stops being scannable the moment the library is real, and Remove should
 never sit next to Refresh.
+
+**The Database page (`src/ui/db/`) shows the stored state, unformatted.** It is
+AMR's Database Manager — store tabs, search, a table, JSON view/edit/delete —
+with two departures.
+
+- **`storage.local` is a store here too**, alongside the two IndexedDB ones.
+  Half of AAW's state lives there (settings, per-source settings, the download
+  queue), and rules 10 and 11 above are both about a settings value that was
+  wrong in a way nothing in the UI could show. Its rows are wrapped as
+  `{ key, value }` so a store of single objects has rows like any other.
+- **It goes through the router, not straight at IndexedDB** the way AMR's does.
+  A write has to reach the rest of the extension, or an open library tab keeps
+  showing the old value — which defeats a page whose whole job is showing what is
+  really there. `handlers/db.ts` broadcasts `libraryChanged` after a write.
+
+The judgement it makes about untyped rows — which are epochs, how a value fits in
+a cell, whether an edit is a legal row — is in `model/inspect.ts`, pure and
+covered by `npm run check:inspect`. **`0` is not an epoch there**: it is this
+codebase's "never" (`lastCheckedAt`) and "as soon as convenient" (`nextCheckAt`),
+and rendering it as 1 January 1970 turns two normal states into alarming ones.
+
+**"Copy debug report" in the row menu is AMR's Debug item plus the settings
+chain.** AMR copies the manga object, which is nearly the whole story there. Here
+it is not: behaviour is decided three levels up (rule 5), so an entry pasted on
+its own cannot explain why a series never notified or why the player was
+replaced. `debug:report` answers with the entry, the source's state and settings,
+every chained setting as `resolve()` actually resolves it, and the build version
+— which is otherwise unanswerable from a paste. `CHAINED_SETTINGS` in
+`model/inspect.ts` carries a compile-time proof that it covers every key of
+`AnimeOverrides` and `SourceSettings`, so adding an override and forgetting the
+report is a type error rather than a silently thinner report.
 
 **Testing notifications is awkward and there is no shortcut, so do not go looking
 for one.** You cannot make a site publish an episode, and **nothing in the UI
