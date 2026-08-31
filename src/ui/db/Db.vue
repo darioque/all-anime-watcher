@@ -4,6 +4,7 @@ import { send } from "~/shared/messages"
 import {
     STORES,
     cellText,
+    columnFields,
     extraFields,
     filterRows,
     formatEpoch,
@@ -18,6 +19,7 @@ import {
 } from "~/model/inspect"
 import type { TrackedAnime } from "~/model/types"
 import ConfirmDialog from "~/ui/components/ConfirmDialog.vue"
+import RowMenu, { type MenuItem } from "~/ui/components/RowMenu.vue"
 
 /**
  * Everything the extension has stored, unformatted.
@@ -55,6 +57,7 @@ const toast = ref<{ text: string; bad: boolean } | null>(null)
 let toastTimer: number | undefined
 
 const spec = computed(() => storeSpec(active.value))
+const fields = computed(() => columnFields(spec.value))
 const extras = computed(() => extraFields(spec.value, rows.value))
 
 /** Filter, then sort — so the sort is over what you can see, not what you can't. */
@@ -96,6 +99,30 @@ function sortBy(name: string) {
         sortField.value = name
         sortDescending.value = false
     }
+}
+
+/**
+ * Everything that isn't opening the row, in the `⋯` menu the rest of this
+ * extension already uses — same reasoning as the library list, and the same
+ * reason it went in here: four buttons per row is a column wide enough to cost
+ * the data columns the room they needed, for actions used once a session.
+ */
+function menuFor(row: Row): MenuItem[] {
+    const key = keyOf(row)
+    return [
+        { label: "Edit as JSON", action: () => openRow(row, "edit") },
+        { label: "Copy row", action: () => void copy(JSON.stringify(row, null, 2), "Row") },
+        ...(active.value === "anime"
+            ? [
+                  {
+                      label: "Copy debug report",
+                      hint: "The entry, plus every setting in force for it",
+                      action: () => void copyDebugReport(key)
+                  }
+              ]
+            : []),
+        { label: "Delete", danger: true, separated: true, action: () => (pendingDelete.value = [key]) }
+    ]
 }
 
 // ---------------------------------------------------------------- loading
@@ -258,7 +285,7 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKey))
                 <input v-model="query" placeholder="Search rows" aria-label="Search rows" />
                 <select v-model="field" aria-label="Field to search">
                     <option value="*">Every field</option>
-                    <option v-for="name in spec.columns" :key="name" :value="name">{{ name }}</option>
+                    <option v-for="name in fields" :key="name" :value="name">{{ name }}</option>
                 </select>
                 <button class="btn" :disabled="loading" @click="load">{{ loading ? "Loading…" : "Reload" }}</button>
                 <button class="btn" @click="newRow">New row</button>
@@ -283,6 +310,17 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKey))
 
         <div class="sheet">
             <table>
+                <!--
+                    Widths declared, because the table is laid out `fixed` and
+                    will not work them out from the content. That is the point:
+                    one series whose URL runs to 300 characters is enough to push
+                    every other column off the side of an automatic table.
+                -->
+                <colgroup>
+                    <col class="tick" />
+                    <col v-for="column in spec.columns" :key="column.field" :style="{ width: `${column.percent}%` }" />
+                    <col class="acts" />
+                </colgroup>
                 <thead>
                     <tr>
                         <th class="tick">
@@ -293,20 +331,35 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKey))
                                 @change="toggleAll"
                             />
                         </th>
-                        <th v-for="name in spec.columns" :key="name" :class="{ sorted: sortField === name }">
-                            <button class="sort" @click="sortBy(name)">
-                                {{ name }}
-                                <span v-if="sortField === name" aria-hidden="true">{{
+                        <th
+                            v-for="column in spec.columns"
+                            :key="column.field"
+                            :class="{ sorted: sortField === column.field }"
+                        >
+                            <button class="sort" @click="sortBy(column.field)">
+                                <span class="label">{{ column.field }}</span>
+                                <span v-if="sortField === column.field" aria-hidden="true">{{
                                     sortDescending ? "▾" : "▴"
                                 }}</span>
                             </button>
                         </th>
-                        <th class="acts">actions</th>
+                        <th class="acts"><span class="sr">actions</span></th>
                     </tr>
                 </thead>
                 <tbody>
-                    <tr v-for="row in visible" :key="keyOf(row)" :class="{ picked: isSelected(row) }">
-                        <td class="tick">
+                    <!--
+                        The row itself opens it. Reading one is what this page is
+                        overwhelmingly for, and spending a whole column on a View
+                        button to do what clicking the row obviously should is
+                        how the table ran out of room in the first place.
+                    -->
+                    <tr
+                        v-for="row in visible"
+                        :key="keyOf(row)"
+                        :class="{ picked: isSelected(row) }"
+                        @click="openRow(row)"
+                    >
+                        <td class="tick" @click.stop>
                             <input
                                 type="checkbox"
                                 :checked="isSelected(row)"
@@ -314,26 +367,14 @@ onBeforeUnmount(() => document.removeEventListener("keydown", onKey))
                                 @change="toggle(row)"
                             />
                         </td>
-                        <td v-for="name in spec.columns" :key="name" :title="cell(row, name)">
-                            {{ cell(row, name) }}
+                        <td v-for="column in spec.columns" :key="column.field" :title="cell(row, column.field)">
+                            {{ cell(row, column.field) }}
                         </td>
-                        <td class="acts">
-                            <div class="btns">
-                                <button class="btn tiny" @click="openRow(row)">View</button>
-                                <button class="btn tiny" @click="openRow(row, 'edit')">Edit</button>
-                                <button
-                                    v-if="active === 'anime'"
-                                    class="btn tiny"
-                                    title="The entry plus every setting that decides how it behaves"
-                                    @click="copyDebugReport(keyOf(row))"
-                                >
-                                    Debug
-                                </button>
-                                <button class="btn tiny danger" @click="pendingDelete = [keyOf(row)]">Delete</button>
-                            </div>
+                        <td class="acts" @click.stop>
+                            <RowMenu :items="menuFor(row)" :label="`Actions for ${keyOf(row)}`" />
                         </td>
                     </tr>
-                    <tr v-if="visible.length === 0">
+                    <tr v-if="visible.length === 0" class="flat">
                         <td class="empty" :colspan="spec.columns.length + 2">
                             {{ loading ? "Loading…" : rows.length === 0 ? "This store is empty." : "Nothing matches." }}
                         </td>
@@ -546,36 +587,63 @@ code {
 
 /* ---------------------------------------------------------------- table */
 
+/*
+ * No `overflow` here on purpose, and it is load-bearing twice over. There is
+ * nothing left to scroll — the table below is laid out `fixed`, so it is exactly
+ * as wide as this box whatever the rows hold — and a scroll container would clip
+ * the ⋯ dropdown, which is absolutely positioned and has to escape its row.
+ */
 .sheet {
-    overflow-x: auto;
     background: var(--surface);
     border: 1px solid var(--rule);
     border-radius: var(--radius);
 }
 
+/*
+ * `fixed` is the whole fix for the horizontal scrollbar. An automatic table
+ * sizes itself to its widest cell, so a single series whose episode URL runs to
+ * 300 characters widened the table past the page and pushed every other column
+ * off the side. `max-width` on a cell does not stop that: in automatic layout it
+ * is a hint the browser is free to ignore, and it does.
+ *
+ * Fixed layout takes the column widths from the `<colgroup>` and clips whatever
+ * does not fit, which is what the ellipsis and the `title` tooltip are for.
+ */
 table {
     width: 100%;
+    table-layout: fixed;
     border-collapse: collapse;
     font-size: 12px;
+}
+
+col.tick {
+    width: 34px;
+}
+
+col.acts {
+    width: 44px;
 }
 
 th,
 td {
     text-align: left;
-    padding: 6px 10px;
+    padding: 7px 10px;
     border-bottom: 1px solid var(--rule);
-    /* Every cell is one line: a table that reflows on a 400-character URL stops
-       being scannable, and the full value is one click away in the row. */
+    /* One line per cell. A table that reflows on a 400-character URL stops being
+       scannable, and the whole value is one click away in the row. */
     white-space: nowrap;
-    max-width: 320px;
     overflow: hidden;
     text-overflow: ellipsis;
+}
+
+tbody tr:last-child td {
+    border-bottom: none;
 }
 
 thead th {
     position: sticky;
     top: 0;
-    z-index: 1;
+    z-index: 2;
     background: var(--surface-2);
     font-family: var(--mono);
     font-size: 10.5px;
@@ -589,10 +657,25 @@ th.sorted {
 }
 
 .sort {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    max-width: 100%;
     font: inherit;
     color: inherit;
-    display: inline-flex;
-    gap: 4px;
+}
+
+.sort .label {
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.sort:hover {
+    color: var(--ink);
+}
+
+tbody tr {
+    cursor: pointer;
 }
 
 tbody tr:hover {
@@ -603,25 +686,48 @@ tbody tr.picked {
     background: var(--accent-soft);
 }
 
+tbody tr.flat {
+    cursor: default;
+    background: none;
+}
+
 td {
     font-family: var(--mono);
     font-size: 11px;
     color: var(--ink-2);
 }
 
+/* The key column reads as the row's name, so it gets the emphasis a name gets. */
+tbody td:nth-child(2) {
+    color: var(--ink);
+}
+
 .tick {
-    width: 28px;
-    white-space: nowrap;
+    cursor: default;
+    text-align: center;
+    padding-left: 0;
+    padding-right: 0;
 }
 
+.tick input {
+    vertical-align: middle;
+}
+
+/* The ⋯ dropdown is absolutely positioned and has to leave the cell. */
 .acts {
-    width: 1%;
-    white-space: nowrap;
+    overflow: visible;
+    padding-left: 0;
+    padding-right: 4px;
+    text-align: right;
 }
 
-.btns {
-    display: flex;
-    gap: 4px;
+.sr {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
 }
 
 .empty {
@@ -629,11 +735,6 @@ td {
     font-family: var(--font);
     text-align: center;
     padding: 24px;
-}
-
-.btn.tiny {
-    font-size: 10.5px;
-    padding: 2px 7px;
 }
 
 /* ---------------------------------------------------------------- detail */

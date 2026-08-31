@@ -10,8 +10,11 @@
  * visible by reading the page, and all of them are one line here.
  */
 import {
+    COLUMN_BUDGET,
     STORES,
     cellText,
+    columnFields,
+    columnPercent,
     extraFields,
     filterRows,
     formatEpoch,
@@ -45,11 +48,31 @@ eq(
 )
 eq(
     "and lists it first, so a row is identifiable at a glance",
-    STORES.every(s => s.columns[0] === s.keyPath),
+    STORES.every(store => store.columns[0]?.field === store.keyPath),
     true
 )
 eq("the library is keyed the way the library is keyed", storeSpec("anime").keyPath, "key")
 eq("storage rows are wrapped, so the key is a field like any other", storeSpec("storage").keyPath, "key")
+
+/*
+ * The page has no horizontal scrollbar because its table is laid out `fixed` off
+ * these numbers, and a fixed table whose columns add up to more than its width
+ * does not shrink them — it overflows, which is the scrollbar back. The budget
+ * leaves room for the two columns that are not data and are sized in pixels: the
+ * selection tick and the ⋯ menu.
+ *
+ * Exactly the kind of thing that stays right until someone adds a column to one
+ * store and nobody opens that tab for a month.
+ */
+for (const store of STORES) {
+    eq(`${store.id} fits the width budget`, columnPercent(store) <= COLUMN_BUDGET, true)
+    eq(`${store.id} uses most of it rather than huddling to one side`, columnPercent(store) >= COLUMN_BUDGET - 15, true)
+    eq(
+        `${store.id} gives every column enough to show something`,
+        store.columns.every(column => column.percent >= 5),
+        true
+    )
+}
 
 // ---------------------------------------------------------------- epochs
 
@@ -102,6 +125,7 @@ const stateRows: Row[] = [
 ]
 eq("a field no column claims is reported", extraFields(spec, stateRows), ["andAnother", "somethingNew"])
 eq("a store whose rows are all covered reports none", extraFields(spec, [stateRows[0]!]), [])
+eq("and the column names come back as plain fields for the search picker", columnFields(spec)[0], "sourceId")
 
 // ---------------------------------------------------------------- searching
 

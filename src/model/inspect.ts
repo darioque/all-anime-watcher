@@ -16,6 +16,24 @@ export type Row = Record<string, unknown>
 
 export type StoreId = "anime" | "sourceState" | "storage"
 
+/**
+ * One column, and how much of the table it is entitled to.
+ *
+ * The width is here rather than in the stylesheet because it is a fact about the
+ * data: a library key is long and a fail count is one digit, and no amount of
+ * CSS can work that out from a `<td>`. The table is laid out `fixed` and takes
+ * these as given — which is the whole reason the page has no horizontal
+ * scrollbar. Left to itself a table sizes to its widest cell, and one series
+ * whose URL runs to 300 characters is enough to push every other column off the
+ * side; `max-width` on a cell does not stop it, because in automatic table
+ * layout that is a hint the browser is free to ignore, and does.
+ */
+export interface ColumnSpec {
+    field: string
+    /** Percent of the table's width. See `columnPercent` for the budget. */
+    percent: number
+}
+
 export interface StoreSpec {
     id: StoreId
     label: string
@@ -26,17 +44,37 @@ export interface StoreSpec {
      */
     keyPath: string
     /** Columns worth a table, best first. Everything else lives in the detail. */
-    columns: string[]
+    columns: ColumnSpec[]
     /** Shown under the tab. Says what the store is for, not what it contains. */
     note: string
 }
+
+/**
+ * What the percentages have to leave for the two columns that are not data: the
+ * selection tick and the ⋯ menu, both sized in pixels because a checkbox does
+ * not get more useful with more room.
+ *
+ * A fixed-layout table whose columns add up to more than its width does not
+ * shrink them — it overflows, which is the scrollbar this budget exists to
+ * prevent. `check:inspect` holds every store to it.
+ */
+export const COLUMN_BUDGET = 92
 
 export const STORES: StoreSpec[] = [
     {
         id: "anime",
         label: "Library",
         keyPath: "key",
-        columns: ["key", "title", "sourceId", "episodes", "lastWatched", "nextCheckAt", "failCount", "follow"],
+        columns: [
+            { field: "key", percent: 20 },
+            { field: "title", percent: 16 },
+            { field: "sourceId", percent: 9 },
+            { field: "episodes", percent: 6 },
+            { field: "lastWatched", percent: 12 },
+            { field: "nextCheckAt", percent: 13 },
+            { field: "failCount", percent: 6 },
+            { field: "follow", percent: 6 }
+        ],
         note: "One row per followed series, keyed `sourceId/seriesId`. IndexedDB store `anime`."
     },
     {
@@ -44,13 +82,13 @@ export const STORES: StoreSpec[] = [
         label: "Source state",
         keyPath: "sourceId",
         columns: [
-            "sourceId",
-            "enabled",
-            "preferredDomain",
-            "pinnedDomain",
-            "knownDomains",
-            "lastDomainCheckAt",
-            "lastDomainCheckResult"
+            { field: "sourceId", percent: 13 },
+            { field: "enabled", percent: 7 },
+            { field: "preferredDomain", percent: 17 },
+            { field: "pinnedDomain", percent: 15 },
+            { field: "knownDomains", percent: 17 },
+            { field: "lastDomainCheckAt", percent: 13 },
+            { field: "lastDomainCheckResult", percent: 10 }
         ],
         note: "Which host each site is currently believed to live at. IndexedDB store `sourceState`."
     },
@@ -58,7 +96,11 @@ export const STORES: StoreSpec[] = [
         id: "storage",
         label: "storage.local",
         keyPath: "key",
-        columns: ["key", "bytes", "value"],
+        columns: [
+            { field: "key", percent: 22 },
+            { field: "bytes", percent: 8 },
+            { field: "value", percent: 62 }
+        ],
         note:
             "Settings, per-source settings and the download queue. One row per top-level storage key, " +
             "wrapped as `{ key, value }` — edit the `value` side; the `key` side says where it goes."
@@ -69,6 +111,15 @@ export function storeSpec(id: StoreId): StoreSpec {
     const spec = STORES.find(store => store.id === id)
     if (!spec) throw new Error(`no such store: ${id}`)
     return spec
+}
+
+/** The column names alone, for the search picker and the unclaimed-field check. */
+export function columnFields(spec: StoreSpec): string[] {
+    return spec.columns.map(column => column.field)
+}
+
+export function columnPercent(spec: StoreSpec): number {
+    return spec.columns.reduce((total, column) => total + column.percent, 0)
 }
 
 // ---------------------------------------------------------------- values
@@ -132,10 +183,11 @@ export function cellText(value: unknown, max = 64): string {
 
 /** Everything a row carries that no column claims — the reason to open it. */
 export function extraFields(spec: StoreSpec, rows: Row[]): string[] {
+    const shown = new Set(columnFields(spec))
     const seen = new Set<string>()
     for (const row of rows) {
         for (const field of Object.keys(row)) {
-            if (!spec.columns.includes(field)) seen.add(field)
+            if (!shown.has(field)) seen.add(field)
         }
     }
     return [...seen].sort()
@@ -268,7 +320,6 @@ export const CHAINED_SETTINGS = [
     "completionThreshold",
     "markWatchedOnOpen",
     "markWatchedOnEmbed",
-    "verifyNewEpisodes",
     "takeOverPage",
     "notifyNewEpisode",
     "pushToTracker",
