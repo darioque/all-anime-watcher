@@ -55,12 +55,13 @@ export interface AnimeStreamConfig {
     /**
      * How this site says "posted, but there is nothing to watch yet".
      *
-     * Opt-in, and it has to be: the fallback test below is "the player container
-     * holds no embed", which is only evidence on a site that inlines its player
-     * into the episode page. A site that builds the player in JavaScript would
-     * have every episode declared pending, and pending episodes are never
-     * announced — so a wrong default here is a source that silently stops
-     * reporting new episodes at all. Say nothing and the check never runs.
+     * Opt-in, and it has to be. Both strategies below read an absence — no
+     * embed in the player box, or a date out of step with the list — and an
+     * absence is only evidence on a site whose habits have been watched. A site
+     * that builds its player in JavaScript would have every episode declared
+     * pending, and pending episodes are never announced, so a wrong default
+     * here is a source that silently stops reporting. Say nothing and neither
+     * check runs.
      */
     pending?: PendingMarkers
 
@@ -90,6 +91,22 @@ export interface PendingMarkers {
      * where a CSS string is evidence, and never on screen, where it is noise.
      */
     reason?: string
+
+    /**
+     * The site backdates a placeholder so it sorts to the bottom of its own
+     * list, and the newest episode being the oldest post is the tell.
+     *
+     * Answered from the series list, so it costs nothing — `pendingInList`
+     * rather than `episodeAvailability`, which is a request per candidate for
+     * as long as the countdown stands.
+     *
+     * The test is deliberately narrow on both ends: the entry has to be the
+     * highest-numbered in the list *and* strictly the oldest-dated. Either half
+     * alone is a thing that happens to real episodes — a late re-upload takes
+     * today's date, a corrected typo moves an old one — and only the pair is
+     * the cataloguing habit. See `pendingInList` below.
+     */
+    backdated?: boolean
 }
 
 export interface AnimeStreamSelectors {
@@ -336,6 +353,53 @@ export class AnimeStream implements AnimeSource {
     isEpisodePage(html: string, url: string): boolean {
         if (!this.matchesPath(this.episodeUrl, url)) return false
         return parse(html)(this.sel.server).length > 0
+    }
+
+    /**
+     * The placeholder the site's own list gives away, at no cost.
+     *
+     * luciferdonghua.in backdates a post it has not got the video for, far
+     * enough that it sorts below episode 1 of the series. Ancient God Sovereign
+     * has been caught doing it twice: E13 dated July 1 against E01-04's July 30,
+     * and then, once E13 went live and moved to the top with a real date, E14
+     * dated July 1 in its place.
+     *
+     * Two conditions, and the conjunction is the whole safety of it:
+     *
+     *  1. **Highest-numbered in the list.** A site posts *ahead* of itself,
+     *     never behind, so a placeholder is always at the top of the numbering.
+     *     This is what keeps a late re-upload or a corrected date on an older
+     *     episode — the ordinary reasons a list goes out of order — from ever
+     *     being suppressed, whatever date it carries.
+     *  2. **Strictly the oldest date in the list.** Not merely out of order:
+     *     the oldest, uniquely. The newest episode being the oldest post is not
+     *     something a real release does; being *somewhat* out of order is.
+     *
+     * At most one entry can satisfy both, which is the conservative direction
+     * and matches what the site does — it runs one countdown at a time. A run
+     * of two placeholders would leave the second announced, which is the
+     * mistake that costs a dismissed notification rather than a missed episode.
+     *
+     * Everything vague fails closed, into announcing as usual: fewer than two
+     * dated entries, a missing date on the candidate, a tie for oldest.
+     */
+    pendingInList(episodes: readonly Episode[]): Episode[] {
+        if (!this.pendingMarkers?.backdated) return []
+
+        const dated = episodes.filter(episode => episode.airedAt !== undefined)
+        // One date is no ordering, and a list where the site dates only some of
+        // its posts says nothing by putting one of them last.
+        if (dated.length < 2 || dated.length !== episodes.length) return []
+
+        const newest = episodes.reduce((a, b) => (b.number > a.number ? b : a))
+        const oldestAt = Math.min(...dated.map(episode => episode.airedAt!))
+
+        if (newest.airedAt !== oldestAt) return []
+        // A tie is two posts sharing the oldest date, which is a site that dates
+        // in bulk rather than a site marking one post out.
+        if (dated.filter(episode => episode.airedAt === oldestAt).length > 1) return []
+
+        return [newest]
     }
 
     /**

@@ -43,21 +43,6 @@ export interface GlobalSettings {
     maxParallelSources: number
     /** Cap on how many series one wake-up will check. */
     maxChecksPerRun: number
-    /**
-     * Open a newly-seen episode's page to confirm it has a video before calling
-     * it a release.
-     *
-     * **Off by default, and it has to be.** It is a request per candidate
-     * episode on top of the series page, and a library of several hundred
-     * followed series pays that on every check run — real weight, for a habit
-     * only some sites have. Most never post an episode before they have it, and
-     * on those the check is pure cost with nothing to find.
-     *
-     * So it is opt-in, per source and per series, for the sites that actually do
-     * it. Only sources implementing `episodeAvailability` can answer at all, and
-     * turning it on for a source that cannot is a no-op rather than a waste.
-     */
-    verifyNewEpisodes: boolean
     /** Give up on a single series' check after this long. */
     checkTimeoutSec: number
 
@@ -156,12 +141,6 @@ export interface SourceSettings {
     enabled?: boolean
     takeOverPage?: boolean
     markWatchedOnEmbed?: boolean
-    /**
-     * Worth turning off for a source that never posts an episode early — the
-     * check is a wasted request there — and the level at which it belongs, since
-     * whether a site pre-posts is a fact about the site, not about the series.
-     */
-    verifyNewEpisodes?: boolean
     preferredQuality?: string
     preferredServers?: string[]
     variantPref?: Variant
@@ -192,7 +171,6 @@ export function defaultSettings(): GlobalSettings {
         maxParallelSources: 3,
         maxChecksPerRun: 60,
         checkTimeoutSec: 60,
-        verifyNewEpisodes: false,
 
         takeOverPage: true,
         preferredQuality: "1080p",

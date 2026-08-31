@@ -50,18 +50,33 @@ import { AnimeStream } from "~/sources/families/AnimeStream"
  *                           and /v/1/, "Video Not Available" on /v/2/../v/5/
  *
  * The server list is identical on both — five `option`s in `select.mirror` — so
- * nothing about the *series* page or the server list distinguishes them, and the
- * update loop reads only the series page. E13 was announced as a release, opened
- * to five servers that each resolved to nothing, and was marked watched on the
- * way in.
+ * nothing about the *shape* of the series page distinguishes them, and the update
+ * loop reads only the series page. E13 was announced as a release, opened to five
+ * servers that each resolved to nothing, and was marked watched on the way in.
  *
- * The series list gives it away too, and it is worth knowing about while being
- * the wrong thing to build on: the placeholder is backdated (E13 is dated
- * July 1 while E01-04 is July 30), so it sorts to the bottom of `div.eplister`
- * below episode 1. That is a cataloguing habit, not a declaration — an out-of-
- * order date is also what a corrected typo or a late re-upload looks like — and
- * reading it as "premium" would suppress real episodes. The countdown widget
- * says what the date only hints at.
+ * **The date does distinguish them, and it is what this now reads.** The
+ * placeholder is backdated far enough to sort below episode 1 of its own series.
+ * The first reading of this site called that a symptom and not evidence, on the
+ * grounds that an out-of-order date is also what a corrected typo or a late
+ * re-upload looks like — true, and it is why the test is not "out of order". The
+ * habit has since been watched twice on the same series and it is sharper than
+ * that, on both ends at once:
+ *
+ *   2026-08-27  E13 dated July 1   E01-04 dated July 30   E13 last, newest number
+ *   2026-08-31  E14 dated July 1   E13   dated August 30  E14 last, newest number
+ *
+ * — the newest episode by number carrying, uniquely, the oldest date in the list.
+ * Neither half happens to a real release on its own account: a re-upload takes
+ * *today's* date rather than the list's oldest, and a corrected typo lands on an
+ * episode that is not the newest. Requiring both is what makes this safe to read,
+ * and `AnimeStream.pendingInList` states the conditions in full.
+ *
+ * Reading it off the list is why this site costs no extra request. The evidence
+ * on the episode page is stronger — a tickcounter widget means one thing and
+ * nothing else — but reaching it is a fetch per candidate on every check for as
+ * long as the countdown stands, and the list has already been fetched. The
+ * marker path stays available on the family for a site whose list gives nothing
+ * away.
  */
 export const luciferdonghua = new AnimeStream({
     id: "luciferdonghua",
@@ -95,15 +110,10 @@ export const luciferdonghua = new AnimeStream({
         // finds nothing.
         playerIframe: "div.player-embed iframe[src]"
     },
-    // Checked only when no embed was found at all — see `episodeAvailability`.
-    // `a.tickcounter` is the widget's own class and `data-type=countdown` the
-    // attribute its loader reads, so either alone is enough; both are listed
-    // because the site writes both and dropping one is a free way to survive a
-    // markup tweak. The text clause covers the sibling state, where the site has
-    // given up on a server rather than scheduled it.
+    // Read off the series list, so no episode page is opened — see the note
+    // above and `AnimeStream.pendingInList` for the two conditions.
     pending: {
-        markers: ["a.tickcounter", "[data-type=countdown]"],
-        text: ["video not available"],
-        reason: "the site is counting down to it rather than playing it"
+        backdated: true,
+        reason: "the site has dated it below episode 1, which is how it parks one it cannot play yet"
     }
 })

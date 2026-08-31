@@ -82,12 +82,6 @@ const GROUPS: { id: string; title: string; note?: string; fields: Field[] }[] = 
         note: "Any series can override the schedule from its own row in the list.",
         fields: [
             {
-                key: "verifyNewEpisodes",
-                label: "Check a new episode is really out before telling me",
-                help: "Some sites post an episode's page ahead of the video, with a countdown where the player goes. This opens the page once to look, which costs a request per new episode — so it is off unless you turn it on for the sites that do it, under Sources or on a single series.",
-                type: "toggle"
-            },
-            {
                 key: "sourceRequestDelaySec",
                 label: "Wait between requests to one site",
                 help: "Seconds. Politeness to a single site, not overall speed.",

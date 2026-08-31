@@ -10,17 +10,13 @@ import type { SourceSettings } from "~/settings/schema"
 /**
  * The settings a site can disagree with the global default about.
  *
- * Publishing an episode's page before the episode is a fact about the *site* —
- * luciferdonghua.in does it, lmanime does not — so this is the level the check
- * most naturally belongs at, and why it is off globally rather than on. A single
- * series can still overrule it from its own row.
+ * Only settings that are genuinely a preference. Whether a site posts an
+ * episode's page before the episode is a fact about the site rather than a
+ * choice about it, so it is not here and is not anywhere else either — the
+ * site's source declares it and the update loop obeys. See "Posted, but not
+ * out" in CLAUDE.md.
  */
 const SOURCE_OVERRIDES = [
-    {
-        key: "verifyNewEpisodes" as const,
-        label: "Check a new episode is really out",
-        help: "Opens the episode page once before announcing it. Worth turning off for a site that never posts early — the check is a wasted request there."
-    },
     {
         key: "recoverStalledPlayback" as const,
         label: "Ride out a stream that stalls",

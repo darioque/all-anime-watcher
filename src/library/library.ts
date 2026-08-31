@@ -316,10 +316,25 @@ const VERIFICATION_SWEEP = 3
  * The fetched list with the posts that have no video behind them removed.
  *
  * The update loop reads the *series* page, where a post the site created ahead
- * of the release is indistinguishable from one it has: same markup, same server
- * count, a title and a number like any other. Only the episode page shows the
- * difference, so the only way to tell is to look — one request per candidate,
- * and `verificationCandidates` decides which candidates are worth it.
+ * of the release usually looks exactly like one it has: same markup, same server
+ * count, a title and a number like any other. A source answers in one of two
+ * ways and may do both:
+ *
+ * - **`pendingInList`**, from the list already in hand. Free, so it runs first
+ *   and runs always. luciferdonghua.in is here — it backdates a placeholder
+ *   below episode 1 of its own series, and the newest episode being uniquely
+ *   the oldest post is a thing only a placeholder does.
+ * - **`episodeAvailability`**, from the episode page. One request per
+ *   candidate, spent on every check for as long as the countdown stands, so it
+ *   is asked only about what survived the free pass and only for the candidates
+ *   `verificationCandidates` picks.
+ *
+ * **Not a setting.** It used to be one, off by default, opt-in per source and
+ * per series — which asked the viewer a question they have no way to answer
+ * ("does this site post ahead?") about a cost they cannot see, and left the
+ * default wrong for the one site that needed it. Whether a site posts ahead is
+ * a fact about the site, so the site's source declares it and the loop obeys;
+ * how it is answered, and what that costs, is the source's business too.
  *
  * **Removed, not flagged.** An earlier version kept such posts in the list under
  * a `pending` flag, which made "is this a real episode?" a question every reader
@@ -331,17 +346,17 @@ const VERIFICATION_SWEEP = 3
  * it makes going live an ordinary appearance in the diff.
  *
  * The price is honest and small. A dropped placeholder is in the diff again on
- * the next check, so it is re-opened once per check for as long as the countdown
- * stands — the same request the old "already known to be pending" clause spent.
- * And where the old flag survived a failed fetch, this cannot: a blip on the
- * placeholder's page falls through to "out" and may announce it a second time.
- * That is the cheap mistake, deliberately — see below.
+ * the next check, so a source on the request path re-opens it once per check for
+ * as long as the countdown stands — the same request the old "already known to
+ * be pending" clause spent. And where the old flag survived a failed fetch, this
+ * cannot: a blip on the placeholder's page falls through to "out" and may
+ * announce it a second time. That is the cheap mistake, deliberately — see below.
  *
- * **Every failure path leaves the episode in.** A source with no opinion, the
- * setting off, a fetch that times out, a parse that throws — all of them keep the
- * episode, because the cost of the two mistakes is not symmetrical. Announcing a
- * countdown is a notification the viewer dismisses; suppressing a real episode is
- * one they never learn they missed.
+ * **Every failure path leaves the episode in.** A source with no opinion, a rule
+ * that declines to answer, a fetch that times out, a parse that throws — all of
+ * them keep the episode, because the cost of the two mistakes is not symmetrical.
+ * Announcing a countdown is a notification the viewer dismisses; suppressing a
+ * real episode is one they never learn they missed.
  */
 async function verifiedEpisodes(options: {
     source: AnimeSource
@@ -352,8 +367,30 @@ async function verifiedEpisodes(options: {
     candidateReleases: Episode[]
 }): Promise<Episode[]> {
     const { source, ctx, anime, episodes, stored, candidateReleases } = options
-    if (!source.episodeAvailability) return episodes
-    if (!resolve("verifyNewEpisodes", { anime, sourceId: anime.sourceId })) return episodes
+    if (!source.pendingInList && !source.episodeAvailability) return episodes
+
+    const notOut = new Set<string>()
+
+    /*
+     * The free pass. No memo and no candidate budget: it reads a list already
+     * fetched, so there is nothing to save by asking about less of it, and a
+     * rule that has to hold on every check is a rule worth running on every
+     * check — a site that stops backdating stops being caught, immediately,
+     * rather than at whatever point a stamp expired.
+     */
+    if (source.pendingInList) {
+        try {
+            for (const episode of source.pendingInList(episodes)) {
+                notOut.add(episodeProgressKey(episode))
+            }
+        } catch (error) {
+            logger.warn(`${anime.key}: the list rule threw, treating everything as out`, error)
+        }
+    }
+
+    if (!source.episodeAvailability) {
+        return notOut.size === 0 ? episodes : episodes.filter(ep => !notOut.has(episodeProgressKey(ep)))
+    }
 
     /*
      * Carry the `available` memos onto the fresh list first. Settled the cheap
@@ -366,13 +403,13 @@ async function verifiedEpisodes(options: {
     }
 
     const candidates = verificationCandidates({
-        episodes,
+        // Nothing the free pass already settled: it is not in the list that
+        // will be stored, so a request asking after it buys nothing.
+        episodes: episodes.filter(ep => !notOut.has(episodeProgressKey(ep))),
         releases: candidateReleases,
         sweep: VERIFICATION_SWEEP,
         limit: MAX_VERIFICATIONS_PER_REFRESH
     })
-
-    const notOut = new Set<string>()
 
     // Sequential on purpose. This runs inside a scheduled check of a whole
     // library; the politeness the scheduler buys between series is not worth
@@ -383,10 +420,6 @@ async function verifiedEpisodes(options: {
             const verdict = source.episodeAvailability(html, episode.url)
             if (verdict.pending) {
                 notOut.add(episodeProgressKey(episode))
-                logger.info(
-                    `${anime.key}: E${episode.number} is posted but not out` +
-                        `${verdict.reason ? ` — ${verdict.reason}` : ""}`
-                )
             } else {
                 episode.available = true
             }

@@ -207,6 +207,25 @@ export interface AnimeSource {
     isEpisodePage(html: string, url: string): boolean
 
     /**
+     * Which of these the *series list alone* says are not out yet.
+     *
+     * The cheap half of "posted, but not out" — see `episodeAvailability` for
+     * the costly half and the problem both exist for. Implement this one
+     * wherever the site's own list gives the placeholder away, because it is
+     * free: the update loop has already parsed this list, and answering from it
+     * costs no request at all.
+     *
+     * Free does not mean careless. It is read on every check with no memo to
+     * settle it, so the rule has to hold for the whole life of a series rather
+     * than merely at the moment it was written, and it must key on something
+     * the site does *only* for placeholders. The asymmetry from
+     * `episodeAvailability` applies here in full: return nothing when unsure.
+     *
+     * Return the entries to drop, taken from the array passed in.
+     */
+    pendingInList?(episodes: readonly Episode[]): Episode[]
+
+    /**
      * Does this episode page actually offer something to watch?
      *
      * Optional, and deliberately separate from `isEpisodePage`, which these
@@ -216,10 +235,12 @@ export interface AnimeSource {
      * placeholder is indistinguishable from a release.
      *
      * Answered from the episode page's own HTML, so verification costs one
-     * request per candidate rather than one per server. Only implement it where
-     * the site has a marker that means this and nothing else; a source that
-     * cannot tell must not guess, because the cost of a false positive is an
-     * episode that is never announced at all.
+     * request per candidate rather than one per server. Reach for it only when
+     * `pendingInList` cannot answer, since this one is paid on every check while
+     * a placeholder stands. Only implement it where the site has a marker that
+     * means this and nothing else; a source that cannot tell must not guess,
+     * because the cost of a false positive is an episode that is never announced
+     * at all.
      */
     episodeAvailability?(html: string, url: string): EpisodeAvailability
     getPageInfo(html: string, url: string, ctx: FetchCtx): Promise<PageInfo>

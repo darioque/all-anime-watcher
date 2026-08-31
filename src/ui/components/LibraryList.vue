@@ -425,16 +425,9 @@ const setSchedule = (a: TrackedAnime, schedule: SchedulePolicy) =>
  *
  * Listed rather than generated: every setting resolves through the three-level
  * chain, but only some are worth deciding *per show*, and a panel offering all
- * thirty would bury the one that matters. Verification is here as well as on the
- * source because posting ahead is as often a per-series habit as a per-site one —
- * one show on a site gets the early treatment and the rest do not.
+ * thirty would bury the one that matters.
  */
 const TRACKING_OVERRIDES = [
-    {
-        key: "verifyNewEpisodes" as const,
-        label: "Check a new episode is really out",
-        help: "Opens the episode page once before announcing it. A page with only a countdown is announced later, when it goes live."
-    },
     {
         key: "recoverStalledPlayback" as const,
         label: "Ride out a stream that stalls",

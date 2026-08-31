@@ -78,7 +78,6 @@ export interface AnimeOverrides {
     completionThreshold?: number
     markWatchedOnOpen?: boolean
     markWatchedOnEmbed?: boolean
-    verifyNewEpisodes?: boolean
     takeOverPage?: boolean
     notifyNewEpisode?: boolean
     pushToTracker?: boolean

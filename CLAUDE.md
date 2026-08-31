@@ -185,8 +185,16 @@ scripts/probe-source.mts the CLI Lab page
    is a config object in `sources/sites/` and nothing more.
 2. Otherwise implement `AnimeSource` directly; copy the closest existing site.
 3. Register it in `sources/registry.ts`.
-4. `npm run probe -- <id>` until every check passes. Add `VERBOSE=1` for request logs.
-5. Prior art for a site's real data path:
+4. **Ask whether the site posts episodes it cannot play yet** — a page up with a
+   countdown, a premium early-access window, a placeholder created ahead of the
+   release. The update loop reads the series list and cannot see the difference,
+   so it announces the post, moves the watch position onto it, and the real
+   episode never shows as unwatched. Check by opening the newest one or two
+   episodes of a *currently airing* series and looking at where the player
+   should be. If it does, declare `pendingInList` or `episodeAvailability` — see
+   "Posted, but not out" below. This is not optional and is not a setting.
+5. `npm run probe -- <id>` until every check passes. Add `VERBOSE=1` for request logs.
+6. Prior art for a site's real data path:
    `github.com/Kohi-den/extensions-source` (Kotlin, Aniyomi). Browse with
    `https://api.github.com/repos/Kohi-den/extensions-source/git/trees/main?recursive=1`.
    It documents endpoints and response shapes and saves days per site.
@@ -548,24 +556,51 @@ each resolved to nothing. It was announced as a release, the notification opened
 a dead page, and the watch position had already moved onto it on the way in — so
 the real E13 would never have shown as unwatched when it aired.
 
-**Nothing on the series page distinguishes it**, which is the whole difficulty:
-the update loop reads only the series page, and the placeholder's `<li>` is
-byte-for-byte the same shape as a real one — same `epl-num` ("13 [4K]"), same
-`epl-title`, same `status Sub`. The only tell there is that the post is
-*backdated* (E13 dated July 1 against E01-04's July 30), so it sorts to the
-bottom of `div.eplister` below episode 1. **Do not build on that.** An
-out-of-order date is also what a corrected typo or a late re-upload looks like,
-and reading it as "premium" would suppress real episodes. It is worth knowing as
-a symptom and is not evidence.
+**The `<li>` is byte-for-byte the same shape as a real one** — same `epl-num`
+("13 [4K]"), same `epl-title`, same `status Sub` — which is the whole difficulty,
+because the update loop reads only the series page. The one thing that differs is
+the *date*: the placeholder is backdated far enough to sort below episode 1 of
+its own series.
 
-The evidence is on the episode page, so `refreshSeries` opens it — one request
-per *candidate*, not per episode, decided by `verificationCandidates`.
+**That was first written off as a symptom and it was wrong to.** The objection
+was sound — an out-of-order date is also what a corrected typo or a late
+re-upload looks like, and reading it as "premium" would suppress real episodes —
+but it argues against the loose test, not against every test. Watched twice on
+the same series, the habit is sharper on both ends at once:
 
-**`verifyNewEpisodes` is off by default and that is deliberate.** It is a request
-per candidate on top of the series page, and a library of several hundred
-followed series pays that on every check run — real weight, for a habit only some
-sites have. It is opt-in per source and per series, which is the level the fact
-belongs at: luciferdonghua.in posts ahead, lmanime does not.
+```
+2026-08-27   E13 dated July 1   E01-04 dated July 30    E13 last, and the newest number
+2026-08-31   E14 dated July 1   E13    dated August 30  E14 last, and the newest number
+```
+
+So the rule is a conjunction, and the conjunction is the whole safety of it: the
+entry must be **the highest-numbered in the list** *and* **strictly the
+oldest-dated**. A re-upload takes today's date, not the list's oldest; a
+corrected typo lands on an episode that is not the newest. Neither half alone is
+evidence, and each is a real episode suppressed if trusted alone. Ties, missing
+dates and partly-dated lists all decline to answer.
+
+**Two strategies, and a source picks by what its site gives away.**
+
+| | cost | when |
+| --- | --- | --- |
+| `pendingInList(episodes)` | free — the list is already fetched | the site's own list gives it away |
+| `episodeAvailability(html, url)` | one request per candidate, every check while the countdown stands | it doesn't |
+
+Both are optional, both may be declared, the free one runs first and always, and
+the paid one is only asked about what survived it. luciferdonghua reads its list
+and costs nothing; `AnimeStream` implements both from one per-site `pending`
+config (`backdated` for the first, `markers`/`text`/`reason` for the second).
+
+**It is not a setting, and it used to be.** `verifyNewEpisodes` was a global
+toggle, off by default, overridable per source and per series. That asked the
+viewer a question they have no way to answer — "does this site post ahead?" —
+about a cost they cannot see, and then defaulted to the wrong answer for the one
+site that needed it, so the bug it was written for stayed live until somebody
+found the switch. Whether a site posts ahead is a fact about the site, so the
+site's source declares it and the loop obeys; *how* it is answered, and what that
+costs, is the source's business too. **When a source says it must check
+something, the check is not optional.**
 
 **Which candidates is the part that was got wrong first, and it is worth knowing
 why.** The obvious answer — "the episodes about to be announced" — fixed nothing
@@ -580,9 +615,7 @@ a second clause: sweep the newest few episodes nobody has ever asked about.
 not fine**, which is the whole reason it is tri-state rather than a boolean. It
 is also the migration path — the sweep is what reaches a placeholder already
 sitting in someone's library and drops it on the next check.
-`AnimeSource.episodeAvailability(html, url)` is optional and answers from markup
-already in hand; `AnimeStream` implements it from a per-site `pending` config
-(`markers`, `text`, `reason`). Three rules hold it together:
+Three rules hold the request-path check together:
 
 - **An embed wins outright, checked before any marker.** A site is free to run a
   countdown to the *next* episode above a player that works, and suppressing the
@@ -595,7 +628,8 @@ already in hand; `AnimeStream` implements it from a per-site `pending` config
   setting off, fetch timeout, parse throw) leaves the episode *announced*. The
   two mistakes are not symmetrical: announcing a countdown is a notification you
   dismiss, suppressing a real episode is one you never learn you missed. That is
-  also why `pending` is opt-in per site and `lmanime` declares nothing.
+  also why `pending` is opt-in per site and `lmanime` declares nothing. The same
+  asymmetry governs `pendingInList`, which returns nothing whenever unsure.
 - **The placeholder is dropped, not flagged, and ordering is what makes that
   work.** `verifiedEpisodes` removes it *before* the diff runs, so the stored
   list contains episodes and nothing else. Everything downstream —
@@ -619,9 +653,9 @@ placeholder and going live is an ordinary appearance in the diff, which is what
 `newReleases` has always announced.
 
 **The price, stated honestly.** A dropped placeholder is in the diff again on the
-next check, so it is re-opened once per check while the countdown stands — the
-same request the old "already known to be pending" clause spent, so no
-regression. And where the old flag survived a failed fetch, this cannot: a
+next check, so a source on the request path re-opens it once per check while the
+countdown stands — the same request the old "already known to be pending" clause
+spent, so no regression, and nothing at all for a source answering from its list. And where the old flag survived a failed fetch, this cannot: a
 network blip on the placeholder's page falls through to "out" and may announce it
 a second time. That is the cheap mistake by the asymmetry above, it self-corrects
 on the next successful check, and it is the trade for deleting a rule that had to
