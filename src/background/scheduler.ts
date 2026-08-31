@@ -222,21 +222,18 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
     })
 }
 
-/** Tracker data ages: air times move, series finish. Twelve hours is plenty. */
+/** Tracker data ages: titles get corrected, series finish. Twelve hours is plenty. */
 const TRACKER_MAX_AGE_MS = 12 * 60 * 60 * 1000
 
 /**
  * Piggyback tracker refresh on the check that just ran.
  *
- * A series on the `airing` policy needs current air times or its schedule
- * silently degrades to the fallback interval, and refreshing here means no extra
- * wake-ups and no separate rate-limit budget to reason about.
+ * Posters, titles and the country of origin every automatic shelf is built from
+ * all age, and refreshing here means no extra wake-ups and no separate
+ * rate-limit budget to reason about.
  */
 async function refreshTrackerIfStale(anime: TrackedAnime): Promise<void> {
-    const wanted =
-        resolve("anilistMetadata", { anime, sourceId: anime.sourceId }) ||
-        resolve("anilistSchedule", { anime, sourceId: anime.sourceId })
-    if (!wanted) return
+    if (!resolve("anilistMetadata", { anime, sourceId: anime.sourceId })) return
     if (Date.now() - (anime.trackerCheckedAt ?? 0) < TRACKER_MAX_AGE_MS) return
 
     try {

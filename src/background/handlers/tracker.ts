@@ -64,10 +64,7 @@ export function registerTrackerHandlers() {
         const all = await getAllAnime()
         let done = 0
         for (const anime of all) {
-            const wanted =
-                resolve("anilistMetadata", { anime, sourceId: anime.sourceId }) ||
-                resolve("anilistSchedule", { anime, sourceId: anime.sourceId })
-            if (!wanted) continue
+            if (!resolve("anilistMetadata", { anime, sourceId: anime.sourceId })) continue
             try {
                 await enrich(anime.key)
                 done++

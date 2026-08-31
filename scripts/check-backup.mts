@@ -103,7 +103,6 @@ const library: BackupParts = {
             anilistId: 12345,
             trackerConfirmed: true,
             trackerCheckedAt: 1_700_000_300_000,
-            airing: { episode: 477, at: 1_700_600_000_000, fetchedAt: 1_700_000_300_000 },
             episodes: [
                 { number: 476, url: "https://x/476", variant: "sub" },
                 { number: 475.5, url: "https://x/475-5", variant: "sub", title: "Recap" }
@@ -114,7 +113,7 @@ const library: BackupParts = {
             },
             lastWatched: { number: 476, variant: "sub", at: 1_700_000_400_000 },
             categories: ["donghua", "airing"],
-            overrides: { schedule: { mode: "weekly", weekday: 2, time: "18:00" }, skipIntro: "auto" }
+            overrides: { schedule: { mode: "weekly", weekdays: [3, 4], times: ["21:00"] }, skipIntro: "auto" }
         }),
         anime({
             key: "lmanime/xian-ni",
@@ -138,7 +137,7 @@ const library: BackupParts = {
         { sourceId: "myanime", knownDomains: ["myanime.live"], lastDomainCheckAt: 0, enabled: true }
     ],
     settings: { ...defaultSettings(), completionThreshold: 0.9, preferredServers: ["Vidstream-2"] },
-    sourceSettings: { myanime: { releaseDelayMin: 240, notifyNewEpisode: false } }
+    sourceSettings: { myanime: { sourceRequestDelaySec: 4, notifyNewEpisode: false } }
 }
 
 console.log("\n\x1b[1mround trip\x1b[0m\n")

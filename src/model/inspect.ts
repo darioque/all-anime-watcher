@@ -269,7 +269,6 @@ export const CHAINED_SETTINGS = [
     "markWatchedOnOpen",
     "markWatchedOnEmbed",
     "verifyNewEpisodes",
-    "releaseDelayMin",
     "takeOverPage",
     "notifyNewEpisode",
     "pushToTracker",

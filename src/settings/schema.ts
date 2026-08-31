@@ -37,11 +37,6 @@ export interface GlobalSettings {
 
     // --- update scheduling
     schedule: SchedulePolicy
-    /**
-     * Minutes between an episode airing and a site having it subtitled and up.
-     * Used by the `airing` schedule; a per-anime policy can state its own.
-     */
-    releaseDelayMin: number
     /** Seconds between requests to the same source during a check run. */
     sourceRequestDelaySec: number
     /** How many sources may be checked concurrently. */
@@ -102,8 +97,6 @@ export interface GlobalSettings {
     // --- metadata / trackers
     /** Read-only AniList lookups for posters, titles, episode counts. */
     anilistMetadata: boolean
-    /** Read-only AniList airing schedule, used by the `airing` policy. */
-    anilistSchedule: boolean
     /** Write watch progress back to AniList. Requires sign-in. */
     pushToTracker: boolean
 
@@ -169,8 +162,6 @@ export interface SourceSettings {
      * whether a site pre-posts is a fact about the site, not about the series.
      */
     verifyNewEpisodes?: boolean
-    /** How far behind a broadcast this particular site tends to run. */
-    releaseDelayMin?: number
     preferredQuality?: string
     preferredServers?: string[]
     variantPref?: Variant
@@ -197,9 +188,6 @@ export function defaultSettings(): GlobalSettings {
         // Plain interval polling by default: it is what you would expect and it
         // never surprises you. Schedule-aware polling is opt-in, per anime.
         schedule: { mode: "interval", everyHours: 6 },
-        // An hour is a guess, but a better one than zero: no site has an episode
-        // the minute it airs, and checking then just burns the airing window.
-        releaseDelayMin: 60,
         sourceRequestDelaySec: 2,
         maxParallelSources: 3,
         maxChecksPerRun: 60,
@@ -223,7 +211,6 @@ export function defaultSettings(): GlobalSettings {
         notificationTimeoutMs: 0,
 
         anilistMetadata: true,
-        anilistSchedule: false,
         pushToTracker: false,
 
         domainCheckIntervalHours: 24,

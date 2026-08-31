@@ -22,10 +22,9 @@ export async function enrich(key: string, options: { force?: boolean } = {}): Pr
     if (!anime) return null
 
     const wantMetadata = resolve("anilistMetadata", { anime, sourceId: anime.sourceId })
-    const wantSchedule = resolve("anilistSchedule", { anime, sourceId: anime.sourceId })
-    if (!wantMetadata && !wantSchedule && !options.force) return anime
+    if (!wantMetadata && !options.force) return anime
 
-    // Already linked: just refresh what changes (airing times, episode counts).
+    // Already linked: just refresh what changes (episode counts, status).
     if (anime.anilistId) {
         const media = await getAniListMedia(anime.anilistId)
         if (media) applyMedia(anime, media, wantMetadata)
@@ -82,7 +81,6 @@ export async function unlink(key: string): Promise<TrackedAnime | null> {
     if (!anime) return null
     delete anime.anilistId
     delete anime.malId
-    delete anime.airing
     // Confirmed so auto-matching doesn't immediately re-link what was just undone.
     anime.trackerConfirmed = true
     anime.updatedAt = Date.now()
@@ -119,18 +117,6 @@ function applyMedia(anime: TrackedAnime, media: AniListMedia, wantMetadata: bool
         ...(media.seasonYear ? { seasonYear: media.seasonYear } : {})
     }
     if (Object.keys(meta).length > 0) anime.meta = meta
-
-    if (media.nextAiringAt && media.nextAiringEpisode) {
-        anime.airing = {
-            episode: media.nextAiringEpisode,
-            at: media.nextAiringAt,
-            fetchedAt: Date.now()
-        }
-    } else {
-        // Finished, or between seasons. Drop stale data rather than keep a date
-        // that has already passed — the scheduler falls back to its interval.
-        delete anime.airing
-    }
 
     anime.updatedAt = Date.now()
 }

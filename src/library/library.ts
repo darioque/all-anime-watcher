@@ -178,7 +178,7 @@ export async function addSeries(options: {
     await db.putAnime(anime)
     logger.info(`added ${key} — ${anime.episodes.length} episodes`)
 
-    // Fill in poster, canonical title and air times in the background. Never
+    // Fill in poster, canonical title and shelving data in the background. Never
     // awaited: a slow or rate-limited tracker must not delay adding a series.
     void enrich(key).catch(error => logger.debug(`${key}: tracker enrich skipped`, error))
     await ensureSourceState(source.id)

@@ -1,5 +1,6 @@
 import type { AnimeOverrides, SchedulePolicy, TrackedAnime } from "~/model/types"
 import type { GlobalSettings, SourceSettings } from "./schema"
+import { normalizeSchedule } from "~/background/schedule"
 import { cachedSettings, cachedSourceSettings } from "./storage"
 
 /**
@@ -44,19 +45,17 @@ function isInherit(value: unknown): boolean {
  * Schedule needs its own accessor because `inherit` is expressed inside the
  * value rather than by the key being absent.
  *
- * It also fills in `delayMin` for the airing policy from the same three-level
- * chain as everything else. Doing it here rather than inside `nextCheckAt` is
- * what keeps that function a pure function of its arguments — it never reaches
- * for settings, so its date arithmetic stays testable outside an extension.
+ * It is also where a stored policy is brought up to the current shape, so
+ * `nextCheckAt` only ever sees one. That keeps `nextCheckAt` a pure function of
+ * its arguments — it never reaches for settings and never guesses at an older
+ * profile's spelling — so its date arithmetic stays testable outside an
+ * extension.
  */
 export function resolveSchedule(
     anime: (Pick<TrackedAnime, "overrides"> & Partial<Pick<TrackedAnime, "sourceId">>) | null | undefined
 ): SchedulePolicy {
     const own = anime?.overrides?.schedule
-    const policy = own && own.mode !== "inherit" ? own : cachedSettings().schedule
-
-    if (policy.mode !== "airing" || policy.delayMin !== undefined) return policy
-    return { ...policy, delayMin: resolve("releaseDelayMin", { anime, sourceId: anime?.sourceId }) }
+    return normalizeSchedule(own && own.mode !== "inherit" ? own : cachedSettings().schedule)
 }
 
 /** Where a resolved value came from — shown in the UI so overrides are visible. */

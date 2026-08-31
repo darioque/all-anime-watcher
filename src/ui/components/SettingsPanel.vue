@@ -96,15 +96,6 @@ const GROUPS: { id: string; title: string; note?: string; fields: Field[] }[] = 
                 max: 60
             },
             { key: "maxParallelSources", label: "Sites checked at once", type: "number", min: 1, max: 10 },
-            {
-                key: "releaseDelayMin",
-                label: "Sites are usually behind the broadcast by",
-                help: "Minutes. Used by the “Air time” schedule — no site has an episode subtitled the minute it airs, and checking then just wastes the window. A series can state its own.",
-                type: "number",
-                min: 0,
-                max: 10080,
-                step: 15
-            },
             { key: "maxChecksPerRun", label: "Most series checked per wake-up", type: "number", min: 1, max: 500 },
             {
                 key: "checkTimeoutSec",
@@ -203,18 +194,12 @@ const GROUPS: { id: string; title: string; note?: string; fields: Field[] }[] = 
     {
         id: "anilist",
         title: "AniList",
-        note: "Read-only. Nothing is sent to AniList, and no sign-in is needed for either of these.",
+        note: "Read-only. Nothing is sent to AniList, and no sign-in is needed.",
         fields: [
             {
                 key: "anilistMetadata",
                 label: "Fill in posters and titles from AniList",
                 help: "Only fills gaps — never replaces a poster or title the site already gave.",
-                type: "toggle"
-            },
-            {
-                key: "anilistSchedule",
-                label: "Use real air times for scheduling",
-                help: "Lets the “Air time” schedule check a series when its episode is actually due.",
                 type: "toggle"
             }
         ]

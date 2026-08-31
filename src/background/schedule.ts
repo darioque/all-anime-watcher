@@ -1,4 +1,4 @@
-import type { SchedulePolicy, TrackedAnime } from "~/model/types"
+import type { SchedulePolicy, TrackedAnime, Weekday } from "~/model/types"
 import { checkable } from "~/model/keys"
 import { log } from "~/shared/logger"
 import { NEVER } from "~/shared/time"
@@ -65,7 +65,7 @@ function computeNext(policy: SchedulePolicy, anime: TrackedAnime, now: number): 
             return (anime.lastCheckedAt || now) + Math.max(0.25, policy.everyHours) * HOUR
 
         case "weekly":
-            return nextWeekly(policy.weekday, policy.time, now)
+            return nextWeekly(policy.weekdays, policy.times, now)
 
         case "everyNDays": {
             const period = Math.max(1, policy.days) * DAY
@@ -76,31 +76,6 @@ function computeNext(policy: SchedulePolicy, anime: TrackedAnime, now: number): 
             return from + (Math.floor(elapsed / period) + 1) * period
         }
 
-        case "airing": {
-            const airing = anime.airing
-
-            /*
-             * The tracker knows when an episode *broadcasts*. It does not know
-             * when this site will have it subtitled and uploaded, which for a
-             * fansubbed donghua is hours later — checking at the broadcast minute
-             * reliably finds nothing and then waits out the fallback interval.
-             * `delayMin` is that gap; resolveSchedule fills it in from the source
-             * or the global default when the policy leaves it unset.
-             */
-            const expected = airing ? airing.at + (policy.delayMin ?? 0) * MINUTE : 0
-
-            // No tracker data, or a date that has already passed and not been
-            // refreshed: fall back to plain polling rather than never checking.
-            if (!airing || expected + policy.padAfterMin * MINUTE < now) {
-                logger.debug(`${anime.key}: no usable airing time, falling back to ${policy.fallbackHours}h`)
-                return (anime.lastCheckedAt || now) + Math.max(0.25, policy.fallbackHours) * HOUR
-            }
-
-            // Start looking shortly before it is expected — sites publish early
-            // as often as late — and if that moment has passed, look now.
-            return Math.max(expected - policy.padBeforeMin * MINUTE, now)
-        }
-
         case "inherit":
             // resolveSchedule already collapsed inherit; a stray one means the
             // global default is itself "inherit", which is a misconfiguration.
@@ -109,22 +84,105 @@ function computeNext(policy: SchedulePolicy, anime: TrackedAnime, now: number): 
     }
 }
 
-/** Next occurrence of a weekday and HH:MM, strictly in the future, local time. */
-function nextWeekly(weekday: number, time: string, now: number): number {
-    const [hoursText, minutesText] = time.split(":")
-    const hours = Number.parseInt(hoursText ?? "0", 10)
-    const minutes = Number.parseInt(minutesText ?? "0", 10)
-    if (!Number.isFinite(hours) || !Number.isFinite(minutes)) {
-        logger.warn(`unparseable weekly time "${time}", falling back to 24h`)
+/**
+ * Soonest slot strictly in the future, local time.
+ *
+ * Every combination of a listed weekday and a listed time is a slot, and the
+ * nearest one wins. Walking eight days rather than seven is not an off-by-one:
+ * when today is the only listed weekday and all of today's times have passed,
+ * the answer is the same weekday next week, and day seven is that day.
+ *
+ * The arithmetic goes through a local `Date` on purpose. Adding 24h in
+ * milliseconds is wrong across a DST boundary — "Thursdays at 21:00" would
+ * become 20:00 or 22:00 for half the year — whereas `setDate` then `setHours`
+ * asks for a wall-clock time and lets the platform find the instant.
+ */
+function nextWeekly(weekdays: readonly Weekday[], times: readonly string[], now: number): number {
+    const minutes = times.map(parseTime).filter((value): value is number => value !== null)
+
+    // Nothing to go on. Falling back to a day beats both NEVER (a series that
+    // silently stops being checked) and `now` (a series checked every tick).
+    if (weekdays.length === 0 || minutes.length === 0) {
+        logger.warn(`weekly schedule has no ${weekdays.length === 0 ? "days" : "usable times"}; falling back to 24h`)
         return now + DAY
     }
 
-    const candidate = new Date(now)
-    candidate.setHours(hours, minutes, 0, 0)
+    let best = Number.POSITIVE_INFINITY
 
-    let delta = (weekday - candidate.getDay() + 7) % 7
-    if (delta === 0 && candidate.getTime() <= now) delta = 7
-    candidate.setDate(candidate.getDate() + delta)
+    for (let ahead = 0; ahead <= 7; ahead++) {
+        const day = new Date(now)
+        day.setDate(day.getDate() + ahead)
+        if (!weekdays.includes(day.getDay() as Weekday)) continue
 
-    return candidate.getTime()
+        for (const minute of minutes) {
+            const slot = new Date(day)
+            slot.setHours(Math.floor(minute / 60), minute % 60, 0, 0)
+            const at = slot.getTime()
+            if (at > now && at < best) best = at
+        }
+    }
+
+    return Number.isFinite(best) ? best : now + DAY
+}
+
+/** "21:00" → 1260 minutes past midnight. `null` for anything unparseable. */
+function parseTime(time: string): number | null {
+    const [hoursText, minutesText] = String(time).split(":")
+    const hours = Number.parseInt(hoursText ?? "", 10)
+    const minutes = Number.parseInt(minutesText ?? "", 10)
+    if (!Number.isInteger(hours) || !Number.isInteger(minutes)) return null
+    if (hours < 0 || hours > 23 || minutes < 0 || minutes > 59) return null
+    return hours * 60 + minutes
+}
+
+/**
+ * Bring a stored policy up to the current shape.
+ *
+ * Settings and per-anime overrides are persisted as whole objects, so a profile
+ * written by an older build hands back exactly what that build wrote — there is
+ * no schema migration step to lean on. Both readers (`resolveSchedule` for the
+ * scheduler, the picker for the UI) go through here, so an old value is
+ * understood everywhere rather than silently failing one `switch` at a time.
+ *
+ * Two shapes come forward:
+ *
+ * - `weekly` held a single `weekday` and `time`. It becomes a one-day, one-time
+ *   list, which is the same schedule.
+ * - `airing` polled around AniList's broadcast time. It is gone, and its honest
+ *   translation is its own fallback interval: whenever the tracker had nothing
+ *   usable — no match, a finished series, a date already past — that is what it
+ *   did anyway.
+ */
+export function normalizeSchedule(policy: SchedulePolicy | undefined | null): SchedulePolicy {
+    if (!policy || typeof policy !== "object") return { mode: "interval", everyHours: 6 }
+
+    const legacy = policy as {
+        mode: string
+        weekday?: number
+        time?: string
+        weekdays?: unknown
+        times?: unknown
+        fallbackHours?: number
+    }
+
+    if (legacy.mode === "airing") {
+        const everyHours = Number.isFinite(legacy.fallbackHours) ? Number(legacy.fallbackHours) : 12
+        logger.info(`the "air time" schedule is gone; reading it as every ${everyHours}h`)
+        return { mode: "interval", everyHours }
+    }
+
+    if (legacy.mode !== "weekly") return policy
+
+    const weekdays = (Array.isArray(legacy.weekdays) ? legacy.weekdays : [legacy.weekday])
+        .map(Number)
+        .filter(day => Number.isInteger(day) && day >= 0 && day <= 6) as Weekday[]
+    const times = (Array.isArray(legacy.times) ? legacy.times : [legacy.time]).filter(
+        (value): value is string => typeof value === "string" && parseTime(value) !== null
+    )
+
+    return {
+        mode: "weekly",
+        weekdays: weekdays.length > 0 ? [...new Set(weekdays)].sort((a, b) => a - b) : [2],
+        times: times.length > 0 ? [...new Set(times)].sort() : ["18:00"]
+    }
 }

@@ -9,8 +9,8 @@ const ENDPOINT = "https://graphql.anilist.co"
  *
  * No key and no sign-in needed for search and metadata, which is why this is
  * useful before any OAuth work: posters, canonical titles, episode counts and —
- * the interesting part — `nextAiringEpisode`, which lets the update scheduler
- * check a series around the time it actually airs instead of every six hours.
+ * the interesting part — `countryOfOrigin`, the one fact no site reports and the
+ * only thing that tells a donghua from an anime.
  *
  * Writing progress back needs OAuth and is deliberately not here.
  */
@@ -34,9 +34,6 @@ export interface AniListMedia {
     countryOfOrigin?: string
     genres: string[]
     coverImage?: string
-    /** Epoch ms of the next episode's air time, when the series is running. */
-    nextAiringAt?: number
-    nextAiringEpisode?: number
 }
 
 const MEDIA_FIELDS = `
@@ -51,7 +48,6 @@ const MEDIA_FIELDS = `
     countryOfOrigin
     genres
     coverImage { large }
-    nextAiringEpisode { episode airingAt }
 `
 
 /**
@@ -113,14 +109,7 @@ function toMedia(raw: RawMedia): AniListMedia {
         ...(raw.seasonYear ? { seasonYear: raw.seasonYear } : {}),
         ...(raw.countryOfOrigin ? { countryOfOrigin: raw.countryOfOrigin } : {}),
         genres: raw.genres ?? [],
-        ...(raw.coverImage?.large ? { coverImage: raw.coverImage.large } : {}),
-        ...(raw.nextAiringEpisode
-            ? {
-                  // AniList reports seconds; everything here is milliseconds.
-                  nextAiringAt: raw.nextAiringEpisode.airingAt * 1000,
-                  nextAiringEpisode: raw.nextAiringEpisode.episode
-              }
-            : {})
+        ...(raw.coverImage?.large ? { coverImage: raw.coverImage.large } : {})
     }
 }
 
@@ -163,5 +152,4 @@ interface RawMedia {
     countryOfOrigin?: string
     genres?: string[]
     coverImage?: { large?: string }
-    nextAiringEpisode?: { episode: number; airingAt: number }
 }

@@ -17,9 +17,9 @@ export interface MatchCandidate {
 /**
  * How sure we have to be before linking a series without the user saying so.
  *
- * Deliberately strict. A wrong link puts the wrong poster and the wrong airing
- * schedule on a series, and the user has no reason to suspect it — far worse
- * than leaving it unlinked and visibly unmatched.
+ * Deliberately strict. A wrong link puts the wrong poster and the wrong shelves
+ * on a series, and the user has no reason to suspect it — far worse than
+ * leaving it unlinked and visibly unmatched.
  */
 export const CONFIDENT = 0.9
 

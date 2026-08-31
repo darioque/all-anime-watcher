@@ -637,7 +637,6 @@ function stateTags(a: TrackedAnime): { label: string; tone: "warn" | "muted" }[]
     if (!a.poll) tags.push({ label: "not checking", tone: "muted" })
     if (a.overrides.schedule) tags.push({ label: "custom schedule", tone: "muted" })
     if (a.failCount > 0) tags.push({ label: `${a.failCount} failed check${a.failCount > 1 ? "s" : ""}`, tone: "warn" })
-    if (a.airing) tags.push({ label: `ep ${a.airing.episode} ${relativeFuture(a.airing.at)}`, tone: "muted" })
     return tags
 }
 
@@ -684,7 +683,7 @@ function menuFor(a: TrackedAnime): MenuItem[] {
             label: a.anilistId ? "Change AniList match…" : "Match on AniList…",
             checked: Boolean(a.anilistId),
             separated: true,
-            hint: a.anilistId ? undefined : "Poster, canonical title and air times",
+            hint: a.anilistId ? undefined : "Poster, canonical title and shelving",
             action: () => (trackerFor.value = a)
         },
         { label: "Open series page", action: () => open(a.url) },

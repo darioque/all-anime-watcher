@@ -79,38 +79,47 @@ export interface AnimeOverrides {
     markWatchedOnOpen?: boolean
     markWatchedOnEmbed?: boolean
     verifyNewEpisodes?: boolean
-    releaseDelayMin?: number
     takeOverPage?: boolean
     notifyNewEpisode?: boolean
     pushToTracker?: boolean
 }
 
+/** Sunday is 0, matching `Date.prototype.getDay`. */
+export type Weekday = 0 | 1 | 2 | 3 | 4 | 5 | 6
+
 /**
  * When to look for new episodes. Resolved per anime, defaulting to the global
- * policy. `manual` exists because donghua release data is frequently missing or
- * wrong upstream, and the user needs to be able to just say "Tuesdays".
+ * policy.
+ *
+ * Deliberately all hand-set: donghua release data is frequently missing or wrong
+ * upstream, and the user needs to be able to just say "Wednesdays and Thursdays
+ * at 21:00". There was once an `airing` mode that took AniList's broadcast time
+ * and polled around it; it is gone. See `weekly` for why.
  */
 export type SchedulePolicy =
     | { mode: "inherit" }
     /** Plain polling, AMR's behaviour. */
     | { mode: "interval"; everyHours: number }
     /**
-     * Poll around the real air time; falls back to interval when unknown.
+     * "Wednesdays and Thursdays at 21:00", in the browser's local time.
      *
-     * `delayMin` is the gap between a broadcast and this *site* having it —
-     * fansub and donghua sites are rarely instant, so checking at the broadcast
-     * minute mostly finds nothing. Left undefined it falls through to the
-     * source's `releaseDelayMin` and then to the global one.
-     */
-    | { mode: "airing"; delayMin?: number; padBeforeMin: number; padAfterMin: number; fallbackHours: number }
-    /**
-     * "Every Tuesday at 18:00", in the browser's local time.
+     * Both fields are lists, and the slots are every combination — three days
+     * and two times is six checks a week. One time on one day is the common
+     * case and still the shape the picker opens on; the lists exist because a
+     * site that posts a Wednesday episode late on Wednesday or early on
+     * Thursday is normal, and expressing that as an interval means polling
+     * around the clock to catch a window you already know.
+     *
+     * This replaced a mode that read the broadcast time off AniList. Knowing
+     * when an episode *broadcast* is not knowing when a fansub site has it up,
+     * so that mode needed a delay guess on top of the tracker's guess, and it
+     * was wrong more often than a person saying which evenings to look.
      *
      * No timezone field on purpose: honouring one means a genuinely tz-aware
      * implementation, not an ignored string. Local time is right for a library
      * that lives on one machine.
      */
-    | { mode: "weekly"; weekday: 0 | 1 | 2 | 3 | 4 | 5 | 6; time: string }
+    | { mode: "weekly"; weekdays: Weekday[]; times: string[] }
     /** "Every N days, counting from this date." */
     | { mode: "everyNDays"; days: number; from: number }
     /** Followed, never polled. */
@@ -147,13 +156,6 @@ export interface TrackedAnime {
      * and the genres do not distinguish them — `countryOfOrigin` does.
      */
     meta?: SeriesMeta
-
-    /**
-     * Next episode's air time, from the tracker. Feeds the `airing` schedule
-     * policy; absent for a finished series, which makes that policy fall back to
-     * its interval rather than never checking.
-     */
-    airing?: { episode: number; at: number; fetchedAt: number }
 
     /** Descending by number, as the source returned it. */
     episodes: Episode[]
