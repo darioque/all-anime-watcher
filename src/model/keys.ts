@@ -53,9 +53,10 @@ export function resumePositionFor(saved: EpisodeProgress | undefined): number | 
 /*
  * There is deliberately no `watchable(episode)` predicate here, and there was
  * one. A post the site has created but not aired — a countdown, a premium
- * window, a backdated placeholder — is not in the episode list at all; the check
- * run drops it before storing (see `verifiedEpisodes`). Everything below can
- * therefore treat every entry as a real episode.
+ * window, a backdated placeholder — is not in the episode list at all: the
+ * source drops it while parsing the list, so it never enters the extension in
+ * the first place. Everything below can therefore treat every entry as a real
+ * episode.
  *
  * The version that kept such posts with a `pending` flag needed every reader of
  * `anime.episodes` to remember to skip them, and the cost of that showed up
@@ -197,66 +198,6 @@ export function newReleases(options: {
  * instead puts the transition back where it belongs — the episode is absent, then
  * it is present, which is exactly what the diff is for.
  */
-
-/**
- * Which episodes are worth opening to check whether they are real.
- *
- * Verification costs one request each, so this decides what that budget buys.
- * Two kinds qualify and nothing else does:
- *
- *  - **the ones about to be announced.** A backfill is never announced, so
- *    confirming a two-year-old post has a player in it buys nothing. This is
- *    also what keeps re-checking a standing countdown: the placeholder was
- *    dropped last time, so it is in the diff again, so it is a candidate again —
- *    which is the only way it is ever noticed going live.
- *  - **the newest few nobody has ever asked about.** This is the one that is
- *    easy to leave out and useless without.
- *
- * That third clause is a repair, and it exists because the first version of this
- * shipped without it and fixed nothing. A library that already holds the
- * placeholder holds it as an ordinary episode: it is not in the diff, because
- * nothing about the list changed, and no code had ever looked at it. The other
- * clause came back empty and the countdown stayed the newest episode — the
- * feature worked perfectly on libraries that did not have the problem. Same
- * family as rule 11 in CLAUDE.md: new behaviour that cannot reach the state
- * already on disk.
- *
- * `available` is what stops that sweep repeating. Absent means *unknown*, so the
- * sweep runs once per episode and then never again; without the flag there is no
- * way to tell "checked and fine" from "never asked", and the top episodes of
- * every series would be re-fetched on every single check forever.
- *
- * Highest number first, then capped. A site posts *ahead* of itself, never
- * behind, so placeholders are always at the top of the numbering; if the cap
- * bites, the episodes it drops are the least likely to be placeholders.
- */
-export function verificationCandidates(options: {
-    /** The freshly fetched list, carrying whatever `available` memos were kept. */
-    episodes: Episode[]
-    /** What would be announced if nothing were verified. */
-    releases: Episode[]
-    /** How many never-checked episodes to sweep from the top of the numbering. */
-    sweep: number
-    limit: number
-}): Episode[] {
-    const byNumberDesc = (a: Episode, b: Episode) => b.number - a.number
-    const unknown = (ep: Episode) => ep.available !== true
-
-    const announced = new Set(options.releases.map(episodeProgressKey))
-    const swept = new Set(
-        options.episodes.filter(unknown).sort(byNumberDesc).slice(0, Math.max(0, options.sweep)).map(episodeProgressKey)
-    )
-
-    const picked = options.episodes.filter(ep => {
-        // Settled, and settled the cheap way round: an episode with a player in
-        // it does not lose it.
-        if (ep.available === true) return false
-        const key = episodeProgressKey(ep)
-        return announced.has(key) || swept.has(key)
-    })
-
-    return picked.sort(byNumberDesc).slice(0, Math.max(0, options.limit))
-}
 
 /**
  * How far the watch pointer sits above the newest episode the source lists.

@@ -191,8 +191,9 @@ scripts/probe-source.mts the CLI Lab page
    so it announces the post, moves the watch position onto it, and the real
    episode never shows as unwatched. Check by opening the newest one or two
    episodes of a *currently airing* series and looking at where the player
-   should be. If it does, declare `pendingInList` or `episodeAvailability` — see
-   "Posted, but not out" below. This is not optional and is not a setting.
+   should be. If it does, drop the post while parsing the list — see "Posted, but
+   not out" below — and declare `pending` markers too, for somebody who opens the
+   page anyway. This is not optional and is not a setting.
 5. `npm run probe -- <id>` until every check passes. Add `VERBOSE=1` for request logs.
 6. Prior art for a site's real data path:
    `github.com/Kohi-den/extensions-source` (Kotlin, Aniyomi). Browse with
@@ -556,41 +557,61 @@ each resolved to nothing. It was announced as a release, the notification opened
 a dead page, and the watch position had already moved onto it on the way in — so
 the real E13 would never have shown as unwatched when it aired.
 
-**The `<li>` is byte-for-byte the same shape as a real one** — same `epl-num`
-("13 [4K]"), same `epl-title`, same `status Sub` — which is the whole difficulty,
-because the update loop reads only the series page. The one thing that differs is
-the *date*: the placeholder is backdated far enough to sort below episode 1 of
-its own series.
+**A post with no episode behind it is not an episode, so the source does not
+return one.** The filtering happens inside list parsing, which is the only place
+it belongs. `getEpisodes` has three callers — the update loop, the Lab page and
+the CLI probe — and a rule enforced anywhere else has to be remembered at each of
+them; an earlier version ran it as a separate pass in the update loop and the
+other two duly listed the placeholder. Downstream, `latestEpisodeNumber`,
+`unwatchedCount`, `nextEpisode`, `watchState`, the shelves, the group aggregates
+and the player's navigator are all correct without knowing the concept exists.
 
-**That was first written off as a symptom and it was wrong to.** The objection
-was sound — an out-of-order date is also what a corrected typo or a late
-re-upload looks like, and reading it as "premium" would suppress real episodes —
-but it argues against the loose test, not against every test. Watched twice on
-the same series, the habit is sharper on both ends at once:
+**Two questions, asked in different places, neither of which costs a request.**
 
-```
-2026-08-27   E13 dated July 1   E01-04 dated July 30    E13 last, and the newest number
-2026-08-31   E14 dated July 1   E13    dated August 30  E14 last, and the newest number
-```
-
-So the rule is a conjunction, and the conjunction is the whole safety of it: the
-entry must be **the highest-numbered in the list** *and* **strictly the
-oldest-dated**. A re-upload takes today's date, not the list's oldest; a
-corrected typo lands on an episode that is not the newest. Neither half alone is
-evidence, and each is a real episode suppressed if trusted alone. Ties, missing
-dates and partly-dated lists all decline to answer.
-
-**Two strategies, and a source picks by what its site gives away.**
-
-| | cost | when |
+| | question | where |
 | --- | --- | --- |
-| `pendingInList(episodes)` | free — the list is already fetched | the site's own list gives it away |
-| `episodeAvailability(html, url)` | one request per candidate, every check while the countdown stands | it doesn't |
+| `withoutBackdatedPlaceholder(episodes)` | which of these listed posts are episodes? | inside `parseEpisodes`, off a list already fetched |
+| `episodeAvailability(html, url)` | is there anything on *this* page? | `identify.ts`, off HTML already in hand |
 
-Both are optional, both may be declared, the free one runs first and always, and
-the paid one is only asked about what survived it. luciferdonghua reads its list
-and costs nothing; `AnimeStream` implements both from one per-site `pending`
-config (`backdated` for the first, `markers`/`text`/`reason` for the second).
+The second does not stop anything being announced — that post is gone from the
+list already. It runs when somebody opens the page anyway, from a bookmark or the
+site's own navigation: it keeps the visit from counting as watched and sends
+`pendingReason` to the player, which shows it where the video would be. A site
+with the habit usually wants both, and luciferdonghua declares both.
+
+**The tell is in the date, and writing it off was a mistake worth recording.**
+The placeholder's `<li>` is byte-for-byte the same shape as a real one — same
+`epl-num` ("13 [4K]"), same `epl-title`, same `status Sub`. Only the date differs:
+it is backdated far enough to sort below episode 1 of its own series. That was
+first dismissed as a symptom rather than evidence, because an out-of-order date
+is also what a corrected typo or a late re-upload looks like. Sound against a
+loose test; not against every test. Watched twice on the same series the habit is
+sharper on both ends at once:
+
+```
+2026-08-27   E13 dated July 1   E01-04 dated July 30    last, and the newest number
+2026-08-31   E14 dated July 1   E13    dated August 30  last, and the newest number
+```
+
+So the rule is a conjunction, and the conjunction is its whole safety: **highest-
+numbered in the list** *and* **strictly the oldest-dated**. A re-upload takes
+today's date, not the list's oldest; a corrected typo lands on an episode that is
+not the newest. Ties, missing dates and partly-dated lists decline to answer, as
+does every other uncertainty — the two mistakes are not symmetrical. Announcing a
+countdown is a notification the viewer dismisses; dropping a real episode is one
+they never learn they missed. **Every uncertain path keeps the episode.**
+
+The same asymmetry governs the page check, which has three rules of its own:
+
+- **An embed wins outright, checked before any marker.** A site is free to run a
+  countdown to the *next* episode above a player that works. The marker is only
+  consulted once the player container has no iframe and the page no
+  `meta[itemprop=embedUrl]`.
+- **Requiring both is what makes a broken selector safe.** An empty player
+  container is suggestive but not conclusive — a theme change looks identical —
+  so something has to positively say "not yet". A source that declares no markers
+  never answers at all, which is why `lmanime` declares nothing.
+- **`reason` is written for a person**, because it is what the player prints.
 
 **It is not a setting, and it used to be.** `verifyNewEpisodes` was a global
 toggle, off by default, overridable per source and per series. That asked the
@@ -598,68 +619,32 @@ viewer a question they have no way to answer — "does this site post ahead?" �
 about a cost they cannot see, and then defaulted to the wrong answer for the one
 site that needed it, so the bug it was written for stayed live until somebody
 found the switch. Whether a site posts ahead is a fact about the site, so the
-site's source declares it and the loop obeys; *how* it is answered, and what that
-costs, is the source's business too. **When a source says it must check
-something, the check is not optional.**
+source declares it and everything else obeys. **When a source says a post is not
+an episode, that is not a preference.**
 
-**Which candidates is the part that was got wrong first, and it is worth knowing
-why.** The obvious answer — "the episodes about to be announced" — fixed nothing
-on the machine that reported the bug. A library that already holds the
-placeholder holds it as an ordinary episode: it is not in the diff, because
-nothing about the list changed, and no code had ever looked at it. The clause
-came back empty and the countdown stayed the newest episode. The feature worked
-perfectly on libraries that did not have the problem. That is rule 11's shape
-again — new behaviour that cannot reach the state already on disk — and the fix is
-a second clause: sweep the newest few episodes nobody has ever asked about.
-`Episode.available` is what stops the sweep repeating; **absent means unknown,
-not fine**, which is the whole reason it is tri-state rather than a boolean. It
-is also the migration path — the sweep is what reaches a placeholder already
-sitting in someone's library and drops it on the next check.
-Three rules hold the request-path check together:
+**What this replaced, and why none of it is here any more.** Three designs
+preceded it, each deleted by the next:
 
-- **An embed wins outright, checked before any marker.** A site is free to run a
-  countdown to the *next* episode above a player that works, and suppressing the
-  episode the viewer is on would be worse than the bug. The marker is only
-  consulted once the player container has no iframe and the page no
-  `meta[itemprop=embedUrl]`.
-- **Requiring both is what makes a broken selector safe.** An empty player
-  container is suggestive but not conclusive — a theme change looks identical —
-  so something has to positively say "not yet". Every failure path (no opinion,
-  setting off, fetch timeout, parse throw) leaves the episode *announced*. The
-  two mistakes are not symmetrical: announcing a countdown is a notification you
-  dismiss, suppressing a real episode is one you never learn you missed. That is
-  also why `pending` is opt-in per site and `lmanime` declares nothing. The same
-  asymmetry governs `pendingInList`, which returns nothing whenever unsure.
-- **The placeholder is dropped, not flagged, and ordering is what makes that
-  work.** `verifiedEpisodes` removes it *before* the diff runs, so the stored
-  list contains episodes and nothing else. Everything downstream —
-  `latestEpisodeNumber`, `unwatchedCount`, `nextEpisode`, `watchState`, the
-  shelves, the group aggregates, the player's own navigator — is then correct
-  without knowing the concept exists.
-
-**This replaced a design that kept the post under an `Episode.pending` flag, and
-the reason is worth keeping.** That version needed every reader of
-`anime.episodes` to remember to skip flagged entries, via a `watchable()`
-predicate. One of them didn't: the player built its episode navigator straight
-off the stored list, so the next-episode arrow lit up for a countdown and the
-picker offered it — the same bug the flag existed to prevent, one layer down. **A
-rule that has to be repeated at every call site will be missed at one of them.**
-A list that contains only episodes cannot be read wrongly.
-
-It also deleted a function. With the placeholder stored, the day the video went
-up *nothing about the list changed*, so the diff could not see it and a second
-announcement path (`wentLive`) had to exist to catch the transition. Drop the
-placeholder and going live is an ordinary appearance in the diff, which is what
-`newReleases` has always announced.
-
-**The price, stated honestly.** A dropped placeholder is in the diff again on the
-next check, so a source on the request path re-opens it once per check while the
-countdown stands — the same request the old "already known to be pending" clause
-spent, so no regression, and nothing at all for a source answering from its list. And where the old flag survived a failed fetch, this cannot: a
-network blip on the placeholder's page falls through to "out" and may announce it
-a second time. That is the cheap mistake by the asymmetry above, it self-corrects
-on the next successful check, and it is the trade for deleting a rule that had to
-be obeyed in nine places.
+1. **An `Episode.pending` flag.** Every reader of `anime.episodes` had to
+   remember to skip flagged entries via a `watchable()` predicate. The player's
+   episode navigator didn't, so the next-episode arrow lit up for a countdown —
+   the same bug the flag existed to prevent, one layer down. **A rule that has to
+   be repeated at every call site will be missed at one of them.**
+2. **A `wentLive` announcement path.** With the placeholder stored, the day the
+   video went up *nothing about the list changed*, so the diff could not see it
+   and a second path had to exist to catch the transition. Drop the placeholder
+   and going live is an ordinary appearance in the diff.
+3. **`verifiedEpisodes`, a late pass that opened episode pages.** One request per
+   candidate, on every check, for as long as the countdown stood — plus
+   `verificationCandidates` to pick them, a sweep to reach placeholders already
+   stored, an `Episode.available` memo to stop the sweep repeating, and a cap so
+   an empty stored list did not open four hundred pages. All of it existed to
+   make an expensive late check affordable. Reading the list at parse time
+   dissolves the problem: there is nothing to budget, nothing to memoise, and a
+   placeholder already in the library simply stops being returned on the next
+   refresh. If a future site hides the tell only on the episode page, this is the
+   shape to rebuild — it is in the history, deleted deliberately and not by
+   accident.
 
 **And the watch position moved before anything was known to be playable.** That
 is a second bug with the same root: `markWatchedOnOpen` fired when the page was
@@ -669,154 +654,6 @@ timing moved — `onOpenMark` (pure, in `settings/watching.ts`) answers `never` 
 handed to it and spent at the first frame (`markOnScreen`, at the three points
 where `status` becomes `ready`). Every server failing with no embed to fall back
 on therefore records nothing.
-
-**This is not a setting, and an attempt to make it one was removed.** Waiting for
-a picture is not a preference — it is the difference between recording a fact and
-recording a guess, and nobody wants the guess. It is also why the rule takes two
-inputs and has no special cases: a page with no servers, a page that is a
-countdown, and five servers that all resolve to nothing each reach the same place
-on their own, because none of them ever attaches anything. With `takeOverPage`
-off the answer is still `now` — nothing of ours attaches to the site's own
-player, so no later moment is coming and the page read is the only signal there
-will ever be, exactly as `markWatchedOnEmbed` already says.
-
-**An empty episode list is a failure, not a result.** `failCount` lives in a
-`catch`, so on its own it only ever counts *transport* failures — a timeout, a
-refused connection. The common way a source actually dies is a **parse** failure:
-a renamed class, a restyled listing, a soft-404 answering 200 with no items.
-Every one of those returns cleanly with zero episodes, which reads as a healthy
-check that happened to find nothing — no tag, no backoff, nothing in the failed
-filter, nothing to notice at all.
-
-`episodeList()` throws instead, and both `addSeries` and `refreshSeries` go
-through it so they cannot drift apart. Throwing rather than flagging does a
-second job that matters as much: the caller assigns the fetched list straight
-over the stored one, so an empty parse used to **replace a good episode list with
-nothing** — the row dropped to "unstarted", the picker emptied, and the record of
-what the site had was gone until some later check succeeded. Failing leaves the
-stored list untouched, which is the honest answer: we did not learn the episodes
-are gone, we learned nothing.
-
-No attempt is made to tell "had episodes, now has none" from "never had any". A
-series in the library was put there by opening one of its episodes, so it had at
-least one; the ambiguous case is a technicality, and a second code path to keep
-right costs more than it buys.
-
-**The Lab and `npm run probe` keep calling `getEpisodes` directly**, deliberately.
-Their job is to report what happened, and "0 episodes" is exactly the finding
-someone runs them to see — throwing there would hide it behind a stack trace.
-
-**There is no auto-suspend, and that is a decision.** AMR stops polling a mirror
-that keeps failing, which is right for a library of thousands; here the backoff
-already caps a dead series at two requests a day, and the failure mode of
-suspending is bad in the way this codebase cares about — a source down for a day
-comes back and the series silently never checks again. `poll` also records the
-*user's* choice, so an automatic writer would make the UI stop telling them what
-they chose (rule 11's shape). If it is ever wanted it belongs in a separate
-`suspended` flag, never by flipping `poll`.
-
-The backoff is `min(2 ** min(failCount, 6) * 15min, 12h)`, applied as a *floor*
-under the normal schedule: 30min, 1h, 2h, 4h, 8h, then 12h from the sixth failure
-on. One failure is enough to tag the row and fill the failed filter — there is no
-threshold — and any successful check sets `failCount` back to 0 and clears
-`lastError`.
-
-**A pointer on an episode that cannot be watched rolls back, and that is a
-decided rule rather than a side effect of this feature.** Two situations reach
-it: the episode is gone from the list (the site renumbered, pulled a post,
-re-uploaded under another number) or it was a countdown the check run has just
-dropped. They get the same answer, deliberately — and since a placeholder is not
-in the list at all, by the time `pointerRollback` reads it they are literally the
-same situation, which is one more thing dropping bought. Either way the row reads
-"Up to date" at an episode that does not exist, the badge stays dark, and "watch
-next" returns nothing.
-
-`pointerRollback` moves to the highest episode *below* the one held,
-not to zero. AMR resets to zero and is right to for its model — its position
-**is** a chapter URL, so a vanished path means the position is genuinely gone.
-Ours is a number and the episode list is evidence: the viewer did watch what is
-below, and zeroing would mark a whole run unwatched, light the badge for all of
-it and point "watch next" at the bottom. One step back surfaces the problem —
-the row goes from "Up to date" to having something waiting — without inventing a
-backlog. **An empty list is not a renumbering**: a failed fetch returns no
-episodes, and acting on that would wipe every series' pointer the moment a site
-had a bad minute.
-
-It runs in `refreshSeries`, **outside `verifyEpisodes` and unconditional**. The
-missing-episode case has nothing to do with countdowns and has to keep working
-for every source whether or not `verifyNewEpisodes` is switched on for it.
-
-`positionDriftTolerance` is gone with it. It existed to sit out a site pulling
-its newest episode for a re-upload, but that is now exactly the case the rollback
-handles, and a threshold could only delay saying so. `positionDrift` survives as
-the residual surface for the window before the next check — an imported backup,
-a list edited by hand — and fires at any drift at all.
-
-**Reaching it at all three levels took UI that did not exist.** Before this there
-was no per-source settings editor at all (SourcesPanel was domain management
-only) and the per-anime menu exposed nothing but Schedule, so the resolver chain
-was real and unreachable — a setting can be "per source and per series" in
-`resolve()` and still be settable nowhere. Now: Settings for the global, Sources
-for per-site, and a series' ⋯ → "Tracking…" for per-show, each a three-way
-Default/On/Off. `library:setOverrides` and `sources:setSettings` are
-generic patch writers — **`null` clears a key**, because Chrome JSON-serialises
-messages and an `undefined` field simply vanishes, which reads as "leave it
-alone" and makes "inherit" unreachable once anything has been written.
-
-`npm run check:episodes` covers the rules; `npm run check:pending` covers
-reaching the verdict, against reduced fixtures of the three states the player
-container was observed in.
-
-**A non-browser User-Agent is the probe's *other* blind spot, and it points the
-opposite way.** The documented one is the CLI being too strong — Node can set a
-`Referer` a browser cannot. Node's default `User-Agent` is the same blind spot
-reversed: luluvdo's CDN 403s it and serves a browser UA, 3/3 each way with a
-fresh token and no `Referer` or `Origin` involved. `scripts/probe-source.mts`
-now sends a browser UA from `browserHeaders()` for exactly this reason. A netRule
-would have been the wrong fix twice over: Chrome does not let an extension set a
-UA, and the real one is already browser-shaped.
-
-**Some CDNs bind a signed URL to the `Accept-Language` of the request that
-minted it.** luluvdo (StreamWish family, served from `tnmr.org`) does exactly
-that. Stating it precisely matters, because three wrong theories fit the symptom
-first. Measured 3/3 per cell, and perfectly deterministic once *both* sides are
-controlled:
-
-| mint sends | spend sends | result |
-| --- | --- | --- |
-| `en-US,en;q=0.9` | the same | 200 |
-| `en-US,en;q=0.9` | `es-ES,es;q=0.9,en;q=0.8` | 403 |
-| `en-US,en;q=0.9` | nothing | 403 |
-| nothing | nothing | 200 |
-| nothing | `en-US,en;q=0.9` | 403 |
-
-`Accept` is irrelevant, and so are Referer, Origin and Sec-Fetch: a Node-minted
-token fails from a browser page *even on luluvdo's own origin*, while the token
-luluvdo's own page mints for itself plays every segment at 200. The header
-experiments looked random for an afternoon only because each attempt minted and
-spent with different header sets — control both and the behaviour is stable. The
-403 body carries no `access-control-allow-origin`, so the player sees
-`TypeError: Failed to fetch` rather than a status, which reads like a dead host.
-
-Extractors mint through `createFetchCtx`, which sends `BASE_HEADERS`, so anything
-that later fetches that URL has to look the same. Two things follow:
-
-- **`playback:fetch`, `lab:fetch` and `coverPlaylistHosts` all send
-  `BASE_HEADERS`.** A bare fetch in the worker sends Chrome's own locale, which
-  is a different client as far as the CDN is concerned. The proxy is the same
-  client as the fetcher and has to look like it.
-- **Such a stream has to be `fetchVia: "background"`.** The page cannot match —
-  hls.js there sends Chrome's locale and nothing can rewrite `Accept-Language`
-  per request from the page — so only the proxy can spend the token.
-  `StreamWishExtractor.BOUND_TO_MINT_LANGUAGE` lists the hosts that need it; the
-  rest of the family keeps the cheaper page fetch.
-
-**This is also the one failure the Lab used to bless.** `lab:fetch` runs in the
-worker, so a stream pinned to `fetchVia: "page"` was vouched for on a path
-playback never takes — a green run and a dead server. `checkStreamReach` now
-warns for every stream it fetched from the worker that the player will fetch from
-the page, and the probe's `browserHeaders()` mirrors `BASE_HEADERS` so its own
-mint and spend agree.
 
 ## Phase status
 

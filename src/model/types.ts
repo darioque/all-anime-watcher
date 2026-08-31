@@ -29,21 +29,6 @@ export interface Episode {
     filler?: boolean
     /** Epoch ms, when the site publishes a release date. */
     airedAt?: number
-    /**
-     * Verified to have a video behind it, so it is never opened again.
-     *
-     * A memo, not a state anything has to respect: an episode in the list is an
-     * episode, and a reader that ignores this field entirely is still correct.
-     * That is the difference between this and the `pending` flag that used to sit
-     * beside it — see `verifiedEpisodes` in the library for why a post with
-     * nothing behind it is now simply not in the list.
-     *
-     * Absent means *unknown*, not unavailable. Without the distinction, "already
-     * in the stored list" and "checked and fine" are the same value — and every
-     * episode stored before this existed would read as checked, so the sweep
-     * would never run on the library that needs it. See `verificationCandidates`.
-     */
-    available?: true
 }
 
 export interface EpisodeProgress {

@@ -11,6 +11,7 @@ import type {
     Server
 } from "~/sources/types"
 import { attrOf, imageUrlFrom, leadingNumber, looseDate, ownText, parse } from "~/sources/html"
+import { withoutBackdatedPlaceholder } from "~/sources/placeholders"
 import { absoluteUrl, ensureTrailingSlash, hostOf, pathOf } from "~/shared/url"
 import { log } from "~/shared/logger"
 
@@ -53,17 +54,32 @@ export interface AnimeStreamConfig {
     serverLabelFilter?: (label: string) => boolean
 
     /**
-     * How this site says "posted, but there is nothing to watch yet".
+     * How this site's *episode page* says "posted, but there is nothing to
+     * watch yet", read when the viewer opens one.
      *
-     * Opt-in, and it has to be. Both strategies below read an absence — no
-     * embed in the player box, or a date out of step with the list — and an
-     * absence is only evidence on a site whose habits have been watched. A site
-     * that builds its player in JavaScript would have every episode declared
-     * pending, and pending episodes are never announced, so a wrong default
-     * here is a source that silently stops reporting. Say nothing and neither
-     * check runs.
+     * Opt-in, and it has to be: the fallback test is "the player container
+     * holds no embed", which is only evidence on a site that inlines its player
+     * into the page. A site that builds the player in JavaScript would have
+     * every episode declared pending. Say nothing and the check never runs.
+     *
+     * Separate from `backdatedPlaceholders`, which answers the same question
+     * about the *series list* — see `parseEpisodes`. A site with the habit
+     * usually wants both: the list rule keeps the post from ever being
+     * announced, and this one explains the empty player to somebody who
+     * navigated there anyway.
      */
     pending?: PendingMarkers
+
+    /**
+     * This site backdates a post it cannot play yet, so it sorts to the bottom
+     * of its own list.
+     *
+     * Dropped during list parsing, so it costs nothing and no caller ever sees
+     * it — not the update loop, not the Lab, not the probe. See
+     * `withoutBackdatedPlaceholder` for the two conditions and why they are
+     * narrow.
+     */
+    backdatedPlaceholders?: boolean
 
     netRequest?: NetRequestConfig | null
     domainSource?: DomainSource
@@ -91,22 +107,6 @@ export interface PendingMarkers {
      * where a CSS string is evidence, and never on screen, where it is noise.
      */
     reason?: string
-
-    /**
-     * The site backdates a placeholder so it sorts to the bottom of its own
-     * list, and the newest episode being the oldest post is the tell.
-     *
-     * Answered from the series list, so it costs nothing — `pendingInList`
-     * rather than `episodeAvailability`, which is a request per candidate for
-     * as long as the countdown stands.
-     *
-     * The test is deliberately narrow on both ends: the entry has to be the
-     * highest-numbered in the list *and* strictly the oldest-dated. Either half
-     * alone is a thing that happens to real episodes — a late re-upload takes
-     * today's date, a corrected typo moves an old one — and only the pair is
-     * the cataloguing habit. See `pendingInList` below.
-     */
-    backdated?: boolean
 }
 
 export interface AnimeStreamSelectors {
@@ -170,6 +170,7 @@ export class AnimeStream implements AnimeSource {
     protected readonly netRequestConfig: NetRequestConfig | null
     protected readonly serverLabelFilter: (label: string) => boolean
     protected readonly pendingMarkers: PendingMarkers | null
+    protected readonly backdatedPlaceholders: boolean
     protected readonly logger
 
     constructor(config: AnimeStreamConfig) {
@@ -188,6 +189,7 @@ export class AnimeStream implements AnimeSource {
         this.netRequestConfig = config.netRequest ?? null
         this.serverLabelFilter = config.serverLabelFilter ?? (() => true)
         this.pendingMarkers = config.pending ?? null
+        this.backdatedPlaceholders = config.backdatedPlaceholders ?? false
         this.domainSource = config.domainSource
         this.logger = log(`source:${config.id}`)
     }
@@ -344,8 +346,24 @@ export class AnimeStream implements AnimeSource {
         })
 
         episodes.sort((a, b) => b.number - a.number)
-        this.logger.debug(`${episodes.length} episodes from ${baseUrl}`)
-        return episodes
+
+        /*
+         * A post the site made before it had the episode is not an episode, so
+         * it does not leave this method. Doing it here rather than in the update
+         * loop is what makes it true for every caller — the Lab and the probe
+         * read this list too, and both used to show the placeholder.
+         */
+        const listed = this.backdatedPlaceholders ? withoutBackdatedPlaceholder(episodes) : episodes
+        if (listed.length !== episodes.length) {
+            const dropped = episodes.filter(episode => !listed.includes(episode))
+            this.logger.debug(
+                `${baseUrl}: E${dropped.map(episode => episode.number).join(", E")} ` +
+                    `is dated below episode 1, which is how this site parks one it cannot play yet`
+            )
+        }
+
+        this.logger.debug(`${listed.length} episodes from ${baseUrl}`)
+        return listed
     }
 
     // ------------------------------------------------------------ page context
@@ -356,54 +374,12 @@ export class AnimeStream implements AnimeSource {
     }
 
     /**
-     * The placeholder the site's own list gives away, at no cost.
-     *
-     * luciferdonghua.in backdates a post it has not got the video for, far
-     * enough that it sorts below episode 1 of the series. Ancient God Sovereign
-     * has been caught doing it twice: E13 dated July 1 against E01-04's July 30,
-     * and then, once E13 went live and moved to the top with a real date, E14
-     * dated July 1 in its place.
-     *
-     * Two conditions, and the conjunction is the whole safety of it:
-     *
-     *  1. **Highest-numbered in the list.** A site posts *ahead* of itself,
-     *     never behind, so a placeholder is always at the top of the numbering.
-     *     This is what keeps a late re-upload or a corrected date on an older
-     *     episode — the ordinary reasons a list goes out of order — from ever
-     *     being suppressed, whatever date it carries.
-     *  2. **Strictly the oldest date in the list.** Not merely out of order:
-     *     the oldest, uniquely. The newest episode being the oldest post is not
-     *     something a real release does; being *somewhat* out of order is.
-     *
-     * At most one entry can satisfy both, which is the conservative direction
-     * and matches what the site does — it runs one countdown at a time. A run
-     * of two placeholders would leave the second announced, which is the
-     * mistake that costs a dismissed notification rather than a missed episode.
-     *
-     * Everything vague fails closed, into announcing as usual: fewer than two
-     * dated entries, a missing date on the candidate, a tie for oldest.
-     */
-    pendingInList(episodes: readonly Episode[]): Episode[] {
-        if (!this.pendingMarkers?.backdated) return []
-
-        const dated = episodes.filter(episode => episode.airedAt !== undefined)
-        // One date is no ordering, and a list where the site dates only some of
-        // its posts says nothing by putting one of them last.
-        if (dated.length < 2 || dated.length !== episodes.length) return []
-
-        const newest = episodes.reduce((a, b) => (b.number > a.number ? b : a))
-        const oldestAt = Math.min(...dated.map(episode => episode.airedAt!))
-
-        if (newest.airedAt !== oldestAt) return []
-        // A tie is two posts sharing the oldest date, which is a site that dates
-        // in bulk rather than a site marking one post out.
-        if (dated.filter(episode => episode.airedAt === oldestAt).length > 1) return []
-
-        return [newest]
-    }
-
-    /**
      * Is there a video behind this episode post, or only a promise of one?
+     *
+     * Asked when the viewer opens the page, off HTML already in hand, so it
+     * costs nothing: it decides whether opening counts as watching, and gives
+     * the player something to say instead of an empty frame. The series list is
+     * a separate question with its own answer — `backdatedPlaceholders`.
      *
      * Only answered where the site declared how it says so — see `pending` on
      * the config for why guessing is not an option here.

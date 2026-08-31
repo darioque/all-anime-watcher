@@ -69,14 +69,15 @@ import { AnimeStream } from "~/sources/families/AnimeStream"
  * Neither half happens to a real release on its own account: a re-upload takes
  * *today's* date rather than the list's oldest, and a corrected typo lands on an
  * episode that is not the newest. Requiring both is what makes this safe to read,
- * and `AnimeStream.pendingInList` states the conditions in full.
+ * and `withoutBackdatedPlaceholder` states the conditions in full.
  *
- * Reading it off the list is why this site costs no extra request. The evidence
- * on the episode page is stronger — a tickcounter widget means one thing and
- * nothing else — but reaching it is a fetch per candidate on every check for as
- * long as the countdown stands, and the list has already been fetched. The
- * marker path stays available on the family for a site whose list gives nothing
- * away.
+ * **Both are declared, because they answer different questions.** The list rule
+ * runs while the episode list is parsed, so the placeholder never reaches the
+ * update loop, the Lab or the probe and is never announced. The marker rule runs
+ * when somebody opens the page anyway — from a bookmark, from the series list on
+ * the site itself — where it stops the visit counting as watched and gives the
+ * player a sentence to show instead of an empty frame. Neither costs a request:
+ * one reads a list already fetched, the other HTML already in hand.
  */
 export const luciferdonghua = new AnimeStream({
     id: "luciferdonghua",
@@ -110,10 +111,18 @@ export const luciferdonghua = new AnimeStream({
         // finds nothing.
         playerIframe: "div.player-embed iframe[src]"
     },
-    // Read off the series list, so no episode page is opened — see the note
-    // above and `AnimeStream.pendingInList` for the two conditions.
+    // The series list, read as it is parsed — see `withoutBackdatedPlaceholder`
+    // for the two conditions and why they are narrow.
+    backdatedPlaceholders: true,
+    // And the episode page, for somebody who opens one anyway. `a.tickcounter`
+    // is the widget's own class and `data-type=countdown` the attribute its
+    // loader reads, so either alone is enough; both are listed because the site
+    // writes both and dropping one is a free way to survive a markup tweak. The
+    // text clause covers the sibling state, where the site has given up on a
+    // server rather than scheduled it.
     pending: {
-        backdated: true,
-        reason: "the site has dated it below episode 1, which is how it parks one it cannot play yet"
+        markers: ["a.tickcounter", "[data-type=countdown]"],
+        text: ["video not available"],
+        reason: "the site is counting down to it rather than playing it"
     }
 })
