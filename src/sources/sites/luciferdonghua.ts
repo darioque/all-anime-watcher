@@ -69,7 +69,7 @@ import { AnimeStream } from "~/sources/families/AnimeStream"
  * Neither half happens to a real release on its own account: a re-upload takes
  * *today's* date rather than the list's oldest, and a corrected typo lands on an
  * episode that is not the newest. Requiring both is what makes this safe to read,
- * and `withoutBackdatedPlaceholder` states the conditions in full.
+ * and `AnimeStream.parseEpisodes` states the conditions in full.
  *
  * **Both are declared, because they answer different questions.** The list rule
  * runs while the episode list is parsed, so the placeholder never reaches the
@@ -111,7 +111,7 @@ export const luciferdonghua = new AnimeStream({
         // finds nothing.
         playerIframe: "div.player-embed iframe[src]"
     },
-    // The series list, read as it is parsed — see `withoutBackdatedPlaceholder`
+    // The series list, read as it is parsed — see `AnimeStream.parseEpisodes`
     // for the two conditions and why they are narrow.
     backdatedPlaceholders: true,
     // And the episode page, for somebody who opens one anyway. `a.tickcounter`

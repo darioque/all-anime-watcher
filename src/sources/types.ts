@@ -223,7 +223,7 @@ export interface AnimeSource {
      * **This is not how the update loop avoids announcing such a post** — that
      * would be a request per candidate for every series in the library. A source
      * whose *list* betrays the placeholder drops it while parsing the list, so
-     * nothing downstream ever sees it; see `withoutBackdatedPlaceholder`. A site
+     * nothing downstream ever sees it; see `AnimeStream.parseEpisodes`. A site
      * with the habit usually wants both.
      *
      * Only implement it where the site has a marker that means this and nothing

@@ -11,7 +11,6 @@ import type {
     Server
 } from "~/sources/types"
 import { attrOf, imageUrlFrom, leadingNumber, looseDate, ownText, parse } from "~/sources/html"
-import { withoutBackdatedPlaceholder } from "~/sources/placeholders"
 import { absoluteUrl, ensureTrailingSlash, hostOf, pathOf } from "~/shared/url"
 import { log } from "~/shared/logger"
 
@@ -76,8 +75,7 @@ export interface AnimeStreamConfig {
      *
      * Dropped during list parsing, so it costs nothing and no caller ever sees
      * it — not the update loop, not the Lab, not the probe. See
-     * `withoutBackdatedPlaceholder` for the two conditions and why they are
-     * narrow.
+     * `parseEpisodes` for the two conditions and why they are narrow.
      */
     backdatedPlaceholders?: boolean
 
@@ -348,22 +346,33 @@ export class AnimeStream implements AnimeSource {
         episodes.sort((a, b) => b.number - a.number)
 
         /*
-         * A post the site made before it had the episode is not an episode, so
-         * it does not leave this method. Doing it here rather than in the update
-         * loop is what makes it true for every caller — the Lab and the probe
-         * read this list too, and both used to show the placeholder.
+         * Drop a post the site made before it had the episode. It is not an
+         * episode, so it does not leave this method and nothing downstream is
+         * ever told it existed.
+         *
+         * `backdatedPlaceholders` sites park such a post at a date below
+         * episode 1 of their own series. Both conditions are needed and the
+         * conjunction is the whole safety of it: the entry must be the
+         * highest-numbered *and* strictly the oldest-dated. A late re-upload
+         * takes today's date, not the list's oldest; a corrected typo lands on
+         * an episode that is not the newest. Anything less certain — a tie for
+         * oldest, a list where only some posts carry dates — keeps the episode,
+         * because dropping a real one is silent and listing a countdown costs a
+         * notification the viewer dismisses.
          */
-        const listed = this.backdatedPlaceholders ? withoutBackdatedPlaceholder(episodes) : episodes
-        if (listed.length !== episodes.length) {
-            const dropped = episodes.filter(episode => !listed.includes(episode))
-            this.logger.debug(
-                `${baseUrl}: E${dropped.map(episode => episode.number).join(", E")} ` +
-                    `is dated below episode 1, which is how this site parks one it cannot play yet`
-            )
+        const dated = episodes.filter(episode => episode.airedAt !== undefined)
+        if (this.backdatedPlaceholders && dated.length > 1 && dated.length === episodes.length) {
+            const newest = episodes.reduce((a, b) => (b.number > a.number ? b : a))
+            const oldestAt = Math.min(...dated.map(episode => episode.airedAt!))
+            const uniquelyOldest = dated.filter(episode => episode.airedAt === oldestAt).length === 1
+
+            if (newest.airedAt === oldestAt && uniquelyOldest) {
+                episodes.splice(episodes.indexOf(newest), 1)
+            }
         }
 
-        this.logger.debug(`${listed.length} episodes from ${baseUrl}`)
-        return listed
+        this.logger.debug(`${episodes.length} episodes from ${baseUrl}`)
+        return episodes
     }
 
     // ------------------------------------------------------------ page context

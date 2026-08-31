@@ -570,7 +570,7 @@ and the player's navigator are all correct without knowing the concept exists.
 
 | | question | where |
 | --- | --- | --- |
-| `withoutBackdatedPlaceholder(episodes)` | which of these listed posts are episodes? | inside `parseEpisodes`, off a list already fetched |
+| `getEpisodes` itself | which of these listed posts are episodes? | inside the source's own list parsing, off a list already fetched |
 | `episodeAvailability(html, url)` | is there anything on *this* page? | `identify.ts`, off HTML already in hand |
 
 The second does not stop anything being announced — that post is gone from the
