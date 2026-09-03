@@ -61,11 +61,18 @@ const listed = async (rows: [string, string][], source = luciferdonghua) =>
 console.log("\n\x1b[1mwhat getEpisodes hands back\x1b[0m\n")
 
 /*
- * div.eplister as fetched on 2026-08-31, in full. E14 is the placeholder: its
- * page holds a tickcounter widget where E13's holds a Dailymotion embed, and it
- * carries July 1 while E13 — the episode that had gone live — carries August 30.
+ * div.eplister as fetched on 2026-09-03, in full, and the list that broke the
+ * first version of this rule. E15 is the placeholder — its page holds a
+ * tickcounter widget — and it carries August 1 while E14, the episode that had
+ * gone live that morning, carries September 3.
+ *
+ * Note where it sits: *above* E01-04, not below. The first rule asked for the
+ * uniquely oldest date and this list does not give it one, so E15 was announced
+ * as a release. Reading the shape of the date instead of the position is the
+ * whole of the change.
  */
 const ancientGodSovereign: [string, string][] = [
+    ["14 [4K]", "September 3, 2026"],
     ["13 [4K]", "August 30, 2026"],
     ["12 [4K]", "August 27, 2026"],
     ["11 [4K]", "August 23, 2026"],
@@ -75,18 +82,29 @@ const ancientGodSovereign: [string, string][] = [
     ["07 [4K]", "August 8, 2026"],
     ["06 [4K]", "August 6, 2026"],
     ["05 [4K]", "August 2, 2026"],
-    ["01 to 04 [4K]", "July 30, 2026"],
-    ["14 [4K]", "July 1, 2026"]
+    ["15 [4K]", "August 1, 2026"],
+    ["01 to 04 [4K]", "July 30, 2026"]
 ]
-eq("the real list comes back without E14", await listed(ancientGodSovereign), "13,12,11,10,9,8,7,6,5,1")
+eq("the real list comes back without E15", await listed(ancientGodSovereign), "14,13,12,11,10,9,8,7,6,5,1")
 
 /*
- * The same series four days earlier, when E13 was the countdown and E14 did not
- * exist. The habit has to be recognised at both observations, or it is a
- * coincidence being fitted rather than a rule.
+ * The same series three days earlier, when E14 was the countdown, and four days
+ * before that, when it was E13. Back then the placeholder did sort last. The
+ * habit has to be recognised at all three observations, or it is a coincidence
+ * being fitted rather than a rule.
  */
 eq(
-    "and the same list four days earlier comes back without E13",
+    "the same list three days earlier comes back without E14",
+    await listed([
+        ["13 [4K]", "August 30, 2026"],
+        ["05 [4K]", "August 2, 2026"],
+        ["01 to 04 [4K]", "July 30, 2026"],
+        ["14 [4K]", "July 1, 2026"]
+    ]),
+    "13,5,1"
+)
+eq(
+    "and a week earlier comes back without E13",
     await listed([
         ["12 [4K]", "August 27, 2026"],
         ["05 [4K]", "August 2, 2026"],
@@ -100,8 +118,9 @@ console.log("\n\x1b[1mand every episode it must not swallow\x1b[0m\n")
 
 /*
  * Each of these is a real episode lost if it went wrong, and losing one is the
- * silent failure — nobody learns they missed it. The rule needs both halves,
- * newest number AND uniquely oldest date, and each case removes exactly one.
+ * silent failure — nobody learns they missed it. The rule needs all three of
+ * newest number, strictly older than the newest post, and dated to a 1st; each
+ * case below withholds exactly one of them.
  */
 
 // An ordinary week: the newest episode is also the newest post.
@@ -115,10 +134,10 @@ eq(
     "14,13,1"
 )
 
-// Oldest post, but not the newest episode. This is the late re-upload and the
-// corrected typo — the objection that kept this rule out of the first cut.
+// Backdated to a 1st, but not the newest episode. This is the late re-upload and
+// the corrected typo — the objection that kept this rule out of the first cut.
 eq(
-    "an old episode dated oldest is not a placeholder",
+    "an old episode backdated to a 1st is not a placeholder",
     await listed([
         ["14", "August 30, 2026"],
         ["13", "August 27, 2026"],
@@ -127,8 +146,9 @@ eq(
     "14,13,2"
 )
 
-// Newest episode, out of order, but not the oldest. Being *somewhat* backdated
-// is what a re-upload looks like; being last is what this site does.
+// Newest episode, out of order, but on a real day of the month. Being *somewhat*
+// backdated is what a re-upload looks like; landing on a 1st is what this site
+// does. This is the case position-alone would have swallowed.
 eq(
     "the newest episode merely out of order is not a placeholder",
     await listed([
@@ -139,14 +159,27 @@ eq(
     "14,13,1"
 )
 
-// A bulk edit or an import puts several posts on the same oldest day, which says
-// nothing about any one of them.
+// Episodes do come out on the 1st. That alone says nothing: a real one is the
+// newest post, which is the other half of the test.
 eq(
-    "a tie for oldest says nothing",
+    "a genuine release on the 1st is kept",
     await listed([
-        ["14", "July 1, 2026"],
-        ["13", "August 30, 2026"],
-        ["01", "July 1, 2026"]
+        ["15", "September 1, 2026"],
+        ["14", "August 30, 2026"],
+        ["01", "July 30, 2026"]
+    ]),
+    "15,14,1"
+)
+
+// This list carries a date and no clock, so a same-day double release ties for
+// newest. "Not the newest post" has to mean strictly older or every second
+// episode of a double drop disappears.
+eq(
+    "a tie for newest is not out of order",
+    await listed([
+        ["14", "September 1, 2026"],
+        ["13", "September 1, 2026"],
+        ["01", "July 30, 2026"]
     ]),
     "14,13,1"
 )
@@ -178,7 +211,31 @@ eq("a single episode is untouched", await listed([["14", "July 1, 2026"]]), "14"
 eq(
     "a source that has not declared the habit keeps every post",
     await listed(ancientGodSovereign, lmanime),
-    "14,13,12,11,10,9,8,7,6,5,1"
+    "15,14,13,12,11,10,9,8,7,6,5,1"
+)
+
+console.log("\n\x1b[1mthe one it gets wrong\x1b[0m\n")
+
+/*
+ * Constructed, and asserted so the trade-off is visible rather than discovered:
+ * a real episode released on the 1st, in a list where an older post has just
+ * been re-published and taken today's date. Both halves hold and the episode is
+ * dropped.
+ *
+ * It is kept as the known cost because it needs two uncommon things at once,
+ * and because the alternative — dropping the date-shape half and reading
+ * position alone — gets this same case wrong on *any* day of the month rather
+ * than one in thirty. If it is ever seen live, the next condition to add is
+ * that the placeholder be at least a month old, which every observed one is.
+ */
+eq(
+    "a release on the 1st under a re-published older post is lost",
+    await listed([
+        ["14", "September 1, 2026"],
+        ["13", "September 3, 2026"],
+        ["01", "July 30, 2026"]
+    ]),
+    "13,1"
 )
 
 console.log("\n\x1b[1mthe other question: this page, right now\x1b[0m\n")

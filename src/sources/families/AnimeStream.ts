@@ -70,12 +70,18 @@ export interface AnimeStreamConfig {
     pending?: PendingMarkers
 
     /**
-     * This site backdates a post it cannot play yet, so it sorts to the bottom
-     * of its own list.
+     * This site dates a post it cannot play yet to a month gone by, rather than
+     * to the day it posted it.
+     *
+     * Note what this does *not* say: where the post lands in the list. That was
+     * the first reading of the habit and it was wrong — the placeholder sorts
+     * to the bottom only while the series is young enough that nothing real is
+     * older, and stops doing so the moment it is not. What holds is the shape
+     * of the date. See `parseEpisodes` for the two conditions and why they are
+     * narrow.
      *
      * Dropped during list parsing, so it costs nothing and no caller ever sees
-     * it — not the update loop, not the Lab, not the probe. See
-     * `parseEpisodes` for the two conditions and why they are narrow.
+     * it — not the update loop, not the Lab, not the probe.
      */
     backdatedPlaceholders?: boolean
 
@@ -149,6 +155,23 @@ const DEFAULT_SELECTORS: AnimeStreamSelectors = {
 
 const DEFAULT_EPISODE_URL = /^\/[^/]+-episode-[\d.]+\/?$/
 const DEFAULT_EPISODE_SUFFIX = /-episode-[\d.]+(?:-[a-z0-9-]*)?$/i
+
+/**
+ * Is this timestamp the first day of a month?
+ *
+ * Half the test for a backdated placeholder — see `parseEpisodes`.
+ *
+ * Both readings count, because the answer must not depend on where the viewer
+ * is. `looseDate` hands `Date.parse` whatever the site wrote, and that fixes
+ * the zone: "August 1, 2026" is local midnight, while an ISO "2026-08-01" is
+ * UTC midnight and reads as July 31 anywhere west of Greenwich. Accepting
+ * either widens this half by one day boundary, which the other half — the entry
+ * must also be strictly older than the newest post — is there to catch.
+ */
+function firstOfMonth(at: number): boolean {
+    const date = new Date(at)
+    return date.getDate() === 1 || date.getUTCDate() === 1
+}
 
 export class AnimeStream implements AnimeSource {
     readonly id: string
@@ -350,23 +373,31 @@ export class AnimeStream implements AnimeSource {
          * episode, so it does not leave this method and nothing downstream is
          * ever told it existed.
          *
-         * `backdatedPlaceholders` sites park such a post at a date below
-         * episode 1 of their own series. Both conditions are needed and the
-         * conjunction is the whole safety of it: the entry must be the
-         * highest-numbered *and* strictly the oldest-dated. A late re-upload
-         * takes today's date, not the list's oldest; a corrected typo lands on
-         * an episode that is not the newest. Anything less certain — a tie for
-         * oldest, a list where only some posts carry dates — keeps the episode,
-         * because dropping a real one is silent and listing a countdown costs a
-         * notification the viewer dismisses.
+         * `backdatedPlaceholders` sites date such a post to the first day of a
+         * month gone by, rather than to the day they posted it. Both conditions
+         * are needed and the conjunction is the whole safety of it: the entry
+         * must be the highest-numbered, strictly older than the newest post in
+         * the list, *and* dated to a first of the month. Each half covers the
+         * other's false positive — a late re-upload or a corrected typo lands
+         * out of order but on a real day, and a real episode does sometimes
+         * come out on the 1st, but then it is the newest post and not out of
+         * order at all.
+         *
+         * Anything less certain keeps the episode: a tie for newest (this list
+         * carries no clock, so a same-day double release ties), a list where
+         * only some posts carry dates. Dropping a real episode is silent, and
+         * listing a countdown costs a notification the viewer dismisses.
+         *
+         * One entry, never a sweep. Sites with the habit have only ever been
+         * seen posting one placeholder at a time, and a second pass could only
+         * ever remove an episode nothing has been observed to do.
          */
         const dated = episodes.filter(episode => episode.airedAt !== undefined)
         if (this.backdatedPlaceholders && dated.length > 1 && dated.length === episodes.length) {
             const newest = episodes.reduce((a, b) => (b.number > a.number ? b : a))
-            const oldestAt = Math.min(...dated.map(episode => episode.airedAt!))
-            const uniquelyOldest = dated.filter(episode => episode.airedAt === oldestAt).length === 1
+            const newestAt = Math.max(...dated.map(episode => episode.airedAt!))
 
-            if (newest.airedAt === oldestAt && uniquelyOldest) {
+            if (newest.airedAt! < newestAt && firstOfMonth(newest.airedAt!)) {
                 episodes.splice(episodes.indexOf(newest), 1)
             }
         }

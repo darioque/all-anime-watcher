@@ -55,21 +55,30 @@ import { AnimeStream } from "~/sources/families/AnimeStream"
  * servers that each resolved to nothing, and was marked watched on the way in.
  *
  * **The date does distinguish them, and it is what this now reads.** The
- * placeholder is backdated far enough to sort below episode 1 of its own series.
- * The first reading of this site called that a symptom and not evidence, on the
- * grounds that an out-of-order date is also what a corrected typo or a late
- * re-upload looks like — true, and it is why the test is not "out of order". The
- * habit has since been watched twice on the same series and it is sharper than
- * that, on both ends at once:
+ * placeholder carries the first day of a month gone by instead of the day it was
+ * posted. The first reading of this site called an out-of-order date a symptom
+ * and not evidence, on the grounds that it is also what a corrected typo or a
+ * late re-upload looks like — true, and still the reason the test is not "out of
+ * order" alone. Three sightings on the same series, across two months:
  *
- *   2026-08-27  E13 dated July 1   E01-04 dated July 30   E13 last, newest number
- *   2026-08-31  E14 dated July 1   E13   dated August 30  E14 last, newest number
+ *   2026-08-27  E13 dated July 1    E01-04 dated July 30    E13 last in the list
+ *   2026-08-31  E14 dated July 1    E13   dated August 30   E14 last in the list
+ *   2026-09-03  E15 dated August 1  E14   dated September 3 E15 second from last
  *
- * — the newest episode by number carrying, uniquely, the oldest date in the list.
- * Neither half happens to a real release on its own account: a re-upload takes
- * *today's* date rather than the list's oldest, and a corrected typo lands on an
- * episode that is not the newest. Requiring both is what makes this safe to read,
- * and `AnimeStream.parseEpisodes` states the conditions in full.
+ * — the newest episode by number, always on a 1st, always older than the newest
+ * post. What it is *not* is always last, and the first cut of this rule read it
+ * that way: it required the newest number to hold, uniquely, the oldest date in
+ * the list. That held twice by luck. E01-04 is dated July 30, so a July 1
+ * placeholder cleared it; an August 1 placeholder does not, and E15 was
+ * announced as a release on 2026-09-03 while its page was still counting down.
+ * Had the series begun a month earlier the rule would have failed in August too.
+ *
+ * Position was the coincidence. The date shape is the habit, and the two
+ * conditions now read it directly: highest number, strictly older than the
+ * newest post, dated to a first of the month. Neither half happens to a real
+ * release on its own account — a re-upload lands out of order but on a real day,
+ * and an episode that genuinely comes out on the 1st is the newest post rather
+ * than an old one. `AnimeStream.parseEpisodes` states the conditions in full.
  *
  * **Both are declared, because they answer different questions.** The list rule
  * runs while the episode list is parsed, so the placeholder never reaches the
