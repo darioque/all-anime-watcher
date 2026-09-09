@@ -11,6 +11,8 @@
  * unless something pins the scheme down. This does.
  */
 import { assembleKey, decryptPlayback, fromBase64Url, keyIndices, videoCode } from "~/extractors/sites/byse"
+import { MegaPlayExtractor, type SourcesResponse } from "~/extractors/sites/megaplay"
+import type { ExtractCtx } from "~/extractors/types"
 import { bysePlayback, byseExpected } from "./fixtures/byse"
 
 let failures = 0
@@ -89,6 +91,108 @@ await decryptPlayback({ ...bysePlayback, payload: bysePlayback.payload.slice(0, 
         console.log("  \x1b[31m✗\x1b[0m a truncated payload is rejected")
     })
     .catch(() => console.log("  \x1b[32m✓\x1b[0m a truncated payload is rejected"))
+
+console.log("\n\x1b[1mmegaplay — which sources endpoint\x1b[0m\n")
+
+/*
+ * MegaPlay migrated `stream/getSources` to `stream/getSourcesNew` by patching
+ * its own client, so the old name still answers 200 — with the file gone and an
+ * `enc` blob in its place. Nothing in that response is an error, which is how it
+ * read downstream as "this host stopped serving sources" and fell back to the
+ * iframe for every episode.
+ *
+ * These drive the real `extract` rather than a helper, because the bug was never
+ * in the arithmetic: it was in which URL got asked. A fake ctx records that.
+ */
+
+/** The embed page, reduced to the one attribute the extractor reads. */
+const embedPage = `<html><body><div id="megaplay-player" data-id="179483"></div></body></html>`
+
+const NEW_PAYLOAD: SourcesResponse = {
+    sources: { file: "https://ncdn.imgnex.top/anime/a/b/master.m3u8" },
+    tracks: [{ file: "https://cdn.imgnex.top/a/b/track_0_eng.vtt", label: "English", kind: "captions", default: true }],
+    intro: { start: 33, end: 133 },
+    outro: { start: 569, end: 668 }
+}
+
+/** What the pre-migration name returns on a host that has moved. */
+const ENC_PAYLOAD: SourcesResponse = { tracks: [], enc: "wdeBruh3qqn_i5wUNnyaPQQl1wp7r0SrL6KQPNFd24" }
+
+/** Records every URL asked for, and answers only the endpoints it was given. */
+function ctxServing(answers: Record<string, SourcesResponse>) {
+    const asked: string[] = []
+    const ctx = {
+        referer: "https://anikototv.to/watch/x/ep-17",
+        text: async () => embedPage,
+        json: async (url: string) => {
+            asked.push(new URL(url).pathname.split("/").pop() ?? "")
+            const key = Object.keys(answers).find(name => url.includes(`/stream/${name}?`))
+            if (!key) throw new Error("HTTP 404")
+            return answers[key]
+        }
+    } as unknown as ExtractCtx
+    return { ctx, asked }
+}
+
+const megaplay = new MegaPlayExtractor()
+const embed = "https://megaplay.buzz/stream/s-2/762833/sub"
+
+async function rejects(label: string, work: Promise<unknown>, expected: string) {
+    try {
+        await work
+        failures++
+        console.log(`  \x1b[31m✗\x1b[0m ${label} — resolved instead`)
+    } catch (error) {
+        const message = error instanceof Error ? error.message : String(error)
+        const ok = message.includes(expected)
+        if (!ok) failures++
+        console.log(`  ${ok ? "\x1b[32m✓\x1b[0m" : "\x1b[31m✗\x1b[0m"} ${label}${ok ? "" : ` — got ${message}`}`)
+    }
+}
+
+// The live shape as of 2026-09-09: both endpoints answer, only the new one is
+// usable. Asking the old one first is what shipped the bug.
+{
+    const { ctx, asked } = ctxServing({ getSourcesNew: NEW_PAYLOAD, getSources: ENC_PAYLOAD })
+    const streams = await megaplay.extract(embed, ctx)
+    eq("the new endpoint is asked first", asked[0], "getSourcesNew")
+    eq("and once it answers the old one is left alone", asked.length, 1)
+    eq("the stream is the plain file", streams[0]?.url, NEW_PAYLOAD.sources?.file)
+    eq("typed from the extension", streams[0]?.kind, "hls")
+    eq("subtitles come across", streams[0]?.subtitles?.length, 1)
+    eq("and so do the skip offsets", streams[0]?.skips?.intro?.startSec, 33)
+}
+
+// A host on this white-labelled engine that has not migrated yet: the new name
+// 404s and the old one is still the good one.
+{
+    const { ctx, asked } = ctxServing({ getSources: NEW_PAYLOAD })
+    const streams = await megaplay.extract(embed, ctx)
+    eq("a 404 on the new endpoint falls back to the old one", asked.join(","), "getSourcesNew,getSources")
+    eq("and still yields the file", streams[0]?.url, NEW_PAYLOAD.sources?.file)
+}
+
+// The bug, as it would look if the new endpoint ever went away: an encrypted
+// payload is a diagnosis, not a payload, and must not read as "no sources".
+await rejects(
+    "an encrypted-only answer names the migration",
+    megaplay.extract(embed, ctxServing({ getSources: ENC_PAYLOAD }).ctx),
+    "encrypted payload"
+)
+
+// A file that genuinely has nothing behind it is a different sentence.
+await rejects(
+    "an empty answer is still just an empty answer",
+    megaplay.extract(embed, ctxServing({ getSourcesNew: { tracks: [] } }).ctx),
+    "returned no source"
+)
+
+// Neither name resolves — a host that is not this engine after all, or is down.
+await rejects(
+    "neither endpoint is its own report",
+    megaplay.extract(embed, ctxServing({}).ctx),
+    "served neither sources endpoint"
+)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

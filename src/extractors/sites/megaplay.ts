@@ -9,11 +9,29 @@ const logger = log("extractor:megaplay")
  * Two requests and no obfuscation at all:
  *
  *   /stream/s-2/<realId>/sub    → <div id="megaplay-player" data-id="114042">
- *   /stream/getSources?id=…     → { sources: { file }, tracks, intro, outro }
+ *   /stream/getSourcesNew?id=…  → { sources: { file }, tracks, intro, outro }
  *
- * The id in the embed URL is *not* the id `getSources` wants — that one is only
- * in the page — which is the whole reason this needs a page fetch rather than
- * being derivable from the URL.
+ * The id in the embed URL is *not* the id the sources endpoint wants — that one
+ * is only in the page — which is the whole reason this needs a page fetch rather
+ * than being derivable from the URL.
+ *
+ * **`getSources` is the old endpoint and it still answers**, which is what made
+ * this break quietly on 2026-09-09. It returns 200 and a payload that has lost
+ * `sources` and gained `enc`, a 128-byte base64url blob — the same tracks, the
+ * same intro/outro, the file encrypted. Nothing in the response says "you asked
+ * the wrong endpoint", so the extractor read it as a host that had stopped
+ * handing over sources and fell back to the iframe.
+ *
+ * The site migrated by patching its own client rather than the URL: MegaPlay's
+ * `newclient.min.js` wraps `XMLHttpRequest.open` and `fetch` and rewrites
+ * `stream/getSources` to `stream/getSourcesNew` on the way past. So the endpoint
+ * that looks canonical in the page source is the dead one, and the live one is
+ * only named inside a bundle. `getSourcesNew` returns the file in plain text —
+ * there is no decryption to implement here and `enc` is never read.
+ *
+ * Both are tried, new first, because the engine is white-labelled across hosts
+ * that migrate on their own schedule and one that has not moved yet still serves
+ * the old endpoint in the old shape.
  *
  * The response also carries intro/outro offsets. Anikoto already publishes those
  * through its own API, and it wins where the two disagree since it is closer to
@@ -70,12 +88,8 @@ export class MegaPlayExtractor implements Extractor {
             )
         }
 
-        const payload = await ctx.json<SourcesResponse>(`${origin}/stream/getSources?id=${fileId}`, {
-            headers: { Referer: embedUrl, "X-Requested-With": "XMLHttpRequest" }
-        })
-
-        const file = payload.sources?.file
-        if (!file) throw new Error(`megaplay returned no source for file ${fileId}`)
+        const payload = await sources(origin, fileId, embedUrl, ctx)
+        const file = payload.sources.file
 
         const subtitles = (payload.tracks ?? [])
             .filter(track => track.kind !== "thumbnails" && Boolean(track.file))
@@ -104,8 +118,67 @@ export class MegaPlayExtractor implements Extractor {
     }
 }
 
-interface SourcesResponse {
+/** A payload that actually carries a file — what `sources` promises its caller. */
+type Played = SourcesResponse & { sources: { file: string } }
+
+const played = (payload: SourcesResponse): payload is Played => Boolean(payload.sources?.file)
+
+/**
+ * Ask for the sources, new endpoint first, and say which way it failed.
+ *
+ * A 404 on either name is expected rather than exceptional — the two endpoints
+ * are a migration in progress across a white-labelled engine, and a host serves
+ * one or the other — so a throw here moves on to the next name instead of ending
+ * the extraction.
+ *
+ * What must not be swallowed is the shape that comes back **200 and useless**:
+ * the old endpoint on a migrated host answers with `enc` where `sources` used to
+ * be. That is a different diagnosis from "this file has no sources" and it gets
+ * its own sentence, because the two look identical from the outside and only one
+ * of them is fixed by changing a URL.
+ */
+async function sources(origin: string, fileId: string, embedUrl: string, ctx: ExtractCtx): Promise<Played> {
+    const headers = { Referer: embedUrl, "X-Requested-With": "XMLHttpRequest" }
+    let encrypted = false
+    let reached = false
+
+    for (const endpoint of ["getSourcesNew", "getSources"]) {
+        let payload: SourcesResponse
+        try {
+            payload = await ctx.json<SourcesResponse>(`${origin}/stream/${endpoint}?id=${fileId}`, { headers })
+        } catch {
+            continue
+        }
+
+        reached = true
+        if (played(payload)) {
+            if (endpoint === "getSources") logger.debug(`${origin} still serves the pre-migration endpoint`)
+            return payload
+        }
+        encrypted ||= Boolean(payload.enc)
+    }
+
+    if (encrypted) {
+        throw new Error(
+            `megaplay answered for file ${fileId} with an encrypted payload and no plain source — ` +
+                "getSourcesNew is missing on a host that has migrated"
+        )
+    }
+    throw new Error(
+        reached
+            ? `megaplay returned no source for file ${fileId}`
+            : `megaplay served neither sources endpoint for file ${fileId}`
+    )
+}
+
+export interface SourcesResponse {
     sources?: { file?: string }
+    /**
+     * The encrypted form the *old* endpoint now answers with. Never decrypted —
+     * its presence is a diagnosis, not a payload: it means the request reached a
+     * migrated host by the old name. See the note at the top of this file.
+     */
+    enc?: string
     tracks?: { file: string; label?: string; kind?: string; default?: boolean }[]
     intro?: { start?: number; end?: number }
     outro?: { start?: number; end?: number }
