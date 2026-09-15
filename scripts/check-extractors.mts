@@ -11,7 +11,14 @@
  * unless something pins the scheme down. This does.
  */
 import { assembleKey, decryptPlayback, fromBase64Url, keyIndices, videoCode } from "~/extractors/sites/byse"
-import { MegaPlayExtractor, type SourcesResponse } from "~/extractors/sites/megaplay"
+import {
+    MegaPlayExtractor,
+    cdnToken,
+    decryptSources,
+    signedUrl,
+    tokenPath,
+    type SourcesResponse
+} from "~/extractors/sites/megaplay"
 import type { ExtractCtx } from "~/extractors/types"
 import { bysePlayback, byseExpected } from "./fixtures/byse"
 
@@ -92,31 +99,88 @@ await decryptPlayback({ ...bysePlayback, payload: bysePlayback.payload.slice(0, 
     })
     .catch(() => console.log("  \x1b[32m✓\x1b[0m a truncated payload is rejected"))
 
-console.log("\n\x1b[1mmegaplay — which sources endpoint\x1b[0m\n")
+console.log("\n\x1b[1mmegaplay — the encrypted sources payload\x1b[0m\n")
 
 /*
- * MegaPlay migrated `stream/getSources` to `stream/getSourcesNew` by patching
- * its own client, so the old name still answers 200 — with the file gone and an
- * `enc` blob in its place. Nothing in that response is an error, which is how it
- * read downstream as "this host stopped serving sources" and fell back to the
- * iframe for every episode.
- *
- * These drive the real `extract` rather than a helper, because the bug was never
- * in the arithmetic: it was in which URL got asked. A fake ctx records that.
+ * Captured 2026-09-15 from file 161371 on megaplay.buzz. Both endpoints answer
+ * with this now; the scheme is AES-256-CBC under a key and IV lifted from the
+ * host's own bundle. The key is 16 characters padded to 32 bytes — using it as
+ * AES-128 fails the same way a rotated key would, so this is the check that
+ * separates "we got the arithmetic wrong" from "the host changed".
+ */
+const CAPTURED_ENC =
+    "wdeBruh3qqn_i5wUNnyaPcXqidp1UWP84FfPHzGyKXCtzzjd9QOKnGlfpWz9zni7KLm8ZOSO5mCylRsEEs351e5r8BuIRfR2AqYhvR5XuGJKKk54Uc31mACICmO83ZzaRRdMdWeQitJzZg7oCcdRVgOMYDBWYdD93oNrhz3Vf3E"
+const CAPTURED_FILE =
+    "https://fetch.nexabloom.top/anime/f6ec706c08a1f5eb01539dafdc14b4a3/8cc6f8a81147b9d284b92b804dae6dd5/master.m3u8"
+
+eq("the captured payload decrypts to the file", (await decryptSources(CAPTURED_ENC)).file, CAPTURED_FILE)
+await rejects("a truncated payload is refused", decryptSources(CAPTURED_ENC.slice(0, -8)), "did not decrypt")
+
+console.log("\n\x1b[1mmegaplay — the CDN token\x1b[0m\n")
+
+/*
+ * The token the site's own player put on that same master playlist, in the
+ * same session. Its expiry was 1789469906, minted 90 seconds ahead, so the same
+ * clock reproduces it byte for byte — which pins the message layout, the HMAC
+ * key and the encoding at once.
+ */
+const CAPTURED_TOKEN =
+    "MTc4OTQ2OTkwNnxmNmVjNzA2YzA4YTFmNWViMDE1MzlkYWZkYzE0YjRhMy84Y2M2ZjhhODExNDdiOWQyODRiOTJiODA0ZGFlNmRkNQ.2cf3fsX0-0Dd7aioMbrJE7iC3-kWVhwuAH8sA9oqct0"
+const CAPTURED_PATH = "f6ec706c08a1f5eb01539dafdc14b4a3/8cc6f8a81147b9d284b92b804dae6dd5"
+
+eq("the two ids come out of the path", tokenPath(CAPTURED_FILE), CAPTURED_PATH)
+eq("upper-case hex is lowered, as the site does", tokenPath(CAPTURED_FILE.toUpperCase()), CAPTURED_PATH)
+eq("a URL without the pair has no token path", tokenPath("https://cdn.example/anime/abc/master.m3u8"), null)
+eq(
+    "the site's own token is reproduced from its clock",
+    await cdnToken(CAPTURED_PATH, (1789469906 - 90) * 1000, 90),
+    CAPTURED_TOKEN
+)
+
+const signed = await signedUrl(CAPTURED_FILE, (1789469906 - 90) * 1000)
+eq("signing appends the token", signed.startsWith(`${CAPTURED_FILE}?token=`), true)
+eq(
+    "and the token is url-safe as written, nothing percent-escaped",
+    /\?token=[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+$/.test(signed),
+    true
+)
+eq(
+    "signed for an hour, not the site's ninety seconds",
+    signed.includes(await cdnToken(CAPTURED_PATH, (1789469906 - 90) * 1000)),
+    true
+)
+eq("a URL already carrying one is left alone", await signedUrl(signed), signed)
+eq(
+    "a query string already there is extended, not replaced",
+    (await signedUrl(`${CAPTURED_FILE}?v=1`)).startsWith(`${CAPTURED_FILE}?v=1&token=`),
+    true
+)
+{
+    const plain = "https://cdn.example/anime/abc/master.m3u8"
+    eq("a URL the token is not bound to is passed through", await signedUrl(plain), plain)
+}
+
+console.log("\n\x1b[1mmegaplay — the whole extraction\x1b[0m\n")
+
+/*
+ * These drive the real `extract` rather than a helper, because the bugs were
+ * never in the arithmetic: one was in which URL got asked (the endpoint
+ * migration of 2026-09-09) and one in what got dropped from it (the `?s=` CDN
+ * choice, so three servers were one). A fake ctx records that.
  */
 
 /** The embed page, reduced to the one attribute the extractor reads. */
 const embedPage = `<html><body><div id="megaplay-player" data-id="179483"></div></body></html>`
 
-const NEW_PAYLOAD: SourcesResponse = {
+const PLAIN_PAYLOAD: SourcesResponse = {
     sources: { file: "https://ncdn.imgnex.top/anime/a/b/master.m3u8" },
     tracks: [{ file: "https://cdn.imgnex.top/a/b/track_0_eng.vtt", label: "English", kind: "captions", default: true }],
     intro: { start: 33, end: 133 },
     outro: { start: 569, end: 668 }
 }
 
-/** What the pre-migration name returns on a host that has moved. */
-const ENC_PAYLOAD: SourcesResponse = { tracks: [], enc: "wdeBruh3qqn_i5wUNnyaPQQl1wp7r0SrL6KQPNFd24" }
+/** What both endpoints return today. */
+const ENC_PAYLOAD: SourcesResponse = { ...PLAIN_PAYLOAD, sources: undefined, enc: CAPTURED_ENC }
 
 /** Records every URL asked for, and answers only the endpoints it was given. */
 function ctxServing(answers: Record<string, SourcesResponse>) {
@@ -125,7 +189,7 @@ function ctxServing(answers: Record<string, SourcesResponse>) {
         referer: "https://anikototv.to/watch/x/ep-17",
         text: async () => embedPage,
         json: async (url: string) => {
-            asked.push(new URL(url).pathname.split("/").pop() ?? "")
+            asked.push(url.slice(url.indexOf("/stream/") + "/stream/".length))
             const key = Object.keys(answers).find(name => url.includes(`/stream/${name}?`))
             if (!key) throw new Error("HTTP 404")
             return answers[key]
@@ -150,37 +214,41 @@ async function rejects(label: string, work: Promise<unknown>, expected: string) 
     }
 }
 
-// The live shape as of 2026-09-09: both endpoints answer, only the new one is
-// usable. Asking the old one first is what shipped the bug.
+// The live shape as of 2026-09-15: both endpoints answer, both encrypted.
 {
-    const { ctx, asked } = ctxServing({ getSourcesNew: NEW_PAYLOAD, getSources: ENC_PAYLOAD })
+    const { ctx, asked } = ctxServing({ getSourcesNew: ENC_PAYLOAD, getSources: ENC_PAYLOAD })
     const streams = await megaplay.extract(embed, ctx)
-    eq("the new endpoint is asked first", asked[0], "getSourcesNew")
+    eq("the new endpoint is asked first", asked[0], "getSourcesNew?id=179483")
     eq("and once it answers the old one is left alone", asked.length, 1)
-    eq("the stream is the plain file", streams[0]?.url, NEW_PAYLOAD.sources?.file)
+    eq("the stream is the decrypted file, signed", streams[0]?.url.split("?")[0], CAPTURED_FILE)
+    eq("carrying a token", /[?&]token=/.test(streams[0]?.url ?? ""), true)
     eq("typed from the extension", streams[0]?.kind, "hls")
     eq("subtitles come across", streams[0]?.subtitles?.length, 1)
     eq("and so do the skip offsets", streams[0]?.skips?.intro?.startSec, 33)
 }
 
-// A host on this white-labelled engine that has not migrated yet: the new name
-// 404s and the old one is still the good one.
+// The CDN choice rides on the embed URL and has to reach the sources request,
+// or every server resolves to the same file.
 {
-    const { ctx, asked } = ctxServing({ getSources: NEW_PAYLOAD })
-    const streams = await megaplay.extract(embed, ctx)
-    eq("a 404 on the new endpoint falls back to the old one", asked.join(","), "getSourcesNew,getSources")
-    eq("and still yields the file", streams[0]?.url, NEW_PAYLOAD.sources?.file)
+    const { ctx, asked } = ctxServing({ getSourcesNew: ENC_PAYLOAD })
+    await megaplay.extract(`${embed}?s=tcdn`, ctx)
+    eq("the embed's ?s= is forwarded to the sources request", asked[0], "getSourcesNew?id=179483&s=tcdn")
 }
 
-// The bug, as it would look if the new endpoint ever went away: an encrypted
-// payload is a diagnosis, not a payload, and must not read as "no sources".
-await rejects(
-    "an encrypted-only answer names the migration",
-    megaplay.extract(embed, ctxServing({ getSources: ENC_PAYLOAD }).ctx),
-    "encrypted payload"
-)
+// A host on this white-labelled engine that still hands the file over in plain
+// text — the pre-migration shape.
+{
+    const { ctx, asked } = ctxServing({ getSources: PLAIN_PAYLOAD })
+    const streams = await megaplay.extract(embed, ctx)
+    eq(
+        "a 404 on the new endpoint falls back to the old one",
+        asked.join(","),
+        "getSourcesNew?id=179483,getSources?id=179483"
+    )
+    eq("and a plain file is taken as it is", streams[0]?.url, PLAIN_PAYLOAD.sources?.file)
+}
 
-// A file that genuinely has nothing behind it is a different sentence.
+// A file that genuinely has nothing behind it.
 await rejects(
     "an empty answer is still just an empty answer",
     megaplay.extract(embed, ctxServing({ getSourcesNew: { tracks: [] } }).ctx),

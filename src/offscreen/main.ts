@@ -2,6 +2,7 @@ import browser from "webextension-polyfill"
 import type { Envelope, Reply } from "~/shared/messages"
 import type { FetchPlan } from "~/downloads/types"
 import { ivFor } from "~/downloads/hls"
+import { unwrapSegment } from "~/shared/segments"
 import { log } from "~/shared/logger"
 
 /**
@@ -179,7 +180,10 @@ async function download(plan: FetchPlan): Promise<{ url: string; bytes: number }
 }
 
 /**
- * One segment, decrypted if the playlist said it was encrypted.
+ * One segment, decrypted if the playlist said it was encrypted, and stripped of
+ * the image header some CDNs put in front of the packets — the same treatment
+ * the player gives it, because a file written with those left in is as
+ * unplayable as the stream would have been.
  *
  * Retried, because a CDN dropping one segment out of six hundred is ordinary and
  * failing the whole episode over it is not. `credentials: "include"` and no
@@ -204,7 +208,7 @@ async function fetchPart(
             if (!response.ok) throw new Error(`HTTP ${response.status}`)
 
             const buffer = await response.arrayBuffer()
-            return part.keyUrl ? await decrypt(buffer, part, signal) : buffer
+            return unwrapSegment(part.keyUrl ? await decrypt(buffer, part, signal) : buffer)
         } catch (error) {
             if (signal.aborted) throw new Error("cancelled")
             last = error

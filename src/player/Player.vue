@@ -12,6 +12,7 @@ import type { Category, SourceCategories } from "~/library/categories"
 import type { Stream } from "~/extractors/types"
 import { decideFatal, fatalKind, MAX_RECOVERIES, STARTED_AFTER_SEC } from "~/shared/playback"
 import { BackgroundLoader } from "./backgroundLoader"
+import { unwrapping } from "./unwrappingLoader"
 import { loadTrack, releaseTracks, type LoadedTrack } from "./subtitles"
 
 const props = defineProps<{
@@ -489,10 +490,14 @@ async function attach(stream: Stream, index: number, viaProxy = false) {
         return
     }
 
+    // Route every manifest and segment through the background when the
+    // extractor says the CDN won't serve the page directly.
+    const loader = stream.fetchVia === "background" ? BackgroundLoader : Hls.DefaultConfig.loader
     const instance = new Hls({
-        // Route every manifest and segment through the background when the
-        // extractor says the CDN won't serve the page directly.
-        ...(stream.fetchVia === "background" ? { loader: BackgroundLoader } : {}),
+        loader,
+        // Segments come through the same loader, minus any image header a CDN
+        // dressed them in.
+        fLoader: unwrapping(loader),
         enableWorker: true,
         lowLatencyMode: false,
         backBufferLength: 90

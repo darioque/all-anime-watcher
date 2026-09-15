@@ -1,6 +1,7 @@
 import type { ExtractCtx, Extractor, Stream, Track } from "~/extractors/types"
 import { hostOf } from "~/shared/url"
 import { log } from "~/shared/logger"
+import { fromBase64Url } from "~/shared/binary"
 
 const logger = log("extractor:byse")
 
@@ -164,16 +165,9 @@ export function assembleKey(playback: Pick<BysePlayback, "key_parts" | "version"
     return key
 }
 
-/** Base64url → bytes. The site's own encoding: `-_`, no padding. */
-export function fromBase64Url(value: string): Uint8Array<ArrayBuffer> {
-    const base64 = value.replace(/-/g, "+").replace(/_/g, "/")
-    const padded = base64 + "=".repeat((4 - (base64.length % 4)) % 4)
-    const binary = atob(padded)
-
-    const bytes = new Uint8Array(binary.length)
-    for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
-    return bytes
-}
+// Re-exported for the check suite, which pins the site's `-_`, no-padding
+// encoding here where it was first needed.
+export { fromBase64Url }
 
 export async function decryptPlayback(playback: BysePlayback): Promise<ByseConfig> {
     const key = await crypto.subtle.importKey("raw", assembleKey(playback).buffer, "AES-GCM", false, ["decrypt"])
