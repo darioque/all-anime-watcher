@@ -58,6 +58,7 @@ export class MyAnime implements AnimeSource {
     readonly languages = ["en"]
     readonly domains = ["myanime.live"]
     readonly home = "https://myanime.live/"
+    readonly retired = "Gone: as of 2026-10-01 myanime.live redirects to an unrelated wordpress.com blog."
 
     readonly episodeUrl = /^\/\d{4}\/\d{2}\/\d{2}\/[^/]+\/?$/
     readonly seriesUrl = /^\/tag\/[^/]+\/?$/

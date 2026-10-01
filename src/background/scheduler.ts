@@ -2,6 +2,7 @@ import browser from "webextension-polyfill"
 import { getAllAnime, getDueAnime, putAnime } from "~/model/db"
 import type { TrackedAnime } from "~/model/types"
 import { refreshSeries } from "~/library/library"
+import { sourceById } from "~/sources/registry"
 import { checkable, nextCheckAt } from "./schedule"
 import { notifyNewEpisodes } from "./notifications"
 import { resolveAllDomains } from "./domains"
@@ -16,6 +17,7 @@ const logger = log("scheduler")
 
 export const TICK_ALARM = "aaw-check-tick"
 const TICK_MINUTES = 1
+const RETIRED_RECHECK_MS = 24 * 60 * 60 * 1000
 
 /**
  * In-flight guard. A run can outlive a service-worker wake-up, and two
@@ -157,6 +159,19 @@ export async function runDueChecks(options: { force?: boolean } = {}): Promise<n
 }
 
 async function checkSource(sourceId: string, list: TrackedAnime[]): Promise<number> {
+    /*
+     * A retired site is not asked anything. Its series stay in the library with
+     * their history, but each is pushed a day out instead of being checked —
+     * leaving them due would have them fill `maxChecksPerRun` every tick, and
+     * NEVER would strand them for good if the source were ever un-retired.
+     */
+    const retired = sourceById(sourceId)?.retired
+    if (retired) {
+        logger.debug(`${sourceId}: retired, skipping ${list.length} series — ${retired}`)
+        for (const anime of list) await putAnime({ ...anime, nextCheckAt: Date.now() + RETIRED_RECHECK_MS })
+        return 0
+    }
+
     const delayMs = Math.max(0, resolve("sourceRequestDelaySec", { sourceId })) * 1000
     let found = 0
 

@@ -44,6 +44,9 @@ export async function resolveDomains(
     source: AnimeSource,
     options: { force?: boolean } = {}
 ): Promise<DomainResolution | null> {
+    // A retired site has no live domain to find; checking would only mark it unreachable forever.
+    if (source.retired) return null
+
     const state = await ensureState(source)
 
     // A pinned domain is the user's decision and outranks anything we discover.

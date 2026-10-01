@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from "vue"
+import { computed, onMounted, onUnmounted, ref, watch } from "vue"
 import { send } from "~/shared/messages"
 import type { SourceDescriptor } from "~/shared/messages"
 import type { TrackedAnime } from "~/model/types"
@@ -16,6 +16,12 @@ import { groupSeries, type Groupable } from "~/library/grouping"
  * rules the library groups by. A search for a popular donghua returns the same
  * thing from four sites, and four near-identical rows is a worse answer than one
  * row that says which four.
+ *
+ * Each hit then has its episode list read, one site request at a time, to say
+ * how far the series has got — the question that decides whether a result is
+ * worth following at all. It comes from `getEpisodes`, the same call the update
+ * loop makes, so it already leaves out episodes a site has posted but not
+ * released; the "Ep 14" printed on a site's own search card does not.
  */
 const props = defineProps<{ library: TrackedAnime[]; sources: SourceDescriptor[] }>()
 const emit = defineEmits<{ added: [TrackedAnime]; close: [] }>()
@@ -32,6 +38,8 @@ const state = ref<Record<string, "idle" | "searching" | "done" | "failed">>({})
 const errors = ref<Record<string, string>>({})
 const adding = ref(new Set<string>())
 const searched = ref(false)
+/** Newest episode per hit key: a number, `null` for none listed, or the lookup's state. */
+const latest = ref<Record<string, number | null | "loading" | "failed">>({})
 
 const enabledSources = computed(() => props.sources.filter(source => source.enabled))
 
@@ -51,6 +59,7 @@ async function search() {
     const mine = ++run
     hits.value = []
     errors.value = {}
+    latest.value = {}
     searched.value = true
     state.value = Object.fromEntries(enabledSources.value.map(source => [source.id, "searching" as const]))
 
@@ -59,19 +68,18 @@ async function search() {
             try {
                 const results = await send("sources:search", { sourceId: source.id, query: text })
                 if (mine !== run) return
-                hits.value = [
-                    ...hits.value,
-                    ...results.map(result => ({
-                        key: `${source.id}/${result.seriesId}`,
-                        sourceId: source.id,
-                        title: result.title,
-                        ...(result.poster ? { poster: result.poster } : {}),
-                        episodes: [],
-                        url: result.url,
-                        seriesId: result.seriesId
-                    }))
-                ]
+                const found: Hit[] = results.map(result => ({
+                    key: `${source.id}/${result.seriesId}`,
+                    sourceId: source.id,
+                    title: result.title,
+                    ...(result.poster ? { poster: result.poster } : {}),
+                    episodes: [],
+                    url: result.url,
+                    seriesId: result.seriesId
+                }))
+                hits.value = [...hits.value, ...found]
                 state.value = { ...state.value, [source.id]: "done" }
+                void lookUpLatest(found, mine)
             } catch (error) {
                 if (mine !== run) return
                 state.value = { ...state.value, [source.id]: "failed" }
@@ -82,6 +90,45 @@ async function search() {
             }
         })
     )
+}
+
+/**
+ * One hit at a time per site; the background spaces the requests out too. A new
+ * search, or closing the panel, abandons whatever is still queued.
+ */
+async function lookUpLatest(found: Hit[], mine: number) {
+    for (const hit of found) {
+        if (mine !== run) return
+        if (hit.key in latest.value) continue
+        latest.value = { ...latest.value, [hit.key]: "loading" }
+        let value: number | null | "failed"
+        try {
+            value = (await send("sources:latestEpisode", { sourceId: hit.sourceId, seriesUrl: hit.url })).latest
+        } catch {
+            value = "failed"
+        }
+        if (mine !== run) return
+        latest.value = { ...latest.value, [hit.key]: value }
+    }
+}
+
+function latestLabel(key: string): string {
+    const value = latest.value[key]
+    if (value === undefined) return ""
+    if (value === "loading") return "Ep …"
+    if (value === "failed") return "Ep ?"
+    if (value === null) return "no episodes"
+    return `Ep ${value}`
+}
+
+/** The furthest any site has got, for the group's own line. */
+function groupLatest(entries: readonly { key: string }[]): number | null {
+    let max: number | null = null
+    for (const entry of entries) {
+        const value = latest.value[entry.key]
+        if (typeof value === "number" && (max === null || value > max)) max = value
+    }
+    return max
 }
 
 async function add(hit: Hit) {
@@ -122,6 +169,8 @@ watch(query, () => {
 
 const input = ref<HTMLInputElement | null>(null)
 onMounted(() => input.value?.focus())
+// Stops queued episode lookups once nobody is looking at their answers.
+onUnmounted(() => run++)
 </script>
 
 <template>
@@ -167,15 +216,44 @@ onMounted(() => input.value?.focus())
 
         <ul v-if="groups.length > 0" class="results">
             <li v-for="group in groups" :key="group.id" class="result">
-                <div class="poster">
+                <a
+                    class="poster"
+                    :href="(group.entries[0] as Hit).url"
+                    target="_blank"
+                    rel="noopener"
+                    tabindex="-1"
+                    :title="`Open on ${sourceName(group.entries[0]!.sourceId)}`"
+                >
                     <img v-if="group.poster" :src="group.poster" alt="" loading="lazy" />
-                </div>
+                </a>
                 <div class="body">
-                    <p class="title">{{ group.title }}</p>
+                    <p class="title">
+                        <a
+                            :href="(group.entries[0] as Hit).url"
+                            target="_blank"
+                            rel="noopener"
+                            :title="`Open on ${sourceName(group.entries[0]!.sourceId)}`"
+                            >{{ group.title }}</a
+                        >
+                        <span v-if="groupLatest(group.entries) !== null" class="latest">
+                            Latest: Ep {{ groupLatest(group.entries) }}
+                        </span>
+                    </p>
                     <div class="sources">
-                        <template v-for="hit in group.entries" :key="hit.key">
-                            <span v-if="trackedKeys.has(hit.key)" class="chip tracked" :title="`Already following`">
-                                {{ sourceName(hit.sourceId) }} ✓
+                        <span v-for="hit in group.entries" :key="hit.key" class="entry">
+                            <a
+                                class="chip site"
+                                :href="(hit as Hit).url"
+                                target="_blank"
+                                rel="noopener"
+                                :title="`Open this series on ${sourceName(hit.sourceId)}`"
+                            >
+                                {{ sourceName(hit.sourceId) }}
+                                <span v-if="latestLabel(hit.key)" class="ep">· {{ latestLabel(hit.key) }}</span>
+                                ↗
+                            </a>
+                            <span v-if="trackedKeys.has(hit.key)" class="chip tracked" title="Already following">
+                                ✓ Following
                             </span>
                             <button
                                 v-else
@@ -184,9 +262,9 @@ onMounted(() => input.value?.focus())
                                 :title="`Follow on ${sourceName(hit.sourceId)}`"
                                 @click="add(hit as Hit)"
                             >
-                                {{ adding.has(hit.key) ? "Adding…" : `+ ${sourceName(hit.sourceId)}` }}
+                                {{ adding.has(hit.key) ? "Adding…" : "+ Follow" }}
                             </button>
-                        </template>
+                        </span>
                     </div>
                     <p v-if="group.entries.length > 1" class="alt">
                         Also listed as
@@ -287,6 +365,25 @@ h2 {
     cursor: default;
 }
 
+.chip.site {
+    color: var(--ink-2);
+    text-decoration: none;
+}
+
+.chip.site:hover {
+    border-color: var(--accent);
+    color: var(--accent-ink);
+}
+
+.chip.site .ep {
+    font-variant-numeric: tabular-nums;
+}
+
+.entry {
+    display: inline-flex;
+    gap: 2px;
+}
+
 .chip.tracked {
     color: var(--state-new);
     border-color: var(--state-new-rule);
@@ -313,6 +410,7 @@ h2 {
 }
 
 .poster {
+    display: block;
     width: 46px;
     height: 62px;
     border-radius: 4px;
@@ -338,6 +436,27 @@ h2 {
     margin: 0;
     font-weight: 600;
     font-size: 13px;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: 4px 8px;
+}
+
+.title a {
+    color: var(--ink);
+    text-decoration: none;
+}
+
+.title a:hover {
+    color: var(--accent-ink);
+    text-decoration: underline;
+}
+
+.latest {
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--state-new);
+    font-variant-numeric: tabular-nums;
 }
 
 .sources {

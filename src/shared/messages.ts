@@ -27,6 +27,8 @@ export interface SourceDescriptor {
     categories?: string[]
     lastDomainCheckAt?: number
     lastDomainCheckResult?: "ok" | "moved" | "unreachable"
+    /** Why the site is gone for good, when it is. A retired source is never enabled. */
+    retired?: string
 }
 
 export interface PageIdentity {
@@ -198,6 +200,11 @@ export interface MessageMap {
     "sources:search": {
         req: { sourceId: string; query: string }
         res: { title: string; url: string; seriesId: string; poster?: string }[]
+    }
+    /** The newest episode a series page lists, for a search hit not yet in the library. */
+    "sources:latestEpisode": {
+        req: { sourceId: string; seriesUrl: string }
+        res: { latest: number | null; count: number }
     }
 
     "playback:streams": {

@@ -202,6 +202,7 @@ export async function refreshSeries(
 
     const source = sourceById(anime.sourceId)
     if (!source) throw new Error(`unknown source "${anime.sourceId}"`)
+    if (source.retired) throw new Error(`${source.name} is retired. ${source.retired}`)
 
     const ctx = await fetchCtxFor(source)
     const url = swapOrigin(anime.url, ctx.baseUrl)

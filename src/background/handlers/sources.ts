@@ -3,6 +3,8 @@ import { allSources, sourceById } from "~/sources/registry"
 import { getAllSourceState } from "~/model/db"
 import { fetchCtxFor } from "~/library/library"
 import { setSourceSettings } from "~/settings/storage"
+import { resolve } from "~/settings/resolver"
+import { latestEpisodeNumber } from "~/model/keys"
 import { pinDomain, resolveAllDomains, resolveDomains } from "../domains"
 import type { SourceDescriptor } from "~/shared/messages"
 
@@ -18,7 +20,8 @@ export function registerSourceHandlers() {
                 languages: [...source.languages],
                 domains: [...source.domains],
                 home: source.home,
-                enabled: state?.enabled ?? true,
+                enabled: !source.retired && (state?.enabled ?? true),
+                ...(source.retired ? { retired: source.retired } : {}),
                 hasDomainSource: Boolean(source.domainSource),
                 ...(source.categories?.length ? { categories: [...source.categories] } : {}),
                 knownDomains: state?.knownDomains ?? [...source.domains],
@@ -33,6 +36,7 @@ export function registerSourceHandlers() {
     on("sources:search", async ({ sourceId, query }) => {
         const source = sourceById(sourceId)
         if (!source) throw new Error(`unknown source "${sourceId}"`)
+        if (source.retired) throw new Error(`${source.name} is retired`)
         const ctx = await fetchCtxFor(source)
         const results = await source.search(query, ctx)
         return results.map(r => ({
@@ -41,6 +45,16 @@ export function registerSourceHandlers() {
             seriesId: r.seriesId,
             ...(r.poster ? { poster: r.poster } : {})
         }))
+    })
+
+    on("sources:latestEpisode", async ({ sourceId, seriesUrl }) => {
+        const source = sourceById(sourceId)
+        if (!source) throw new Error(`unknown source "${sourceId}"`)
+        if (source.retired) throw new Error(`${source.name} is retired`)
+        return politely(sourceId, async () => {
+            const episodes = await source.getEpisodes(seriesUrl, await fetchCtxFor(source))
+            return { latest: latestEpisodeNumber({ episodes }), count: episodes.length }
+        })
     })
 
     on("sources:resolveDomains", async ({ sourceId, force }) => {
@@ -58,4 +72,36 @@ export function registerSourceHandlers() {
     })
 
     on("sources:setSettings", async ({ sourceId, patch }) => setSourceSettings(sourceId, patch))
+}
+
+/**
+ * One request at a time per site, `sourceRequestDelaySec` apart.
+ *
+ * The search page asks for the latest episode of every hit it shows, which for
+ * one query can be a dozen series on the same site. That is the update loop's
+ * situation exactly — and its rule, parallel across sites and never within one,
+ * applies here for the same reason. Kept in the background rather than the
+ * page so a second open search, or a popup and a library tab at once, share
+ * the one queue.
+ */
+const queues = new Map<string, Promise<unknown>>()
+const lastRequestAt = new Map<string, number>()
+
+function politely<T>(sourceId: string, work: () => Promise<T>): Promise<T> {
+    const run = async () => {
+        const gapMs = Math.max(0, resolve("sourceRequestDelaySec", { sourceId })) * 1000
+        const wait = (lastRequestAt.get(sourceId) ?? 0) + gapMs - Date.now()
+        if (wait > 0) await new Promise(done => setTimeout(done, wait))
+        try {
+            return await work()
+        } finally {
+            lastRequestAt.set(sourceId, Date.now())
+        }
+    }
+    const next = (queues.get(sourceId) ?? Promise.resolve()).then(run, run)
+    queues.set(
+        sourceId,
+        next.catch(() => undefined)
+    )
+    return next
 }

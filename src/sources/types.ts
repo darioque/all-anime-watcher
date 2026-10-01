@@ -185,6 +185,17 @@ export interface AnimeSource {
     readonly categories?: string[]
 
     /**
+     * Set when the site is gone for good, saying why, for a person to read.
+     *
+     * A fact about the site, not a preference, the same way "posts episodes
+     * ahead" is: nothing can be checked on a site that no longer exists. The
+     * source stays registered so library entries keyed on it keep their name and
+     * watch history; it is simply never asked anything again — no update checks,
+     * no search, no domain health checks. Deleting the line brings it back.
+     */
+    readonly retired?: string
+
+    /**
      * Do two of *this source's* series ids name the same show?
      *
      * Optional, and only worth implementing for a source that reconstructs its

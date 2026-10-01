@@ -144,24 +144,29 @@ onMounted(load)
             <div class="head">
                 <span class="name">{{ source.name }}</span>
                 <span class="host" :class="{ pinned: source.pinnedDomain }">{{ activeHost(source) }}</span>
-                <span v-if="source.pinnedDomain" class="badge">pinned</span>
+                <span v-if="source.retired" class="badge bad">retired</span>
+                <span v-else-if="source.pinnedDomain" class="badge">pinned</span>
                 <span v-else-if="source.hasDomainSource" class="badge auto">auto</span>
                 <span
-                    v-if="source.lastDomainCheckResult === 'unreachable'"
+                    v-if="!source.retired && source.lastDomainCheckResult === 'unreachable'"
                     class="badge bad"
                     title="No known domain answered at the last check"
                 >
                     unreachable
                 </span>
                 <span class="spacer"></span>
-                <span class="checked">
+                <span v-if="!source.retired" class="checked">
                     {{
                         source.lastDomainCheckAt ? `checked ${relativePast(source.lastDomainCheckAt)}` : "never checked"
                     }}
                 </span>
             </div>
 
-            <div class="known">
+            <p v-if="source.retired" class="retired">
+                {{ source.retired }} It is no longer checked or searched; series you followed there keep their history.
+            </p>
+
+            <div v-if="!source.retired" class="known">
                 <button
                     v-for="host in source.knownDomains ?? []"
                     :key="host"
@@ -194,7 +199,7 @@ onMounted(load)
                 </span>
             </div>
 
-            <div class="source-settings">
+            <div v-if="!source.retired" class="source-settings">
                 <div v-for="option in SOURCE_OVERRIDES" :key="option.key" class="setting-row">
                     <div class="setting-text">
                         <span class="setting-label">{{ option.label }}</span>
@@ -307,6 +312,13 @@ h2 {
 .badge.auto {
     background: var(--accent-soft);
     color: var(--accent-ink);
+}
+
+.retired {
+    margin: 0;
+    font-size: 11px;
+    color: var(--ink-3);
+    line-height: 1.5;
 }
 
 .badge.bad {

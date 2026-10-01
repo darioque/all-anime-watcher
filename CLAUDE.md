@@ -207,7 +207,7 @@ scripts/probe-source.mts the CLI Lab page
 | --- | --- | --- |
 | lmanime.com | WordPress `animestream` theme | done — plays in the browser |
 | mundodonghua.com | custom PHP, packed-JS server tabs | done — probe green |
-| myanime.live | WordPress REST API; no series pages at all | done — probe green |
+| myanime.live | WordPress REST API; no series pages at all | **retired** 2026-10-01 — redirects to an unrelated wordpress.com blog |
 | anikototv.to | AnimeKai/AnimeSuge family, signed AJAX | done — probe green |
 | luciferdonghua.in | the same `animestream` theme, added later | done — plays via OK.ru and Dailymotion |
 | donghualife.com | Next.js app, JSON API, one series per *season* | done — probe green on its own R2 HLS + ASS subtitles |
@@ -220,6 +220,15 @@ the next, so nothing has to be pasted in; where there is a choice — which hit,
 which episode, which server — it takes the obvious one and offers a picker to run
 again from there. The judgements are pure (`src/lab/checks.ts`, `npm run
 check:lab`); only the probes touch the network.
+
+**A dead site is declared `retired`, not deleted.** `AnimeSource.retired` is a
+reason string; the source stays registered so entries keyed on it keep their
+name and watch history, and everything that would ask it something declines:
+the update loop pushes its series a day out instead of checking them (leaving
+them due would fill `maxChecksPerRun` every tick; `NEVER` would strand them if
+the line were ever deleted), `refreshSeries` and search refuse, domain
+resolution skips it, and `sources:list` reports it as not enabled. myanime is
+the first; its parsing and `check:myanime` are kept as the template below.
 
 **myanime.live has no series identity to read**, which makes it the hardest of
 the four and a useful template for sites like it. Each post is one episode, and
