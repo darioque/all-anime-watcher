@@ -22,6 +22,7 @@ import { extractorFor } from "~/extractors/registry"
 import type { ResolvedServer } from "~/sources/types"
 import type { ExtractCtx, ExtractorNetRule } from "~/extractors/types"
 import { setLogLevel } from "~/shared/logger"
+import { assToVtt, isAss, isVtt, srtToVtt } from "~/shared/vtt"
 
 setLogLevel(process.env.VERBOSE ? "debug" : "warn")
 
@@ -326,11 +327,38 @@ if (html) {
                         const answer = await source.resolveServer!(chosen, ctx)
                         return (typeof answer === "string" ? { embedUrl: answer } : answer) as ResolvedServer
                     },
-                    r => `${chosen.name} → ${r.embedUrl}${describeSkips(r.skips)}`
+                    r =>
+                        `${chosen.name} → ${r.embedUrl}${describeSkips(r.skips)}` +
+                        (r.subtitles?.length ? `, ${r.subtitles.length} site subtitle track(s)` : "")
                 )
               : null
 
         embedUrl = resolved?.embedUrl ?? null
+
+        /*
+         * Subtitles the site keeps beside the video. The extractor never sees
+         * them, so the extract step below cannot report them; this fetches the
+         * default one the way the player will — the site as Referer, unwrapped,
+         * converted — and counts the cues. Node sets that Referer itself; in the
+         * extension it is a DNR rule from `background/streams.ts`.
+         */
+        const track = resolved?.subtitles?.find(candidate => candidate.default) ?? resolved?.subtitles?.[0]
+        if (track) {
+            await step(
+                "site subtitles",
+                async () => {
+                    const text = await ctx.text(track.url, { headers: { Referer: `${ctx.baseUrl}/` } })
+                    const raw = track.jsonField
+                        ? ((JSON.parse(text) as Record<string, unknown>)[track.jsonField] as string | undefined)
+                        : text
+                    if (typeof raw !== "string") throw new Error(`no "${track.jsonField}" in the response`)
+                    const vtt = isVtt(raw) ? raw : isAss(raw) ? assToVtt(raw) : srtToVtt(raw)
+                    return { label: track.label, cues: (vtt.match(/ --> /g) ?? []).length, ass: isAss(raw) }
+                },
+                r => `"${r.label}", ${r.ass ? "ASS → " : ""}WebVTT with ${r.cues} cue(s)`,
+                r => (r.cues === 0 ? "the track converted to nothing" : null)
+            )
+        }
 
         if (!embedUrl) {
             fail("server embed", `"${chosen.name}" has no embedUrl and the source has no resolveServer`)

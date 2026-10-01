@@ -1,4 +1,5 @@
 import type { Episode, Variant } from "~/model/types"
+import type { Track } from "~/extractors/types"
 
 /** A search or browse hit. */
 export interface SearchResult {
@@ -101,6 +102,15 @@ export interface ResolvedServer {
     embedUrl: string
     /** Seconds from the start of the episode. */
     skips?: { intro?: { startSec: number; endSec: number }; outro?: { startSec: number; endSec: number } }
+    /**
+     * Subtitle tracks the *site* keeps beside the video rather than inside it.
+     *
+     * donghualife.com serves its own video raw and renders a separate ASS track
+     * over it, so the extractor that reads the playlist has no way to know the
+     * subtitles exist. Attached to every extracted stream; the site's own host
+     * is sent as Referer when they are fetched.
+     */
+    subtitles?: Track[]
 }
 
 export interface FetchCtx {

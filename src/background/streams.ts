@@ -104,6 +104,7 @@ async function resolveInner(options: {
     // party — they measured it against this exact encode.
     const embedUrl = typeof resolved === "string" ? resolved : resolved.embedUrl
     const siteSkips = typeof resolved === "string" ? undefined : resolved.skips
+    const siteSubtitles = typeof resolved === "string" ? [] : (resolved.subtitles ?? [])
 
     const host = new URL(embedUrl).hostname
     const extractor = extractorFor(embedUrl)
@@ -141,11 +142,18 @@ async function resolveInner(options: {
         const withSkips = siteSkips
             ? streams.map(stream => ({ ...stream, skips: { ...stream.skips, ...siteSkips } }))
             : streams
+        const withSubtitles =
+            siteSubtitles.length > 0
+                ? withSkips.map(stream => ({ ...stream, subtitles: [...(stream.subtitles ?? []), ...siteSubtitles] }))
+                : withSkips
 
-        await installStreamRules(withSkips)
+        await installStreamRules(withSubtitles)
+        // The site's own subtitle endpoint wants the site as Referer, which is
+        // not necessarily what the stream's CDN asked for.
+        for (const track of siteSubtitles) await ensureRefererRule(track.url, `${ctx.baseUrl}/`)
 
         logger.info(`${options.server.name} → ${extractor.id} → ${streams.length} stream(s)`)
-        return { embedUrl, extractorId: extractor.id, streams: withSkips }
+        return { embedUrl, extractorId: extractor.id, streams: withSubtitles }
     } catch (error) {
         // An extractor that knows the host but couldn't read it — a deleted file,
         // a changed player — still leaves the embed itself playable.

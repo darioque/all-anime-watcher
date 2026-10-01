@@ -28,7 +28,7 @@ export function normalise(title: string): string {
     return title
         .toLowerCase()
         .replace(/\(\s*\d{4}\s*\)/g, " ")
-        .replace(/\b(season|series|part|cour)\s*\d+\b/g, " ")
+        .replace(/\b(season|series|part|cour|temporada)\s*\d+\b/g, " ")
         .replace(/\b(sub|dub|subbed|dubbed|english|eng|latino|castellano)\b/g, " ")
         .replace(/[^a-z0-9]+/g, " ")
         .trim()
@@ -61,11 +61,12 @@ export function similarity(a: string, b: string): number {
 /**
  * The season a title names, if it names one.
  *
- * "Season 5", "S5", "Part 2", or a bare trailing number as several donghua sites
- * write it ("Tales of Demons and Gods 10").
+ * "Season 5", "S5", "Part 2", "Temporada 5" as the Spanish sites write it, or a
+ * bare trailing number as several donghua sites write it ("Tales of Demons and
+ * Gods 10").
  */
 export function seasonOf(title: string): number | null {
-    const worded = /\b(?:season|s|part|cour)\s*0*(\d{1,2})\b/i.exec(title)
+    const worded = /\b(?:season|s|part|cour|temporada)\s*0*(\d{1,2})\b/i.exec(title)
     if (worded?.[1]) return Number.parseInt(worded[1], 10)
     const trailing = /\s0*(\d{1,2})\s*$/.exec(title.trim())
     return trailing?.[1] ? Number.parseInt(trailing[1], 10) : null
@@ -80,13 +81,17 @@ export function seasonOf(title: string): number | null {
  * the *scoring* below, where it stops season 5 quietly linking to season 1.
  */
 export function searchQuery(title: string): string {
-    return title
-        .replace(/\(\s*\d{4}\s*\)/g, " ")
-        .replace(/\b(?:season|part|cour)\s*0*\d{1,2}\b/gi, " ")
-        .replace(/\b(?:sub|dub|subbed|dubbed|subtitulado|latino|castellano)\b/gi, " ")
-        .replace(/[’']/g, "'")
-        .replace(/\s+/g, " ")
-        .trim()
+    return (
+        title
+            .replace(/\(\s*\d{4}\s*\)/g, " ")
+            .replace(/\b(?:season|part|cour|temporada)\s*0*\d{1,2}\b/gi, " ")
+            .replace(/\b(?:sub|dub|subbed|dubbed|subtitulado|latino|castellano)\b/gi, " ")
+            .replace(/[’']/g, "'")
+            .replace(/\s+/g, " ")
+            // "Show – Season 2" leaves its separator behind once the season is out.
+            .replace(/[\s:–—-]+$/, "")
+            .trim()
+    )
 }
 
 export function scoreMatch(localTitle: string, media: AniListMedia): number {

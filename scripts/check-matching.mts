@@ -30,6 +30,12 @@ const media = (titles: { romaji?: string; english?: string; synonyms?: string[] 
 console.log("\n\x1b[1mseason detection\x1b[0m\n")
 check("'… Season 05' → 5", seasonOf("A Record of A Mortal's Journey to Immortality Season 05") === 5)
 check("'… Part 2' → 2", seasonOf("Some Show Part 2") === 2)
+check("'… – Temporada 3' → 3", seasonOf("Wan Jie Du Zun – Temporada 3") === 3)
+check(
+    "'Temporada' comes out of the AniList query",
+    searchQuery("Wan Jie Du Zun – Temporada 3") === "Wan Jie Du Zun",
+    `got "${searchQuery("Wan Jie Du Zun – Temporada 3")}"`
+)
 check("bare trailing number → 10", seasonOf("Tales of Demons and Gods 10") === 10)
 check("no season → null", seasonOf("Renegade Immortal") === null)
 check("a year is not a season", seasonOf("Xian Ni (2023)") === null, `got ${seasonOf("Xian Ni (2023)")}`)

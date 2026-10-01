@@ -6,6 +6,11 @@ export interface Track {
     /** WebVTT plays natively; ASS/SSA needs a renderer. */
     format?: "vtt" | "srt" | "ass" | "unknown"
     default?: boolean
+    /**
+     * The file arrives wrapped in a JSON object; the track is this key's string.
+     * donghualife.com serves `{ "content": "<ASS script>" }` rather than a file.
+     */
+    jsonField?: string
 }
 
 export interface Span {

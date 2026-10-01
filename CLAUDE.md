@@ -24,6 +24,7 @@ npm run check              # validate dist/ alone
 npm run check:schedule     # the schedule date maths
 npm run check:matching     # AniList title matching rules (offline)
 npm run check:myanime      # myanime.live identity parsing (offline)
+npm run check:donghualife  # donghualife.com payload parsing + ASS → WebVTT (offline)
 npm run check:grouping     # one-show-many-sources grouping rules (offline)
 npm run check:m3u8         # which hosts a playlist refers to (offline)
 npm run typecheck          # vue-tsc, must stay clean
@@ -209,6 +210,7 @@ scripts/probe-source.mts the CLI Lab page
 | myanime.live | WordPress REST API; no series pages at all | done — probe green |
 | anikototv.to | AnimeKai/AnimeSuge family, signed AJAX | done — probe green |
 | luciferdonghua.in | the same `animestream` theme, added later | done — plays via OK.ru and Dailymotion |
+| donghualife.com | Next.js app, JSON API, one series per *season* | done — probe green on its own R2 HLS + ASS subtitles |
 
 All four launch sources are in, plus luciferdonghua.in, and the **Lab page** (Settings → Lab) tests one
 end to end: pick a source, press Run, and six chained steps go from its declared
@@ -469,7 +471,9 @@ exercises one at a time.
 | bysekoze.com | `byse` | works — AES-256-GCM player config from `/api/videos/<code>`; pinned by `npm run check:extractors` |
 | megaplay family | `megaplay` | works — HLS + subtitles; covers megaplay.buzz, vidtube.site and the rest of the white-labelled engine |
 | dailymotion.com | `dailymotion` | resolves to a master playlist; the manifest 403s intermittently — see below |
-| voe.sx, rumble.com, youtube.com | — | embedded via the iframe fallback |
+| rumble.com | `rumble` | extractor exists; Cloudflare-challenges Node, so the CLI probe 403s it — confirm in the Lab |
+| videos.donghualife.com | `direct` | plain HLS, CDN allows the site's origin; Spanish is a separate ASS track the *source* attaches |
+| voe.sx, odysee.com, youtube.com | — | embedded via the iframe fallback |
 
 **MegaPlay** is two requests and no obfuscation: the embed page carries a
 `data-id` that is *not* the id in the URL, and `/stream/getSources?id=<data-id>`
@@ -526,7 +530,35 @@ which is why lmanime and myanime still play.
 **Sources:** `lmanime` (AnimeStream theme), `mundodonghua` (custom PHP, packed-JS
 servers), `myanime` (WordPress REST API, no series pages), `anikoto` (AnimeKai
 family, signed AJAX, embeds on the MegaPlay engine), `luciferdonghua`
-(AnimeStream theme again, but with series under `/anime/` — see below).
+(AnimeStream theme again, but with series under `/anime/` — see below),
+`donghualife` (Next.js, see below).
+
+**donghualife.com follows a season, not a show.** Every season restarts at
+episode 1 (Wan Jie Du Zun: 50, 224, 213), so a show-level entry would hold three
+episode 1s. Each season is its own series, keyed by its slug, titled
+"<Show> – Temporada N" once a show has more than one — `trackers/matching.ts`
+reads "Temporada" as a season marker for exactly this. The stored URL is the
+show's page with the season in the fragment (`#temporada=<slug>`); the episodes
+API wants both slugs.
+
+- **An episode URL is not an identity there either.** `/watch/<season>-<n>` is
+  what the site links, but `/watch/<show>-<n>` also plays for a single-season
+  show and lands in `<show>-1` — and the episode's own JSON-LD advertises that
+  second form. `getPageInfo` reads `seasonSlug` from the page's RSC payload.
+- **It is a client-side app.** After a soft navigation the DOM the content script
+  hands over still carries the first page's payload; the page readers compare
+  the payload's `currentId` to the URL and refetch when they differ.
+- **Its own server (R2) is raw video plus an ASS track.** The extractor reading
+  the playlist cannot know the subtitles exist, so the source returns them on
+  `ResolvedServer.subtitles` (the same channel as site skip offsets),
+  `background/streams.ts` attaches them and installs the site's Referer for them
+  (the endpoint 403s without one), `Track.jsonField` unwraps its
+  `{ content }` envelope, and `shared/vtt.ts` flattens ASS to WebVTT.
+- **VIP early access is its "posted, but not out".** The episodes API flags
+  `isVipOnly`; `parseEpisodes` drops those, so they arrive as ordinary releases
+  when the window closes. A free viewer opening one is redirected to `/vip` by a
+  page that names no season, so there is no `episodeAvailability` — nothing on
+  that page can be identified.
 
 **luciferdonghua.in is the second `animestream` site, and it is where two of the
 family's defaults turned out to be lmanime's habits rather than the theme's.**
@@ -744,5 +776,5 @@ on therefore records nothing.
    nothing would play is no longer recorded as watched. See "Posted, but not
    out".
 
-   Still open: the ZoroTheme family, Spanish sources beyond mundodonghua,
+   Still open: the ZoroTheme family, an Odysee extractor (donghualife's third server),
    AniList write-back (needs OAuth), and stats.

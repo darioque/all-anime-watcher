@@ -1,6 +1,6 @@
 import type { Track } from "~/extractors/types"
 import { send } from "~/shared/messages"
-import { isVtt, srtToVtt } from "~/shared/vtt"
+import { assToVtt, isAss, isVtt, srtToVtt } from "~/shared/vtt"
 
 /**
  * Getting a subtitle file onto a `<track>` element.
@@ -11,7 +11,8 @@ import { isVtt, srtToVtt } from "~/shared/vtt"
  * `<track>` refuses outright; Dailymotion is one.
  *
  * So: fetch through the proxy, convert if needed, and hand the element a blob
- * URL from our own origin.
+ * URL from our own origin. ASS goes through the same door, flattened to the
+ * dialogue `<track>` can show — see `assToVtt`.
  */
 
 export interface LoadedTrack extends Track {
@@ -30,10 +31,23 @@ export async function loadTrack(track: Track): Promise<LoadedTrack | null> {
         const response = await send("playback:fetch", { url: track.url, responseType: "text" })
         if (response.error || !response.text) return null
 
-        const content = isVtt(response.text) ? response.text : srtToVtt(response.text)
+        const raw = track.jsonField ? unwrap(response.text, track.jsonField) : response.text
+        if (!raw) return null
+
+        const content = isVtt(raw) ? raw : isAss(raw) ? assToVtt(raw) : srtToVtt(raw)
 
         const blob = new Blob([content], { type: "text/vtt" })
         return { ...track, objectUrl: URL.createObjectURL(blob) }
+    } catch {
+        return null
+    }
+}
+
+/** The string under `field` in a JSON envelope, or null when there is none. */
+function unwrap(text: string, field: string): string | null {
+    try {
+        const value = (JSON.parse(text) as Record<string, unknown>)[field]
+        return typeof value === "string" ? value : null
     } catch {
         return null
     }
