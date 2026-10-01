@@ -84,11 +84,18 @@ export interface ExtractorNetRule {
     resourceTypes?: ("xmlhttprequest" | "media" | "other" | "image")[]
 }
 
+/** What an extractor may ask of a request. POST exists for hosts whose API is JSON-RPC, like Odysee's. */
+export interface ExtractRequestInit {
+    headers?: Record<string, string>
+    method?: "GET" | "POST"
+    body?: string
+}
+
 export interface ExtractCtx {
     /** Page the embed was found on; most hosts want this as Referer. */
     referer: string
-    text(url: string, init?: { headers?: Record<string, string> }): Promise<string>
-    json<T = unknown>(url: string, init?: { headers?: Record<string, string> }): Promise<T>
+    text(url: string, init?: ExtractRequestInit): Promise<string>
+    json<T = unknown>(url: string, init?: ExtractRequestInit): Promise<T>
 }
 
 /**

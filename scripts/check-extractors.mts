@@ -19,6 +19,7 @@ import {
     tokenPath,
     type SourcesResponse
 } from "~/extractors/sites/megaplay"
+import { claimUri } from "~/extractors/sites/odysee"
 import type { ExtractCtx } from "~/extractors/types"
 import { bysePlayback, byseExpected } from "./fixtures/byse"
 
@@ -261,6 +262,22 @@ await rejects(
     megaplay.extract(embed, ctxServing({}).ctx),
     "served neither sources endpoint"
 )
+
+console.log("\n\x1b[1modysee — embed URL to claim URI\x1b[0m\n")
+
+// The percent-encoded form is exactly what donghualife.com hands over.
+eq(
+    "an encoded embed URL",
+    claimUri("https://odysee.com/%24/embed/%40dlife%3A3%2FWs-288%3A1?r=x&signature=ab&signature_ts=1"),
+    "lbry://@dlife#3/Ws-288#1"
+)
+eq("a watch page URL", claimUri("https://odysee.com/@dlife:3/Ws-288:1"), "lbry://@dlife#3/Ws-288#1")
+eq(
+    "name and claim id",
+    claimUri("https://odysee.com/$/embed/Ws-288/1f450847834db62131e4903340179cbaf3621148"),
+    "lbry://Ws-288#1f450847834db62131e4903340179cbaf3621148"
+)
+eq("a site page is not a claim", claimUri("https://odysee.com/$/settings"), null)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

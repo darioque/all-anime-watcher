@@ -124,8 +124,8 @@ async function resolveInner(options: {
 
     const extractCtx: ExtractCtx = {
         referer: options.episodeUrl,
-        text: (url, init) => ctx.text(url, { headers: init?.headers ?? {} }),
-        json: (url, init) => ctx.json(url, { headers: init?.headers ?? {} })
+        text: (url, init) => ctx.text(url, { ...init, headers: init?.headers ?? {} }),
+        json: (url, init) => ctx.json(url, { ...init, headers: init?.headers ?? {} })
     }
 
     /*

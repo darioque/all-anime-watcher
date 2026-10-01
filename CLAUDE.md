@@ -482,7 +482,8 @@ exercises one at a time.
 | dailymotion.com | `dailymotion` | resolves to a master playlist; the manifest 403s intermittently — see below |
 | rumble.com | `rumble` | extractor exists; Cloudflare-challenges Node, so the CLI probe 403s it — confirm in the Lab |
 | videos.donghualife.com | `direct` | plain HLS, CDN allows the site's origin; Spanish is a separate ASS track the *source* attaches |
-| voe.sx, odysee.com, youtube.com | — | embedded via the iframe fallback |
+| odysee.com | `odysee` | works — JSON-RPC `get` (passing the embed's signature for unlisted claims) → signed MP4 on secure.odycdn.com, Referer `https://odysee.com/` |
+| voe.sx, youtube.com | — | embedded via the iframe fallback |
 
 **MegaPlay** is two requests and no obfuscation: the embed page carries a
 `data-id` that is *not* the id in the URL, and `/stream/getSources?id=<data-id>`
@@ -785,5 +786,5 @@ on therefore records nothing.
    nothing would play is no longer recorded as watched. See "Posted, but not
    out".
 
-   Still open: the ZoroTheme family, an Odysee extractor (donghualife's third server),
+   Still open: the ZoroTheme family,
    AniList write-back (needs OAuth), and stats.

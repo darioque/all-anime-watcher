@@ -7,6 +7,7 @@ import { StreamWishExtractor } from "./sites/streamwish"
 import { ByseExtractor } from "./sites/byse"
 import { DirectStreamExtractor } from "./sites/directStream"
 import { RumbleExtractor } from "./sites/rumble"
+import { OdyseeExtractor } from "./sites/odysee"
 import { hostOf } from "~/shared/url"
 import { log } from "~/shared/logger"
 
@@ -27,6 +28,7 @@ const ALL: Extractor[] = [
     new ByseExtractor(),
     new StreamWishExtractor(),
     new RumbleExtractor(),
+    new OdyseeExtractor(),
     new DirectStreamExtractor()
 ]
 
