@@ -1,4 +1,4 @@
-import type { ExtractCtx, Extractor, Stream } from "~/extractors/types"
+import type { ExtractCtx, Extractor, ExtractorNetRule, Stream } from "~/extractors/types"
 import { log } from "~/shared/logger"
 
 const logger = log("extractor:odysee")
@@ -23,18 +23,34 @@ const REFERER = "https://odysee.com/"
  * signature is passed through as the embed carries it; a public claim has none
  * and needs none.
  *
- * **The file wants `Referer: https://odysee.com/`** — 403 without it, 206 with it,
- * whoever minted the URL. Nothing else is bound: a URL minted from the CLI plays
- * in a browser and vice versa. It is a plain MP4, and a `<video src>` is not
- * subject to CORS, so the page fetches it and a DNR rule supplies the Referer.
+ * **Everything on the CDN wants `Referer: https://odysee.com/`** — 403 without
+ * it, whoever minted the URL. Nothing else is bound: a URL minted from the CLI
+ * plays in a browser and vice versa. Declared as a DNR rule for all of
+ * `odycdn.com`, because the extractor's own playlist fetch runs in the worker,
+ * which cannot set the header, and the page's `<video>` and hls.js need it too.
  *
- * A burst of requests earns `429 Try again later` from the CDN (`x-powered-by:
- * use-p2`). That is a rate limit, not a header problem — it looked like one for a
- * while, and went away on its own.
+ * **`streaming_url` names an MP4 the CDN may refuse to serve.** Once Odysee has
+ * transcoded a claim, its player's `HEAD` on that `.mp4` is answered with a 308
+ * to `…/master.m3u8`, and a `GET` with `429 Try again later` (`x-powered-by:
+ * use-p2`) — every time, for as long as you care to retry. That read as a rate
+ * limit until the player was watched doing the HEAD. Before transcoding is
+ * done it is the other way round: the MP4 plays and `master.m3u8` is a 404,
+ * "transcoding is in progress". Both measured 2026-10-01, on animexin's and
+ * donghualife's claims respectively. So the playlist is tried first and the
+ * file is the fallback.
  */
 export class OdyseeExtractor implements Extractor {
     readonly id = "odysee"
     readonly hosts = ["odysee.com"]
+
+    readonly netRules: ExtractorNetRule[] = [
+        {
+            urlFilter: "||odycdn.com",
+            referer: REFERER,
+            appliesTo: "both",
+            resourceTypes: ["media", "xmlhttprequest", "other"]
+        }
+    ]
 
     async extract(embedUrl: string, ctx: ExtractCtx): Promise<Stream[]> {
         const uri = claimUri(embedUrl)
@@ -61,18 +77,38 @@ export class OdyseeExtractor implements Extractor {
         const url = response.result?.streaming_url
         if (!url) throw new Error(response.error?.message ?? "Odysee returned no streaming URL")
 
-        const hls = /\.m3u8(\?|$)/i.test(url) || response.result?.mime_type === "application/x-mpegURL"
-        logger.debug(`${uri} → ${new URL(url).hostname}`)
-        return [
-            {
-                url,
-                kind: hls ? "hls" : "mp4",
-                label: "Odysee",
-                headers: { Referer: REFERER },
-                fetchVia: "page"
-            }
-        ]
+        const master = await transcoded(url, ctx)
+        if (master) {
+            logger.debug(`${uri} → HLS on ${new URL(master).hostname}`)
+            return [{ url: master, kind: "hls", label: "Odysee", headers: { Referer: REFERER } }]
+        }
+
+        logger.debug(`${uri} → MP4 on ${new URL(url).hostname}`)
+        return [{ url, kind: "mp4", label: "Odysee", headers: { Referer: REFERER }, fetchVia: "page" }]
     }
+}
+
+/**
+ * The HLS master beside a `streaming_url`, when the claim has been transcoded.
+ *
+ * The CDN keeps it at the MP4's path with `/master.m3u8` in place of `.mp4`,
+ * same token. Null on anything but a playlist — a 404 there means the original
+ * file is what gets served.
+ */
+async function transcoded(url: string, ctx: ExtractCtx): Promise<string | null> {
+    const master = masterOf(url)
+    if (!master) return null
+    try {
+        const text = await ctx.text(master, { headers: { Referer: REFERER } })
+        return text.trimStart().startsWith("#EXTM3U") ? master : null
+    } catch {
+        return null
+    }
+}
+
+export function masterOf(url: string): string | null {
+    const master = url.replace(/\.mp4(?=\?|$)/i, "/master.m3u8")
+    return master === url ? null : master
 }
 
 /**

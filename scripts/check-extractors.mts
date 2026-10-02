@@ -19,7 +19,7 @@ import {
     tokenPath,
     type SourcesResponse
 } from "~/extractors/sites/megaplay"
-import { claimUri } from "~/extractors/sites/odysee"
+import { claimUri, masterOf } from "~/extractors/sites/odysee"
 import type { ExtractCtx } from "~/extractors/types"
 import { bysePlayback, byseExpected } from "./fixtures/byse"
 
@@ -278,6 +278,12 @@ eq(
     "lbry://Ws-288#1f450847834db62131e4903340179cbaf3621148"
 )
 eq("a site page is not a claim", claimUri("https://odysee.com/$/settings"), null)
+eq(
+    "the HLS master sits at the MP4's path, same token",
+    masterOf("https://secure.odycdn.com/tok==,179/v6/streams/0675/b96f.mp4?hash77=tok==,179"),
+    "https://secure.odycdn.com/tok==,179/v6/streams/0675/b96f/master.m3u8?hash77=tok==,179"
+)
+eq("no .mp4, no master", masterOf("https://secure.odycdn.com/x/v6/streams/a/b/master.m3u8"), null)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)
