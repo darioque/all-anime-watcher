@@ -211,6 +211,9 @@ scripts/probe-source.mts the CLI Lab page
 | anikototv.to | AnimeKai/AnimeSuge family, signed AJAX | done — probe green |
 | luciferdonghua.in | the same `animestream` theme, added later | done — plays via OK.ru and Dailymotion |
 | donghualife.com | Next.js app, JSON API, one series per *season* | done — probe green on its own R2 HLS + ASS subtitles |
+| animexin.dev | `animestream` theme, series at the root | done — probe green; English *and* Indonesian hardsub per host |
+| animekhor.org | `animestream` theme, series under `/anime/` | done — probe green; many white-label hosts fall back to iframes |
+| donghua4k.net | `animestream` theme, series under `/anime/` | done — probe green; Dailymotion only, one server per subtitle language |
 
 All four launch sources are in, plus luciferdonghua.in, and the **Lab page** (Settings → Lab) tests one
 end to end: pick a source, press Run, and six chained steps go from its declared
@@ -482,7 +485,7 @@ exercises one at a time.
 | dailymotion.com | `dailymotion` | resolves to a master playlist; the manifest 403s intermittently — see below |
 | rumble.com | `rumble` | extractor exists; Cloudflare-challenges Node, so the CLI probe 403s it — confirm in the Lab |
 | videos.donghualife.com | `direct` | plain HLS, CDN allows the site's origin; Spanish is a separate ASS track the *source* attaches |
-| odysee.com | `odysee` | works — JSON-RPC `get` (passing the embed's signature for unlisted claims) → signed MP4 on secure.odycdn.com, Referer `https://odysee.com/` |
+| odysee.com | `odysee` | works — JSON-RPC `get` (passing the embed's signature for unlisted claims) → signed URL on secure.odycdn.com; HLS `master.m3u8` once transcoded, the MP4 before. Referer `https://odysee.com/` on all of `odycdn.com` |
 | voe.sx, youtube.com | — | embedded via the iframe fallback |
 
 **MegaPlay** is two requests and no obfuscation: the embed page carries a
@@ -541,7 +544,31 @@ which is why lmanime and myanime still play.
 servers), `myanime` (WordPress REST API, no series pages), `anikoto` (AnimeKai
 family, signed AJAX, embeds on the MegaPlay engine), `luciferdonghua`
 (AnimeStream theme again, but with series under `/anime/` — see below),
-`donghualife` (Next.js, see below).
+`donghualife` (Next.js, see below), and `animexin`, `animekhor`, `donghua4k` (the
+`animestream` theme three more times — config files only).
+
+**Three more `animestream` sites, and what they taught the family.**
+
+- **A server's value is not always a page.** luciferdonghua's `<option>` values
+  are `/v/N/` URLs to fetch, so its `playerIframe` is anchored on
+  `div.player-embed` to dodge an ad frame. These three use base64 of a *bare*
+  `<iframe>`, with no container for that anchor to find — copying the
+  luciferdonghua selector made every server fail with "no embed URL found". The
+  theme default is right for them; check what a decoded value looks like before
+  copying a selector across.
+- **A root-level site can still decline an episode URL.** animexin keeps series
+  at the root, like lmanime, and its stems drift
+  (`ancient-god-sovereign-episode-22-…` is `/primeval-overlord/`). Its
+  `seriesUrl` is "a root slug that is not an episode" — too broad to mean "this
+  is a series page", exactly broad enough to make `seriesIdFromUrl` return null
+  for an episode so the breadcrumb decides.
+- **Episode titles carry a tail after the number** ("… Episode 4 Subbed",
+  "… Episode 217 (243) Subtitles [ENGLISH + INDONESIAN]"); `getPageInfo` now cuts
+  from "Episode N" to the end rather than only a trailing "Episode N".
+- **Language is a server, not a variant, on these sites.** animexin offers every
+  host once in English and once in Indonesian; donghua4k one Dailymotion per
+  subtitle language including Español. Nothing is filtered — the viewer picks
+  with `preferredServers`, per source or per series.
 
 **donghualife.com follows a season, not a show.** Every season restarts at
 episode 1 (Wan Jie Du Zun: 50, 224, 213), so a show-level entry would hold three

@@ -496,8 +496,10 @@ export class AnimeStream implements AnimeSource {
         const number = this.episodeNumberFromUrl(url) ?? leadingNumber(pageTitle.replace(/^\D+/, "")) ?? 1
 
         return {
-            // Strip the trailing "Episode N" the theme appends to episode titles.
-            title: pageTitle.replace(/\s*episode\s*[\d.]+\s*$/i, "").trim() || seriesId,
+            // Strip the "Episode N" the theme appends to episode titles, and
+            // whatever a site tacks on after it — "Subbed", "Indonesia, English
+            // Sub", "(243) Subtitles [ENGLISH + INDONESIAN]".
+            title: pageTitle.replace(/\s+episode\s*[\d.]+\b.*$/i, "").trim() || seriesId,
             seriesId,
             seriesUrl,
             number,
