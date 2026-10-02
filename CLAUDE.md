@@ -486,6 +486,13 @@ exercises one at a time.
 | rumble.com | `rumble` | extractor exists; Cloudflare-challenges Node, so the CLI probe 403s it — confirm in the Lab |
 | videos.donghualife.com | `direct` | plain HLS, CDN allows the site's origin; Spanish is a separate ASS track the *source* attaches |
 | odysee.com | `odysee` | works — JSON-RPC `get` (passing the embed's signature for unlisted claims) → signed URL on secure.odycdn.com; HLS `master.m3u8` once transcoded, the MP4 before. Referer `https://odysee.com/` on all of `odycdn.com` |
+| seekplayer.vip, upns.live, p2pstream.vip | `upns` | works — one white-label engine; `/api/v1/video?id=<#fragment>` is AES-128-CBC under a fixed key, `cfNative` is the HLS master; segments (fMP4 as `.woff2`) want the embed host as Referer |
+| playmogo.com + Dood mirrors | `dood` | works in a browser — `/pass_md5/` prefix + `makePlay()` tail; file wants the mirror as Referer. Cloudflare fingerprints Node's TLS, so the CLI probe 403s the embed page |
+| vidara.to / .so | `vidara` | works — `POST /api/stream` → HLS, no headers anywhere |
+| play.d.tube | `dtube` | works — base58 id → UUID → `nas{1,2}.d.tube/videos/<uuid>/master.m3u8`; hotlink-protected, so Referer `play.d.tube` on all of `d.tube` |
+| player.abyssplayer.com | — | iframe fallback. Config is AES-CTR, key `md5("<user_id>:<slug>:<md5_id>")`, decrypting to MP4 parts on `*.sssrr.org` (Referer: the player) — but the **video bytes are encrypted too**, so playing it means reimplementing its loader |
+| mega.nz | — | iframe fallback. Files are encrypted client-side, key in the URL fragment; same problem as Abyss |
+| turbovidhls.com | — | dead — the domain no longer resolves |
 | voe.sx, youtube.com | — | embedded via the iframe fallback |
 
 **MegaPlay** is two requests and no obfuscation: the embed page carries a
@@ -506,6 +513,22 @@ retries a failing segment long enough that it reads as buffering that never ends
 segments) and installs a rule for every host it names, including the ones hidden
 in `URI="…"` attributes: the decryption key, alternate audio, subtitle
 renditions. Missing the key means an encrypted stream that never plays.
+
+**A stream's declared Referer outranks the embed page's.** Before extracting,
+`streams.ts` gives the embed host the *site* as Referer, which suits most embed
+pages. Rules are per host, and the first one in used to stick — so a stream on
+the embed's own host that named a different Referer was silently left with the
+site's. upns does exactly that (master on the embed host, 403 under a foreign
+Referer) and read as a dead server. `ensureRefererRule(…, { override: true })`
+now replaces a different rule for streams and the hosts their playlists name; a
+default call never displaces one, because the look-ahead re-resolves servers
+while a stream plays.
+
+**Hotlink protection is the page's Referer, not ours.** hls.js on a page we took
+over sends that site as Referer. D.Tube 403s any foreign Referer and accepts
+none, so the CLI probe (which sends none) passed while the extension would have
+failed; it declares `play.d.tube` for all of `d.tube`. Probe a new host with the
+*anime site* as Referer too, not just with none and with the embed's.
 
 **A DNR rule also has to name the right initiator, and there are two.** The proxy's
 fetches come from the extension; hls.js loads manifests and segments straight

@@ -20,6 +20,9 @@ import {
     type SourcesResponse
 } from "~/extractors/sites/megaplay"
 import { claimUri, masterOf } from "~/extractors/sites/odysee"
+import { decryptConfig } from "~/extractors/sites/upns"
+import { fileUrl, subtitlesOf } from "~/extractors/sites/dood"
+import { videoUuid } from "~/extractors/sites/dtube"
 import type { ExtractCtx } from "~/extractors/types"
 import { bysePlayback, byseExpected } from "./fixtures/byse"
 
@@ -284,6 +287,43 @@ eq(
     "https://secure.odycdn.com/tok==,179/v6/streams/0675/b96f/master.m3u8?hash77=tok==,179"
 )
 eq("no .mp4, no master", masterOf("https://secure.odycdn.com/x/v6/streams/a/b/master.m3u8"), null)
+
+console.log("\n\x1b[1mupns — the encrypted player config\x1b[0m\n")
+
+// Encrypted offline with the key and IV the real player was caught using; a
+// changed scheme fails here as a decrypt error rather than as a dead server.
+eq(
+    "the config decrypts under the fixed key",
+    await decryptConfig(
+        "7a8fb6774aeee842ff6f4bdbb54a7ecf972e649ac0921ba6ee0378116518f9cbe65afb54425b1f4766bef0e4a2de303c37051d7a0838d66cafe5a399824100f9a3bb163b87c5595b7f759bef6afd9651"
+    ),
+    '{"cfNative":"/v4/pl/x/master.m3u8","subtitle":{"es":"/a/es.vtt#es"}}'
+)
+await decryptConfig("not hex at all").then(
+    () => eq("non-hex is refused", "accepted", "refused"),
+    () => eq("non-hex is refused", "refused", "refused")
+)
+
+console.log("\n\x1b[1mdood — the file URL and subtitles\x1b[0m\n")
+
+eq(
+    "makePlay(): prefix, 10 random characters, token, expiry",
+    fileUrl("https://km270l.cloudatacdn.com/abc~", "tok123", 1790000000000, () => 0),
+    "https://km270l.cloudatacdn.com/abc~AAAAAAAAAA?token=tok123&expiry=1790000000000"
+)
+const doodPage = `dsplayer.addRemoteTextTrack({src:'data:text/vtt;base64,V0VCVlRUCgo=',label:' ',kind:'captions',srclang:'es'}, false);
+dsplayer.addRemoteTextTrack({src:'//srt.doodcdn.io/srt/56046/x_Spanish.vtt', label:'Spanish',kind:'captions',srclang:'en'}, false);`
+const doodTracks = subtitlesOf(doodPage)
+eq("the empty data: placeholder is skipped", doodTracks.length, 1)
+eq("protocol-relative becomes https", doodTracks[0]?.url, "https://srt.doodcdn.io/srt/56046/x_Spanish.vtt")
+eq("the label names the language", doodTracks[0]?.label, "Spanish")
+
+console.log("\n\x1b[1mdtube — video ids\x1b[0m\n")
+
+// Both forms are real embeds: animexin uses base58, animekhor the UUID.
+eq("base58 decodes to the UUID", videoUuid("3mMLsLreUfvTGzAzSdQkQA"), "16638a2c-9229-40d1-aae8-db780e1bb883")
+eq("a UUID passes through", videoUuid("3e95b258-8685-45a9-8f2f-a8dfa37d8cf2"), "3e95b258-8685-45a9-8f2f-a8dfa37d8cf2")
+eq("base58 has no 0, O, I or l", videoUuid("0OIl"), null)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

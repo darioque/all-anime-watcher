@@ -8,6 +8,10 @@ import { ByseExtractor } from "./sites/byse"
 import { DirectStreamExtractor } from "./sites/directStream"
 import { RumbleExtractor } from "./sites/rumble"
 import { OdyseeExtractor } from "./sites/odysee"
+import { UpnsExtractor } from "./sites/upns"
+import { DoodExtractor } from "./sites/dood"
+import { VidaraExtractor } from "./sites/vidara"
+import { DTubeExtractor } from "./sites/dtube"
 import { hostOf } from "~/shared/url"
 import { log } from "~/shared/logger"
 
@@ -29,6 +33,10 @@ const ALL: Extractor[] = [
     new StreamWishExtractor(),
     new RumbleExtractor(),
     new OdyseeExtractor(),
+    new UpnsExtractor(),
+    new DoodExtractor(),
+    new VidaraExtractor(),
+    new DTubeExtractor(),
     new DirectStreamExtractor()
 ]
 
