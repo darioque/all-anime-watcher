@@ -151,18 +151,41 @@ async function isRegexSupported(regex: string): Promise<boolean> {
 const RUNTIME_ID_BASE = 5000
 const MAX_RUNTIME_RULES = 24
 
-/** host → the rule id serving it, in insertion order for eviction. */
-const runtimeRules = new Map<string, number>()
+/** host → the rule serving it and the Referer it sets, in insertion order for eviction. */
+const runtimeRules = new Map<string, { id: number; referer: string }>()
 let nextRuntimeId = RUNTIME_ID_BASE
 
-export async function ensureRefererRule(url: string, referer: string): Promise<void> {
+/**
+ * Rewrite the Referer for one host.
+ *
+ * Two kinds of caller, and they are not equal. Before extraction the embed
+ * host gets the *site* as Referer — a guess that suits most embed pages. A
+ * stream then names the Referer its files need, and that is not a guess: it is
+ * the extractor saying what playback requires. Where the two disagree on one
+ * host, the stream wins (`override`), because a rule is per host and the first
+ * one in used to stick: the upns player keeps its master playlist on the embed
+ * host and 403s it under the site's Referer, so the stream's own was being
+ * silently dropped and the server read as dead.
+ *
+ * A default never displaces an existing rule. The look-ahead re-resolves the
+ * next episode's servers while the current one plays, and would otherwise flip
+ * a host back to the site's Referer under a playing stream.
+ */
+export async function ensureRefererRule(
+    url: string,
+    referer: string,
+    options: { override?: boolean } = {}
+): Promise<void> {
     let host: string
     try {
         host = new URL(url).hostname
     } catch {
         return
     }
-    if (host === "" || runtimeRules.has(host)) return
+    if (host === "") return
+
+    const existing = runtimeRules.get(host)
+    if (existing && (existing.referer === referer || !options.override)) return
 
     // An extractor that declared a rule for this host chose its Referer
     // deliberately. These run at a higher priority and would silently override
@@ -172,16 +195,17 @@ export async function ensureRefererRule(url: string, referer: string): Promise<v
         return
     }
 
-    const id = nextRuntimeId++
+    // Replacing keeps the host's id; a new host takes the next one.
+    const id = existing?.id ?? nextRuntimeId++
     // Wrap rather than grow without bound; ids are only ever ours.
     if (nextRuntimeId > RUNTIME_ID_BASE + 1000) nextRuntimeId = RUNTIME_ID_BASE
 
     const evict: number[] = []
-    while (runtimeRules.size >= MAX_RUNTIME_RULES) {
+    while (!existing && runtimeRules.size >= MAX_RUNTIME_RULES) {
         const oldest = runtimeRules.keys().next()
         if (oldest.done) break
         const victim = runtimeRules.get(oldest.value)
-        if (victim !== undefined) evict.push(victim)
+        if (victim !== undefined) evict.push(victim.id)
         runtimeRules.delete(oldest.value)
     }
 
@@ -213,8 +237,8 @@ export async function ensureRefererRule(url: string, referer: string): Promise<v
                 }
             ]
         })
-        runtimeRules.set(host, id)
-        logger.debug(`Referer for ${host} → ${referer}`)
+        runtimeRules.set(host, { id, referer })
+        logger.debug(`Referer for ${host} → ${referer}${existing ? ` (was ${existing.referer})` : ""}`)
     } catch (error) {
         logger.warn(`could not install a Referer rule for ${host}`, error)
     }

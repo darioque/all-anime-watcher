@@ -186,7 +186,7 @@ export async function installStreamRules(streams: Stream[]): Promise<void> {
         const referer = refererOf(stream)
         if (!referer) continue
         for (const target of [stream.url, ...(stream.subtitles ?? []).map(track => track.url)]) {
-            await ensureRefererRule(target, referer)
+            await ensureRefererRule(target, referer, { override: true })
         }
         if (stream.kind === "hls") await coverPlaylistHosts(stream.url, referer)
     }
@@ -241,7 +241,7 @@ export async function coverPlaylistHosts(url: string, referer: string, depth = 0
         const host = new URL(absolute).hostname
         if (host === new URL(url).hostname || seen.has(host)) continue
         seen.add(host)
-        await ensureRefererRule(absolute, referer)
+        await ensureRefererRule(absolute, referer, { override: true })
     }
 
     if (seen.size > 0) logger.info(`${new URL(url).hostname} playlist also uses ${[...seen].join(", ")}`)
