@@ -153,8 +153,10 @@ const DEFAULT_SELECTORS: AnimeStreamSelectors = {
     playerContainer: "div.player-embed"
 }
 
-const DEFAULT_EPISODE_URL = /^\/[^/]+-episode-[\d.]+\/?$/
-const DEFAULT_EPISODE_SUFFIX = /-episode-[\d.]+(?:-[a-z0-9-]*)?$/i
+// "-episodes-" too: batch posts ("-episodes-16-to-21-") are routine on some of
+// these sites, and the series list numbers them by their first episode.
+const DEFAULT_EPISODE_URL = /^\/[^/]+-episodes?-[\d.]+\/?$/
+const DEFAULT_EPISODE_SUFFIX = /-episodes?-[\d.]+(?:-[a-z0-9-]*)?$/i
 
 /**
  * Is this timestamp the first day of a month?
@@ -259,7 +261,7 @@ export class AnimeStream implements AnimeSource {
     }
 
     episodeNumberFromUrl(url: string): number | null {
-        const match = pathOf(url).match(/-episode-(\d+(?:\.\d+)?)/i)
+        const match = pathOf(url).match(/-episodes?-(\d+(?:\.\d+)?)/i)
         return match?.[1] ? Number.parseFloat(match[1]) : null
     }
 
@@ -499,7 +501,7 @@ export class AnimeStream implements AnimeSource {
             // Strip the "Episode N" the theme appends to episode titles, and
             // whatever a site tacks on after it — "Subbed", "Indonesia, English
             // Sub", "(243) Subtitles [ENGLISH + INDONESIAN]".
-            title: pageTitle.replace(/\s+episode\s*[\d.]+\b.*$/i, "").trim() || seriesId,
+            title: pageTitle.replace(/\s+episodes?\s*[\d.]+\b.*$/i, "").trim() || seriesId,
             seriesId,
             seriesUrl,
             number,

@@ -35,11 +35,11 @@ export const animexin = new AnimeStream({
     home: "https://animexin.dev/",
     // Chinese animation only; the site brands itself as a donghua site.
     categories: ["Donghua"],
-    episodeUrl: /^\/[^/]+-episode-[\d.]+(?:-[a-z0-9-]+)?\/?$/,
+    episodeUrl: /^\/[^/]+-episodes?-[\d.]+(?:-[a-z0-9-]+)?\/?$/,
     // A root-level page that is not an episode. Broad on purpose — /genres/
     // matches too — because what it is *for* is the negative: an episode URL
     // never yields a series id by slug arithmetic.
-    seriesUrl: /^\/(?![^/]*-episode-[\d.])[^/]+\/?$/
+    seriesUrl: /^\/(?![^/]*-episodes?-[\d.])[^/]+\/?$/
     // The theme's bare `iframe[src]` is right here, unlike on luciferdonghua:
     // a server's value is base64 of the iframe alone, with no page around it
     // for an ad frame to sit in.

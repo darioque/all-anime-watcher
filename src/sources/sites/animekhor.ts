@@ -19,6 +19,11 @@ import { AnimeStream } from "~/sources/families/AnimeStream"
  * decides. Numbers are sometimes dual (`-episode-217-243-`, season count then
  * absolute); the first is the one the series list uses, so it is the one kept.
  *
+ * **Batches are posted as one episode**: `-episodes-16-to-21-`, listed as
+ * "16 to 21". The plural is why `episodeUrl` reads `episodes?`; it missed
+ * every batch post until 2026-10-02. Like the list, it keys them by the first
+ * number.
+ *
  * Servers are labelled "[ENGLISH]" or "[MULTI SUB]": Dailymotion, OK.ru,
  * Rumble, D.Tube, and a row of white-label players (turbovidhls, upns.live,
  * p2pstream.vip, vidara, bysekoze, abyssplayer). bysekoze has an extractor;
@@ -31,7 +36,7 @@ export const animekhor = new AnimeStream({
     domains: ["animekhor.org"],
     home: "https://animekhor.org/",
     categories: ["Donghua"],
-    episodeUrl: /^\/[^/]+-episode-[\d.]+(?:-[a-z0-9-]+)?\/?$/,
+    episodeUrl: /^\/[^/]+-episodes?-[\d.]+(?:-[a-z0-9-]+)?\/?$/,
     seriesUrl: /^\/anime\/[^/]+\/?$/
     // Servers are base64 of a bare iframe, so the theme's `iframe[src]` holds.
 })

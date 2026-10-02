@@ -588,6 +588,16 @@ family, signed AJAX, embeds on the MegaPlay engine), `luciferdonghua`
 - **Episode titles carry a tail after the number** ("… Episode 4 Subbed",
   "… Episode 217 (243) Subtitles [ENGLISH + INDONESIAN]"); `getPageInfo` now cuts
   from "Episode N" to the end rather than only a trailing "Episode N".
+- **Batches are one post**: animekhor writes `-episodes-16-to-21-`, plural,
+  and the list says "16 to 21". The family reads `-episodes?-` everywhere now
+  and keys a batch by its first number, as it already did for luciferdonghua's
+  `-episode-18-to-20-`.
+- **Their posters are hotlink-protected, twice.** animexin sends
+  `Cross-Origin-Resource-Policy: same-origin` and sits behind Cloudflare
+  hotlink protection, so the library page got a broken image. `installRules`
+  gives every source domain a rule for images *our* pages request: the
+  domain's own Referer, CORP removed. Neither fix alone loads it — measured in
+  Brave with the extension loaded.
 - **Language is a server, not a variant, on these sites.** animexin offers every
   host once in English and once in Indonesian; donghua4k one Dailymotion per
   subtitle language including Español. Nothing is filtered — the viewer picks

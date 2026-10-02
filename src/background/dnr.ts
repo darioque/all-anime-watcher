@@ -70,6 +70,35 @@ export async function installRules(): Promise<void> {
         })
     }
 
+    /*
+     * Posters, in our own pages. animexin.dev guards its images twice, and the
+     * library — an extension page — failed both, showing a broken image while
+     * the site's own pages loaded it fine:
+     *
+     *  - `Cross-Origin-Resource-Policy: same-origin` on the response, which
+     *    Chrome reports as `ERR_BLOCKED_BY_RESPONSE.NotSameOrigin`;
+     *  - Cloudflare hotlink protection underneath it: 403 with our page as
+     *    Referer, 403 with none, the image with the site's own.
+     *
+     * Measured in Brave with this extension loaded, one fix at a time; only both
+     * together load it. So each source domain gets its own Referer and loses the
+     * CORP header — for images *our* pages request, never a website's, so the
+     * viewer's own browsing is untouched. Discovered domains are included,
+     * which is why the Referer is the domain itself rather than `source.home`.
+     */
+    for (const domain of sourceDomains) {
+        rules.push({
+            id: id++,
+            priority: 1,
+            action: {
+                type: "modifyHeaders",
+                requestHeaders: [{ header: "Referer", operation: "set", value: `https://${domain}/` }],
+                responseHeaders: [{ header: "cross-origin-resource-policy", operation: "remove" }]
+            },
+            condition: { initiatorDomains: [self], requestDomains: [domain], resourceTypes: ["image"] }
+        })
+    }
+
     // Opt-in CSP removal, only on the episode pages of sources that ask for it.
     for (const source of allSources()) {
         if (!source.stripCsp) continue

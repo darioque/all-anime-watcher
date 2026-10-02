@@ -25,7 +25,7 @@ export const donghua4k = new AnimeStream({
     domains: ["donghua4k.net"],
     home: "https://donghua4k.net/",
     categories: ["Donghua"],
-    episodeUrl: /^\/[^/]+-episode-[\d.]+(?:-[a-z0-9-]+)?\/?$/,
+    episodeUrl: /^\/[^/]+-episodes?-[\d.]+(?:-[a-z0-9-]+)?\/?$/,
     seriesUrl: /^\/anime\/[^/]+\/?$/
     // Servers are base64 of a bare iframe, so the theme's `iframe[src]` holds.
 })
