@@ -104,6 +104,7 @@ async function identifyNow() {
     let options: PlayerOptions = {
         progressTickSec: 5,
         seekStepSec: 5,
+        defaultVolume: 50,
         preferredQuality: "1080p",
         autoAdvance: true,
         skipIntro: "button",
@@ -116,6 +117,7 @@ async function identifyNow() {
         options = {
             progressTickSec: settings.progressTickSec,
             seekStepSec: settings.seekStepSec,
+            defaultVolume: settings.defaultVolume,
             preferredQuality: settings.preferredQuality,
             autoAdvance: settings.autoAdvance,
             skipIntro: settings.skipIntro,

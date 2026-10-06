@@ -176,6 +176,14 @@ const GROUPS: { id: string; title: string; note?: string; fields: Field[] }[] = 
                 max: 120
             },
             {
+                key: "defaultVolume",
+                label: "Start at volume",
+                help: "Percent. The arrow keys and the volume slider still change it while you watch.",
+                type: "number",
+                min: 0,
+                max: 100
+            },
+            {
                 key: "progressTickSec",
                 label: "Save my position every",
                 help: "Seconds.",

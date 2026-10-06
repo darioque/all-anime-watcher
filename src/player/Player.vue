@@ -19,6 +19,8 @@ const props = defineProps<{
     identity: PageIdentity
     progressTickSec: number
     seekStepSec: number
+    /** Percentage, 0–100. */
+    defaultVolume: number
     preferredQuality: string
     autoAdvance: boolean
     skipIntro: "off" | "button" | "auto"
@@ -1011,6 +1013,10 @@ function reportProgress() {
 
 onMounted(async () => {
     document.title = title.value
+
+    // Once, on mount: an in-place swap to the next episode reuses this element,
+    // so a volume changed while watching carries over instead of snapping back.
+    if (video.value) video.value.volume = Math.min(1, Math.max(0, props.defaultVolume / 100))
 
     /*
      * The source recognised a countdown or a placeholder. Say so rather than

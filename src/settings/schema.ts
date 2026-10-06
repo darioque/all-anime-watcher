@@ -73,6 +73,8 @@ export interface GlobalSettings {
     progressTickSec: number
     /** Seconds the left/right arrows move. */
     seekStepSec: number
+    /** Volume the player starts at, as a percentage (0–100). */
+    defaultVolume: number
 
     // --- notifications
     notifyNewEpisode: boolean
@@ -184,6 +186,7 @@ export function defaultSettings(): GlobalSettings {
         skipOutro: "button",
         progressTickSec: 5,
         seekStepSec: 5,
+        defaultVolume: 50,
 
         notifyNewEpisode: true,
         notificationTimeoutMs: 0,
