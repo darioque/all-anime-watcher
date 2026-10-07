@@ -143,6 +143,12 @@ const GROUPS: { id: string; title: string; note?: string; fields: Field[] }[] = 
                     { value: "raw", label: "Raw" }
                 ]
             },
+            {
+                key: "subtitleLanguages",
+                label: "Subtitle languages, best first",
+                help: "Language codes, comma separated: en, es, pt. Decides which subtitle files a download keeps.",
+                type: "list"
+            },
             { key: "autoAdvance", label: "Play the next episode automatically", type: "toggle" },
             {
                 key: "recoverStalledPlayback",
@@ -201,6 +207,29 @@ const GROUPS: { id: string; title: string; note?: string; fields: Field[] }[] = 
         id: "downloads",
         title: "Downloads",
         fields: [
+            {
+                key: "downloadQuality",
+                label: "Quality",
+                type: "select",
+                options: [
+                    { value: "same-as-playback", label: "Same as my playback quality" },
+                    { value: "highest", label: "Highest available" },
+                    { value: "lowest", label: "Lowest available" }
+                ]
+            },
+            {
+                key: "downloadFilenameTemplate",
+                label: "File name",
+                help: "Inside your browser's download folder. A / makes a subfolder. Fields: {title} {ep} {ext} {source} {variant} {quality}.",
+                type: "text"
+            },
+            {
+                key: "maxParallelDownloads",
+                label: "Episodes downloaded at once",
+                type: "number",
+                min: 1,
+                max: 6
+            },
             {
                 key: "downloadSubtitles",
                 label: "Subtitle files",
