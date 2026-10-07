@@ -502,11 +502,14 @@ chrome.downloads?.onChanged.addListener(delta => {
  * `downloads.download` has even resolved with an id.
  *
  * `filename` on `downloads.download` alone is not enough. While any other
- * extension listens to `onDeterminingFilename` (Imagus does, a download manager
- * might), Chrome can throw the creator's name away and fall back to the blob
- * URL's last segment: every episode saved as a bare UUID with no extension. A
- * suggestion made *through* the event is honoured, and between extensions the
- * most recently installed wins.
+ * extension listens to `onDeterminingFilename`, Chrome can throw the creator's
+ * name away and fall back to the blob URL's last segment: every episode saved
+ * as a bare UUID with no extension. XDM's integration is the usual culprit — it
+ * listens permanently and returns without suggesting for anything that is not
+ * http(s), which Chrome counts as suggesting "". A suggestion made *through* the
+ * event is honoured, and between extensions the most recently installed wins;
+ * the losing one gets a "failed to name the download" warning on its card,
+ * which is expected.
  *
  * The listener is only attached while one of ours is pending, so the browser
  * does not wake this worker for every unrelated download.
