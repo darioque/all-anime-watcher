@@ -12,6 +12,7 @@
  */
 import { fileNameFor, formatEpisode } from "~/downloads/naming"
 import { hexToBytes, ivFor } from "~/downloads/hls"
+import { chooseTracks, sidecarNames, subtitleFormat } from "~/downloads/subtitles"
 
 let failures = 0
 
@@ -152,6 +153,59 @@ eq("a large sequence still fits", hex(ivFor({ index: 0x0102_0304 })), "000000000
 eq("the IV is always sixteen bytes", ivFor({ index: 5 }).length, 16)
 eq("even from a short hex string", hex(hexToBytes("0x1")), "00000000000000000000000000000001")
 eq("and an over-long one keeps its last sixteen bytes", hex(hexToBytes(`0x${"ab".repeat(20)}`)), "ab".repeat(16))
+
+console.log("\n\x1b[1msubtitle sidecars\x1b[0m\n")
+
+const en = { url: "https://cdn/en.vtt", label: "English", language: "en" }
+const es = { url: "https://cdn/es.vtt", label: "Spanish", language: "es" }
+const unlabelled = { url: "https://cdn/sub.vtt", label: "Default" }
+const tracksOf = (picked: { url: string }[]) => picked.map(track => track.url).join(" ")
+
+eq("preferred keeps the matching language", tracksOf(chooseTracks([en, es], "preferred", ["en"])), en.url)
+eq(
+    "a label alone is enough to match",
+    tracksOf(chooseTracks([{ ...en, language: undefined }, es], "preferred", ["en"])),
+    en.url
+)
+eq("three-letter tags match too", tracksOf(chooseTracks([{ ...en, language: "eng" }, es], "preferred", ["en"])), en.url)
+// The point of the fallback: a server with one unlabelled track still gets it saved.
+eq("no match falls back to every track", tracksOf(chooseTracks([unlabelled], "preferred", ["en"])), unlabelled.url)
+eq("all is all", tracksOf(chooseTracks([en, es], "all", ["en"])), `${en.url} ${es.url}`)
+eq("off is nothing", chooseTracks([en, es], "off", ["en"]).length, 0)
+
+eq("WebVTT is recognised", subtitleFormat("WEBVTT\n\n00:00.000 --> 00:01.000\nhi"), "vtt")
+eq("ASS stays ASS", subtitleFormat("\ufeff[Script Info]\nTitle: x"), "ass")
+eq("anything else is SubRip", subtitleFormat("1\n00:00:00,000 --> 00:00:01,000\nhi"), "srt")
+
+const video = "Solo Leveling/Solo Leveling - E08.ts"
+eq(
+    "named after the video, tagged by language",
+    sidecarNames(video, [{ track: en, format: "ass" }]).join(),
+    "Solo Leveling/Solo Leveling - E08.en.ass"
+)
+eq(
+    "two tracks in one language keep apart by label",
+    sidecarNames(video, [
+        { track: { ...en, label: "Full" }, format: "ass" },
+        { track: { ...en, label: "Signs" }, format: "ass" }
+    ]).join(" | "),
+    "Solo Leveling/Solo Leveling - E08.en.Full.ass | Solo Leveling/Solo Leveling - E08.en.Signs.ass"
+)
+eq(
+    "identical tracks still never collide",
+    new Set(
+        sidecarNames(video, [
+            { track: en, format: "vtt" },
+            { track: en, format: "vtt" }
+        ])
+    ).size,
+    2
+)
+eq(
+    "no language falls back to the label",
+    sidecarNames(video, [{ track: unlabelled, format: "vtt" }]).join(),
+    "Solo Leveling/Solo Leveling - E08.Default.vtt"
+)
 
 console.log(failures === 0 ? "\n\x1b[32mall checks passed\x1b[0m\n" : `\n\x1b[31m${failures} check(s) failed\x1b[0m\n`)
 process.exit(failures > 0 ? 1 : 0)

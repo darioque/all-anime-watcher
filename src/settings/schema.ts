@@ -1,5 +1,6 @@
 import type { SchedulePolicy, Variant } from "~/model/types"
 import { defaultCategories, type Category, type CategoryFilter } from "~/library/categories"
+import type { SubtitleChoice } from "~/downloads/subtitles"
 
 /**
  * Global defaults. Every key here that also appears in AnimeOverrides or
@@ -97,6 +98,12 @@ export interface GlobalSettings {
     downloadQuality: "same-as-playback" | "highest" | "lowest"
     downloadFilenameTemplate: string
     maxParallelDownloads: number
+    /**
+     * Subtitle files saved beside the video, for servers that send them
+     * separately instead of burning them in. "preferred" means the tracks in
+     * `subtitleLanguages`, or every track when none of them matches.
+     */
+    downloadSubtitles: SubtitleChoice
 
     // --- ui
     /** Library list controls, persisted so the list looks the same next time. */
@@ -200,6 +207,7 @@ export function defaultSettings(): GlobalSettings {
         downloadQuality: "same-as-playback",
         downloadFilenameTemplate: "{title}/{title} - E{ep}.{ext}",
         maxParallelDownloads: 2,
+        downloadSubtitles: "preferred",
 
         listSort: "recent",
         listSortAscending: false,

@@ -5,6 +5,8 @@ import { resolveServerStreams, coverPlaylistHosts, refererOf } from "./streams"
 import { DOWNLOADS_CHANGED, send, type DownloadsChanged } from "~/shared/messages"
 import type { DownloadJob, DownloadPart, FetchPlan } from "~/downloads/types"
 import { fileNameFor } from "~/downloads/naming"
+import { chooseTracks, sidecarNames, subtitleFormat, SUBTITLE_MIME } from "~/downloads/subtitles"
+import { BASE_HEADERS } from "~/net/fetcher"
 import { containerFor, isMasterPlaylist, pickVariant, playlistVariants, readMediaPlaylist } from "~/shared/m3u8"
 import { getAnime } from "~/model/db"
 import { fetchCtxFor } from "~/library/library"
@@ -286,12 +288,14 @@ async function onAssembled(id: string, url: string, bytes: number): Promise<void
 
         await patch(id, { status: "saving", bytes })
         await saveToDisk(id, url, job.filename ?? `episode-${job.number}.ts`)
+        await saveSubtitles(id)
         await patch(id, { status: "done", progress: 1, finishedAt: Date.now() })
         logger.info(`${job.title} E${job.number} → ${job.filename}`)
     } catch (error) {
         await fail(id, error instanceof Error ? error.message : String(error))
     } finally {
         active.delete(id)
+        await dropSubtitles(id)
         await send("offscreen:release", { id }).catch(() => false)
         void pump()
         void closeWhenIdle()
@@ -309,6 +313,7 @@ async function fail(id: string, message: string): Promise<void> {
         await patch(id, { status: "failed", error: message, finishedAt: Date.now() })
         logger.warn(`${job?.title} E${job?.number} failed — ${message}`)
     }
+    await dropSubtitles(id)
 
     await send("offscreen:release", { id }).catch(() => false)
     void pump()
@@ -364,7 +369,10 @@ async function buildPlan(job: DownloadJob, anime: TrackedAnime): Promise<{ plan:
         }
 
         try {
-            return await planFromStream(job, anime, stream, server.name)
+            const planned = await planFromStream(job, anime, stream, server.name)
+            const saved = await stashSubtitles(job, anime, stream, planned.plan.filename)
+            if (saved > 0) planned.detail += ` · ${saved} subtitle${saved === 1 ? "" : "s"}`
+            return planned
         } catch (error) {
             refused.push(`${server.name}: ${error instanceof Error ? error.message : String(error)}`)
         }
@@ -479,6 +487,109 @@ async function fetchText(url: string): Promise<string> {
 }
 
 // ---------------------------------------------------------------- saving
+
+// ------------------------------------------------------------- subtitles
+
+interface Sidecar {
+    filename: string
+    mime: string
+    text: string
+}
+
+const subtitleKey = (jobId: string) => `download-subtitles:${jobId}`
+
+/**
+ * Fetch the stream's subtitle tracks now, while the URLs are fresh.
+ *
+ * Not at save time: an episode takes minutes to pull, and hosts sign subtitle
+ * URLs with the same short-lived tokens as the segments. The text goes to
+ * session storage rather than onto the job, because the job list is broadcast
+ * on every progress tick and the worker may restart before the video is done.
+ *
+ * Returns how many were kept. A track that will not fetch is logged and left
+ * out; a missing subtitle never fails a download.
+ */
+async function stashSubtitles(
+    job: DownloadJob,
+    anime: TrackedAnime,
+    stream: Stream,
+    videoFilename: string
+): Promise<number> {
+    const tracks = chooseTracks(
+        stream.subtitles ?? [],
+        resolve("downloadSubtitles", { anime, sourceId: job.sourceId }),
+        resolve("subtitleLanguages", { anime, sourceId: job.sourceId })
+    )
+    if (tracks.length === 0) return 0
+
+    const fetched = await Promise.all(
+        tracks.map(async track => {
+            try {
+                const response = await fetch(track.url, {
+                    headers: { ...BASE_HEADERS, ...stream.headers },
+                    credentials: "include",
+                    redirect: "follow",
+                    signal: AbortSignal.timeout(30_000)
+                })
+                if (!response.ok) throw new Error(`HTTP ${response.status}`)
+                const body = await response.text()
+                const text = track.jsonField ? unwrapJson(body, track.jsonField) : body
+                if (!text?.trim()) throw new Error("empty")
+                return { track, text, format: subtitleFormat(text) }
+            } catch (error) {
+                logger.warn(
+                    `${job.title} E${job.number}: subtitle "${track.label}" — ${error instanceof Error ? error.message : String(error)}`
+                )
+                return null
+            }
+        })
+    )
+
+    const ok = fetched.filter((entry): entry is NonNullable<typeof entry> => entry !== null)
+    if (ok.length === 0) return 0
+
+    const names = sidecarNames(videoFilename, ok)
+    const sidecars: Sidecar[] = ok.map((entry, index) => ({
+        filename: names[index]!,
+        mime: SUBTITLE_MIME[entry.format],
+        text: entry.text
+    }))
+    await chrome.storage.session.set({ [subtitleKey(job.id)]: sidecars })
+    return sidecars.length
+}
+
+/** Write the stashed sidecars beside the finished video. */
+async function saveSubtitles(jobId: string): Promise<void> {
+    const key = subtitleKey(jobId)
+    const sidecars = ((await chrome.storage.session.get(key))[key] as Sidecar[] | undefined) ?? []
+
+    for (const sidecar of sidecars) {
+        let url: string | undefined
+        try {
+            await ensureOffscreen()
+            url = await send("offscreen:textUrl", { text: sidecar.text, mime: sidecar.mime })
+            await saveToDisk(jobId, url, sidecar.filename)
+        } catch (error) {
+            logger.warn(`${sidecar.filename} — ${error instanceof Error ? error.message : String(error)}`)
+        } finally {
+            if (url) await send("offscreen:revoke", { url }).catch(() => false)
+        }
+    }
+}
+
+async function dropSubtitles(jobId: string): Promise<void> {
+    await chrome.storage.session.remove(subtitleKey(jobId)).catch(() => undefined)
+}
+
+/** The string under `field` in a JSON envelope — donghualife's `{ "content": … }`. */
+function unwrapJson(text: string, field: string): string | null {
+    try {
+        const value = (JSON.parse(text) as Record<string, unknown>)[field]
+        return typeof value === "string" ? value : null
+    } catch {
+        return null
+    }
+}
 
 /** Resolvers waiting on `downloads.onChanged`, keyed by the browser's download id. */
 const saving = new Map<number, { resolve: () => void; reject: (error: Error) => void }>()

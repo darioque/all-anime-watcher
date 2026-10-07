@@ -279,6 +279,9 @@ export interface MessageMap {
     "offscreen:download": { req: FetchPlan; res: { started: true } }
     "offscreen:cancel": { req: { id: string }; res: boolean }
     "offscreen:release": { req: { id: string }; res: boolean }
+    /** A blob URL for a small text file — a subtitle sidecar — since a worker cannot make one. */
+    "offscreen:textUrl": { req: { text: string; mime: string }; res: string }
+    "offscreen:revoke": { req: { url: string }; res: boolean }
 
     /*
      * The Lab: run one piece of a source or extractor on demand, inside the

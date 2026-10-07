@@ -77,6 +77,17 @@ browser.runtime.onMessage.addListener((message: unknown) => {
         running.get(id)?.controller.abort(new Error("cancelled"))
         return handle(async () => true)
     }
+    if (envelope.action === "offscreen:textUrl") {
+        const { text, mime } = envelope.payload as { text: string; mime: string }
+        return handle(async () => URL.createObjectURL(new Blob([text], { type: mime })))
+    }
+    if (envelope.action === "offscreen:revoke") {
+        const { url } = envelope.payload as { url: string }
+        return handle(async () => {
+            URL.revokeObjectURL(url)
+            return true
+        })
+    }
     if (envelope.action === "offscreen:release") {
         const { id } = envelope.payload as { id: string }
         return handle(async () => release(id))

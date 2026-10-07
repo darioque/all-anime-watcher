@@ -194,6 +194,23 @@ const GROUPS: { id: string; title: string; note?: string; fields: Field[] }[] = 
         ]
     },
     {
+        id: "downloads",
+        title: "Downloads",
+        fields: [
+            {
+                key: "downloadSubtitles",
+                label: "Subtitle files",
+                help: "Saved next to the episode for servers that send subtitles separately rather than burning them into the picture. Players like mpv and VLC load them automatically.",
+                type: "select",
+                options: [
+                    { value: "preferred", label: "My subtitle languages" },
+                    { value: "all", label: "Every track" },
+                    { value: "off", label: "Don't save them" }
+                ]
+            }
+        ]
+    },
+    {
         id: "anilist",
         title: "AniList",
         note: "Read-only. Nothing is sent to AniList, and no sign-in is needed.",
