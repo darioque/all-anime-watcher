@@ -497,6 +497,40 @@ chrome.downloads?.onChanged.addListener(delta => {
 })
 
 /**
+ * Filenames for our own downloads still waiting on the browser to name them,
+ * keyed by the object URL — the naming event can arrive before
+ * `downloads.download` has even resolved with an id.
+ *
+ * `filename` on `downloads.download` alone is not enough. While any other
+ * extension listens to `onDeterminingFilename` (Imagus does, a download manager
+ * might), Chrome can throw the creator's name away and fall back to the blob
+ * URL's last segment: every episode saved as a bare UUID with no extension. A
+ * suggestion made *through* the event is honoured, and between extensions the
+ * most recently installed wins.
+ *
+ * The listener is only attached while one of ours is pending, so the browser
+ * does not wake this worker for every unrelated download.
+ */
+const naming = new Map<string, string>()
+
+function suggestOurName(
+    item: chrome.downloads.DownloadItem,
+    suggest: (suggestion?: chrome.downloads.FilenameSuggestion) => void
+): void {
+    const filename = naming.get(item.url) ?? naming.get(item.finalUrl)
+    // Not ours: answering nothing leaves the decision to everyone else.
+    if (!filename) return
+    suggest({ filename, conflictAction: "uniquify" })
+    forgetName(item.url)
+    forgetName(item.finalUrl)
+}
+
+function forgetName(url: string): void {
+    naming.delete(url)
+    if (naming.size === 0) chrome.downloads.onDeterminingFilename?.removeListener(suggestOurName)
+}
+
+/**
  * Hand the assembled file to the browser's own download manager.
  *
  * `uniquify` rather than `overwrite`: re-downloading an episode you already have
@@ -504,12 +538,21 @@ chrome.downloads?.onChanged.addListener(delta => {
  * to know whether the existing file is the same encode.
  */
 async function saveToDisk(jobId: string, objectUrl: string, filename: string): Promise<void> {
-    const downloadId = await chrome.downloads.download({
-        url: objectUrl,
-        filename,
-        conflictAction: "uniquify",
-        saveAs: false
-    })
+    naming.set(objectUrl, filename)
+    chrome.downloads.onDeterminingFilename?.addListener(suggestOurName)
+
+    let downloadId: number
+    try {
+        downloadId = await chrome.downloads.download({
+            url: objectUrl,
+            filename,
+            conflictAction: "uniquify",
+            saveAs: false
+        })
+    } catch (error) {
+        forgetName(objectUrl)
+        throw error
+    }
 
     await new Promise<void>((resolveWait, reject) => {
         saving.set(downloadId, { resolve: resolveWait, reject })
