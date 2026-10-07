@@ -33,6 +33,10 @@ const error = ref<string | null>(null)
  * Descriptor-driven rather than a hand-written form: every setting has to be
  * reachable from the UI or "nothing hardcoded" is only true in the type system,
  * and a table is the only way that stays true as settings are added.
+ *
+ * A new group also needs an entry in `SECTIONS` in SettingsDialog.vue. Only the
+ * group named by the dialog's active tab is rendered, so a group without a tab
+ * builds, typechecks and is never seen.
  */
 interface Field {
     key: keyof GlobalSettings

@@ -21,6 +21,7 @@ const SECTIONS = [
     { id: "checking", label: "Checking for new episodes" },
     { id: "notifications", label: "Notifications" },
     { id: "playback", label: "Playback" },
+    { id: "downloads", label: "Downloads" },
     { id: "anilist", label: "AniList" },
     { id: "domains", label: "Domains" },
     { id: "interface", label: "Interface" },
