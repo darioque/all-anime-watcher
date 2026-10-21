@@ -789,9 +789,16 @@ function nudgeVolume(delta: number) {
  * most likely to be sitting back. It also covers the embedded-iframe case, where
  * there is no video element of ours to ask.
  *
- * Exit is deliberately not element-specific: double-clicking the picture gives
- * the *video* fullscreen through the native controls, and F should still take
- * you out of that.
+ * Every way in goes through here — F, a double-click on the picture and the
+ * button drawn over it — because Chrome's own ways in all fullscreen the
+ * `<video>`. They cannot be redirected after the fact either: the browser's
+ * request spends the click's user activation, so a `fullscreenchange` handler
+ * that exits and asks again for the stage is refused ("Permissions check
+ * failed"). Cancelling the `dblclick` does not stop the native one. Hence
+ * `controlslist="nofullscreen"` on the element, which removes the native button
+ * *and* the native double-click, and our own of each in their place.
+ *
+ * Exit is still not element-specific, so F gets you out of anything fullscreen.
  */
 async function toggleFullscreen() {
     if (document.fullscreenElement) {
@@ -799,6 +806,31 @@ async function toggleFullscreen() {
         return
     }
     await stage.value?.requestFullscreen().catch(() => undefined)
+}
+
+/** Whether the stage is fullscreen now, however it got there or left (Esc). */
+const isFullscreen = ref(false)
+
+function onFullscreenChange() {
+    isFullscreen.value = document.fullscreenElement !== null
+}
+
+/**
+ * The fullscreen button lives over the picture, so it follows the pointer the
+ * way the native control bar does: shown on movement, gone after a moment still.
+ */
+const pointerOverStage = ref(false)
+let stageIdleTimer: number | undefined
+
+function onStagePointer() {
+    pointerOverStage.value = true
+    window.clearTimeout(stageIdleTimer)
+    stageIdleTimer = window.setTimeout(() => (pointerOverStage.value = false), 2500)
+}
+
+function onStageLeave() {
+    window.clearTimeout(stageIdleTimer)
+    pointerOverStage.value = false
 }
 
 async function togglePip() {
@@ -1041,6 +1073,7 @@ onMounted(async () => {
     document.addEventListener("visibilitychange", reportProgress)
     // Capture, so nothing on the page gets the key first.
     window.addEventListener("keydown", onKey, true)
+    document.addEventListener("fullscreenchange", onFullscreenChange)
     window.addEventListener("mousemove", onPointer, { passive: true })
     window.addEventListener("mousedown", onPointer, { passive: true })
 
@@ -1162,6 +1195,8 @@ onBeforeUnmount(() => {
     if (tickTimer) window.clearInterval(tickTimer)
     document.removeEventListener("visibilitychange", reportProgress)
     window.removeEventListener("keydown", onKey, true)
+    document.removeEventListener("fullscreenchange", onFullscreenChange)
+    window.clearTimeout(stageIdleTimer)
     window.removeEventListener("mousemove", onPointer)
     window.removeEventListener("mousedown", onPointer)
     reportProgress()
@@ -1253,7 +1288,7 @@ onBeforeUnmount(() => {
             <a v-if="info" class="tag link" :href="info.seriesUrl">All episodes</a>
         </header>
 
-        <div ref="stage" class="stage">
+        <div ref="stage" class="stage" @mousemove="onStagePointer" @mouseleave="onStageLeave">
             <iframe
                 v-if="embedded"
                 :src="embedded"
@@ -1265,11 +1300,13 @@ onBeforeUnmount(() => {
                 v-show="!embedded"
                 ref="video"
                 :controls="controlsVisible"
+                controlslist="nofullscreen"
                 playsinline
                 autoplay
                 @ended="onEnded"
                 @playing="onPlaying"
                 @timeupdate="checkSkip"
+                @dblclick="toggleFullscreen"
             >
                 <track
                     v-for="(track, index) in subtitles"
@@ -1288,6 +1325,32 @@ onBeforeUnmount(() => {
                 @click="doSkip(inSkip)"
             >
                 Skip {{ inSkip === "intro" ? "intro" : "ending" }} <span class="key">S</span>
+            </button>
+
+            <button
+                v-if="!embedded && controlsVisible"
+                class="fullscreen"
+                :class="{ shown: pointerOverStage }"
+                :title="isFullscreen ? 'Exit fullscreen (F)' : 'Fullscreen (F)'"
+                :aria-label="isFullscreen ? 'Exit fullscreen' : 'Fullscreen'"
+                @click="toggleFullscreen"
+            >
+                <svg viewBox="0 0 24 24" width="20" height="20" aria-hidden="true">
+                    <path
+                        v-if="isFullscreen"
+                        d="M9 4v5H4M15 4v5h5M9 20v-5H4M15 20v-5h5"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    />
+                    <path
+                        v-else
+                        d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"
+                        fill="none"
+                        stroke="currentColor"
+                        stroke-width="2"
+                    />
+                </svg>
             </button>
 
             <div v-if="status === 'resolving'" class="overlay">
@@ -1738,6 +1801,35 @@ video.no-native-controls::-webkit-media-controls-overlay-play-button {
     padding: 8px 14px;
     cursor: pointer;
     box-shadow: 0 6px 18px -6px rgba(0, 0, 0, 0.7);
+}
+
+/*
+ * Top right, clear of the native control bar along the bottom and of the skip
+ * button above it. Faded rather than removed while the pointer is still, so it
+ * stays clickable the moment the pointer comes back.
+ */
+.fullscreen {
+    position: absolute;
+    top: 12px;
+    right: 12px;
+    display: flex;
+    padding: 6px;
+    color: #fff;
+    background: rgba(0, 0, 0, 0.5);
+    border: 0;
+    border-radius: 6px;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.2s;
+}
+
+.fullscreen.shown,
+.fullscreen:focus-visible {
+    opacity: 1;
+}
+
+.fullscreen:hover {
+    background: rgba(0, 0, 0, 0.7);
 }
 
 .skip:hover {
