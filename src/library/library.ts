@@ -16,6 +16,7 @@ import { allSources, sourceById } from "~/sources/registry"
 import type { AnimeSource, FetchCtx, SeriesInfo } from "~/sources/types"
 import { cachedSettings, loadSettings } from "~/settings/storage"
 import { automaticCategoriesOf, shelveOverrides } from "./categories"
+import { unreleasedEpisodes } from "./unreleased"
 import { log } from "~/shared/logger"
 import { ensureTrailingSlash, swapOrigin } from "~/shared/url"
 
@@ -165,7 +166,11 @@ export async function addSeries(options: {
     })
 
     try {
-        anime.episodes = await episodeList(source, options.seriesUrl, ctx)
+        const episodes = await episodeList(source, options.seriesUrl, ctx)
+        // Nothing is announced on add, but a countdown stored now would be an
+        // episode the list already holds on the day it airs — so never announced.
+        const unreleased = await unreleasedEpisodes(source, episodes, ctx)
+        anime.episodes = episodes.filter(episode => !unreleased.includes(episode))
         anime.lastCheckedAt = Date.now()
     } catch (error) {
         anime.failCount = 1
@@ -218,26 +223,29 @@ export async function refreshSeries(
         const watchedUpTo = anime.lastWatched ? { watchedUpTo: anime.lastWatched.number } : {}
 
         /*
-         * Drop the posts that have no video behind them, *before* the diff runs.
+         * Drop the posts that have no video behind them, *before* anything is
+         * stored or announced — and only among the ones about to be announced,
+         * since those are the only ones a countdown can be.
          *
          * Order is the whole trick. A placeholder that never enters the list is
          * absent now and present the day it airs, which is precisely what the
-         * diff below already knows how to announce — no second announcement path,
-         * no flag for the rest of the codebase to remember to skip.
+         * diff already knows how to announce — no second announcement path, no
+         * flag for the rest of the codebase to remember to skip.
          */
-        const added = fetched.filter(isNew)
-        const releases = newReleases({ added, previousHighest, ...watchedUpTo })
+        const candidates = newReleases({ added: fetched.filter(isNew), previousHighest, ...watchedUpTo })
+        const unreleased = await unreleasedEpisodes(source, candidates, ctx)
+        const episodes = fetched.filter(episode => !unreleased.includes(episode))
+        const added = episodes.filter(isNew)
+        const releases = candidates.filter(episode => !unreleased.includes(episode))
 
-        anime.episodes = fetched
+        anime.episodes = episodes
 
         /*
-         * The pointer may now name an episode that is not in the list — pulled,
-         * renumbered, or dropped just above as a placeholder. Deliberately
-         * outside verification: the missing-episode case has nothing to do with
-         * countdowns and must keep working for every source, whether or not
-         * verification is switched on for it.
+         * The pointer may now name an episode that is not in the list — pulled
+         * or renumbered by the site. Nothing to do with countdowns, so it must
+         * keep working for every source.
          */
-        const rollback = pointerRollback({ episodes: fetched, lastWatched: anime.lastWatched })
+        const rollback = pointerRollback({ episodes, lastWatched: anime.lastWatched })
         if (rollback) {
             logger.warn(
                 `${key}: position was on E${rollback.from}, which cannot be watched — ` +
@@ -261,7 +269,7 @@ export async function refreshSeries(
 
         const backfilled = added.length - releases.length
         logger.info(
-            `refreshed ${key} — ${fetched.length} episodes, ${releases.length} new` +
+            `refreshed ${key} — ${episodes.length} episodes, ${releases.length} new` +
                 (backfilled > 0
                     ? ` (${backfilled} older episode(s) appeared too, at or below E${previousHighest ?? 0}` +
                       `${anime.lastWatched ? `/E${anime.lastWatched.number} watched` : ""} — not announced)`

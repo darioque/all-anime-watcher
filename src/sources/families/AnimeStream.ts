@@ -61,29 +61,12 @@ export interface AnimeStreamConfig {
      * into the page. A site that builds the player in JavaScript would have
      * every episode declared pending. Say nothing and the check never runs.
      *
-     * Separate from `backdatedPlaceholders`, which answers the same question
-     * about the *series list* — see `parseEpisodes`. A site with the habit
-     * usually wants both: the list rule keeps the post from ever being
-     * announced, and this one explains the empty player to somebody who
-     * navigated there anyway.
+     * Declaring it also tells the update loop the site has the habit: an
+     * episode it is about to announce gets its page opened and read with these
+     * markers first — see `library/unreleased.ts`. The series list cannot be
+     * trusted for this; it lists a countdown exactly like a release.
      */
     pending?: PendingMarkers
-
-    /**
-     * This site dates a post it cannot play yet to a month gone by, rather than
-     * to the day it posted it.
-     *
-     * Note what this does *not* say: where the post lands in the list. That was
-     * the first reading of the habit and it was wrong — the placeholder sorts
-     * to the bottom only while the series is young enough that nothing real is
-     * older, and stops doing so the moment it is not. What holds is the shape
-     * of the date. See `parseEpisodes` for the two conditions and why they are
-     * narrow.
-     *
-     * Dropped during list parsing, so it costs nothing and no caller ever sees
-     * it — not the update loop, not the Lab, not the probe.
-     */
-    backdatedPlaceholders?: boolean
 
     netRequest?: NetRequestConfig | null
     domainSource?: DomainSource
@@ -158,23 +141,6 @@ const DEFAULT_SELECTORS: AnimeStreamSelectors = {
 const DEFAULT_EPISODE_URL = /^\/[^/]+-episodes?-[\d.]+\/?$/
 const DEFAULT_EPISODE_SUFFIX = /-episodes?-[\d.]+(?:-[a-z0-9-]*)?$/i
 
-/**
- * Is this timestamp the first day of a month?
- *
- * Half the test for a backdated placeholder — see `parseEpisodes`.
- *
- * Both readings count, because the answer must not depend on where the viewer
- * is. `looseDate` hands `Date.parse` whatever the site wrote, and that fixes
- * the zone: "August 1, 2026" is local midnight, while an ISO "2026-08-01" is
- * UTC midnight and reads as July 31 anywhere west of Greenwich. Accepting
- * either widens this half by one day boundary, which the other half — the entry
- * must also be strictly older than the newest post — is there to catch.
- */
-function firstOfMonth(at: number): boolean {
-    const date = new Date(at)
-    return date.getDate() === 1 || date.getUTCDate() === 1
-}
-
 export class AnimeStream implements AnimeSource {
     readonly id: string
     readonly name: string
@@ -193,7 +159,8 @@ export class AnimeStream implements AnimeSource {
     protected readonly netRequestConfig: NetRequestConfig | null
     protected readonly serverLabelFilter: (label: string) => boolean
     protected readonly pendingMarkers: PendingMarkers | null
-    protected readonly backdatedPlaceholders: boolean
+    /** Only where `pending` is declared — see `pageAvailability`. */
+    readonly episodeAvailability?: (html: string, url: string) => EpisodeAvailability
     protected readonly logger
 
     constructor(config: AnimeStreamConfig) {
@@ -212,7 +179,7 @@ export class AnimeStream implements AnimeSource {
         this.netRequestConfig = config.netRequest ?? null
         this.serverLabelFilter = config.serverLabelFilter ?? (() => true)
         this.pendingMarkers = config.pending ?? null
-        this.backdatedPlaceholders = config.backdatedPlaceholders ?? false
+        if (this.pendingMarkers) this.episodeAvailability = (html, url) => this.pageAvailability(html, url)
         this.domainSource = config.domainSource
         this.logger = log(`source:${config.id}`)
     }
@@ -370,40 +337,6 @@ export class AnimeStream implements AnimeSource {
 
         episodes.sort((a, b) => b.number - a.number)
 
-        /*
-         * Drop a post the site made before it had the episode. It is not an
-         * episode, so it does not leave this method and nothing downstream is
-         * ever told it existed.
-         *
-         * `backdatedPlaceholders` sites date such a post to the first day of a
-         * month gone by, rather than to the day they posted it. Both conditions
-         * are needed and the conjunction is the whole safety of it: the entry
-         * must be the highest-numbered, strictly older than the newest post in
-         * the list, *and* dated to a first of the month. Each half covers the
-         * other's false positive — a late re-upload or a corrected typo lands
-         * out of order but on a real day, and a real episode does sometimes
-         * come out on the 1st, but then it is the newest post and not out of
-         * order at all.
-         *
-         * Anything less certain keeps the episode: a tie for newest (this list
-         * carries no clock, so a same-day double release ties), a list where
-         * only some posts carry dates. Dropping a real episode is silent, and
-         * listing a countdown costs a notification the viewer dismisses.
-         *
-         * One entry, never a sweep. Sites with the habit have only ever been
-         * seen posting one placeholder at a time, and a second pass could only
-         * ever remove an episode nothing has been observed to do.
-         */
-        const dated = episodes.filter(episode => episode.airedAt !== undefined)
-        if (this.backdatedPlaceholders && dated.length > 1 && dated.length === episodes.length) {
-            const newest = episodes.reduce((a, b) => (b.number > a.number ? b : a))
-            const newestAt = Math.max(...dated.map(episode => episode.airedAt!))
-
-            if (newest.airedAt! < newestAt && firstOfMonth(newest.airedAt!)) {
-                episodes.splice(episodes.indexOf(newest), 1)
-            }
-        }
-
         this.logger.debug(`${episodes.length} episodes from ${baseUrl}`)
         return episodes
     }
@@ -420,11 +353,11 @@ export class AnimeStream implements AnimeSource {
      *
      * Asked when the viewer opens the page, off HTML already in hand, so it
      * costs nothing: it decides whether opening counts as watching, and gives
-     * the player something to say instead of an empty frame. The series list is
-     * a separate question with its own answer — `backdatedPlaceholders`.
+     * the player something to say instead of an empty frame. The update loop
+     * asks it too, about the episodes it is about to announce.
      *
-     * Only answered where the site declared how it says so — see `pending` on
-     * the config for why guessing is not an option here.
+     * Exposed as `episodeAvailability` only where the site declared how it says
+     * so — see `pending` on the config for why guessing is not an option here.
      *
      * The two clauses are ordered on purpose, and the order is the whole test:
      *
@@ -440,7 +373,7 @@ export class AnimeStream implements AnimeSource {
      *     usual", which is the old behaviour, rather than to a source that
      *     silently stops reporting episodes.
      */
-    episodeAvailability(html: string, url: string): EpisodeAvailability {
+    protected pageAvailability(html: string, url: string): EpisodeAvailability {
         const declared = this.pendingMarkers
         if (!declared) return { pending: false }
 

@@ -204,7 +204,7 @@ eq("our own player measures instead of assuming", marking(false, true, true), fa
  * flag came off, plus the same rule again in the player, the shelves and the
  * group aggregates — where it was missed, and the next-episode arrow lit up for
  * a countdown. What follows is the whole of what replaced all of that: the
- * source never returns the post, so none of these functions knows it exists.
+ * check run never stores the post, so none of these functions knows it exists.
  * Reaching that verdict is `check:pending`.
  * ---------------------------------------------------------------------------
  */
