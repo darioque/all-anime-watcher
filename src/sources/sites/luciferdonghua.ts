@@ -54,39 +54,19 @@ import { AnimeStream } from "~/sources/families/AnimeStream"
  * loop reads only the series page. E13 was announced as a release, opened to five
  * servers that each resolved to nothing, and was marked watched on the way in.
  *
- * **The date does distinguish them, and it is what this now reads.** The
- * placeholder carries the first day of a month gone by instead of the day it was
- * posted. The first reading of this site called an out-of-order date a symptom
- * and not evidence, on the grounds that it is also what a corrected typo or a
- * late re-upload looks like — true, and still the reason the test is not "out of
- * order" alone. Three sightings on the same series, across two months:
+ * **Only the episode page tells them apart, so that is what gets read.** For a
+ * while the list's dates did: the placeholder was dated to the 1st of a month
+ * gone by, older than the newest real post, and a rule in list parsing dropped
+ * the newest episode when it had that shape. It held for most episodes and then
+ * missed Jade Dynasty S4 E12 in October 2026, which the site listed as a release
+ * with a countdown on its page — a date habit is the site's to change without
+ * notice, and the page is the thing that actually says "not yet".
  *
- *   2026-08-27  E13 dated July 1    E01-04 dated July 30    E13 last in the list
- *   2026-08-31  E14 dated July 1    E13   dated August 30   E14 last in the list
- *   2026-09-03  E15 dated August 1  E14   dated September 3 E15 second from last
- *
- * — the newest episode by number, always on a 1st, always older than the newest
- * post. What it is *not* is always last, and the first cut of this rule read it
- * that way: it required the newest number to hold, uniquely, the oldest date in
- * the list. That held twice by luck. E01-04 is dated July 30, so a July 1
- * placeholder cleared it; an August 1 placeholder does not, and E15 was
- * announced as a release on 2026-09-03 while its page was still counting down.
- * Had the series begun a month earlier the rule would have failed in August too.
- *
- * Position was the coincidence. The date shape is the habit, and the two
- * conditions now read it directly: highest number, strictly older than the
- * newest post, dated to a first of the month. Neither half happens to a real
- * release on its own account — a re-upload lands out of order but on a real day,
- * and an episode that genuinely comes out on the 1st is the newest post rather
- * than an old one. `AnimeStream.parseEpisodes` states the conditions in full.
- *
- * **Both are declared, because they answer different questions.** The list rule
- * runs while the episode list is parsed, so the placeholder never reaches the
- * update loop, the Lab or the probe and is never announced. The marker rule runs
- * when somebody opens the page anyway — from a bookmark, from the series list on
- * the site itself — where it stops the visit counting as watched and gives the
- * player a sentence to show instead of an empty frame. Neither costs a request:
- * one reads a list already fetched, the other HTML already in hand.
+ * So `pending` below is read twice: by the library, which opens the page of an
+ * episode it is about to announce (one request, and only when something new
+ * appears — see `library/unreleased.ts`), and when somebody opens the page
+ * anyway, where it stops the visit counting as watched and gives the player a
+ * sentence to show instead of an empty frame.
  */
 export const luciferdonghua = new AnimeStream({
     id: "luciferdonghua",
@@ -120,10 +100,8 @@ export const luciferdonghua = new AnimeStream({
         // finds nothing.
         playerIframe: "div.player-embed iframe[src]"
     },
-    // The series list, read as it is parsed — see `AnimeStream.parseEpisodes`
-    // for the two conditions and why they are narrow.
-    backdatedPlaceholders: true,
-    // And the episode page, for somebody who opens one anyway. `a.tickcounter`
+    // How the episode page says "not yet" — read before an episode is announced,
+    // and when somebody opens one anyway. `a.tickcounter`
     // is the widget's own class and `data-type=countdown` the attribute its
     // loader reads, so either alone is enough; both are listed because the site
     // writes both and dropping one is a free way to survive a markup tweak. The

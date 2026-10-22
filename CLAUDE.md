@@ -192,9 +192,10 @@ scripts/probe-source.mts the CLI Lab page
    so it announces the post, moves the watch position onto it, and the real
    episode never shows as unwatched. Check by opening the newest one or two
    episodes of a *currently airing* series and looking at where the player
-   should be. If it does, drop the post while parsing the list — see "Posted, but
-   not out" below — and declare `pending` markers too, for somebody who opens the
-   page anyway. This is not optional and is not a setting.
+   should be. If it does, declare `pending` markers — the selectors or text that
+   say "not yet" where the player goes — and the library will open the page of
+   any episode it is about to announce and hold back the countdowns. See "Posted,
+   but not out" below. This is not optional and is not a setting.
 5. `npm run probe -- <id>` until every check passes. Add `VERBOSE=1` for request logs.
 6. Prior art for a site's real data path:
    `github.com/Kohi-den/extensions-source` (Kotlin, Aniyomi). Browse with
@@ -659,51 +660,48 @@ each resolved to nothing. It was announced as a release, the notification opened
 a dead page, and the watch position had already moved onto it on the way in — so
 the real E13 would never have shown as unwatched when it aired.
 
-**A post with no episode behind it is not an episode, so the source does not
-return one.** The filtering happens inside list parsing, which is the only place
-it belongs. `getEpisodes` has three callers — the update loop, the Lab page and
-the CLI probe — and a rule enforced anywhere else has to be remembered at each of
-them; an earlier version ran it as a separate pass in the update loop and the
-other two duly listed the placeholder. Downstream, `latestEpisodeNumber`,
-`unwatchedCount`, `nextEpisode`, `watchState`, the shelves, the group aggregates
-and the player's navigator are all correct without knowing the concept exists.
+**A post with no episode behind it is not an episode, so it is never stored.**
+`refreshSeries` drops it before the list is saved and before the diff that
+decides what to announce, and `addSeries` does the same on the way in. Downstream,
+`latestEpisodeNumber`, `unwatchedCount`, `nextEpisode`, `watchState`, the shelves,
+the group aggregates and the player's navigator are all correct without knowing
+the concept exists. A placeholder that is never stored is absent now and present
+the day it airs, which is an ordinary appearance in the diff.
 
-**Two questions, asked in different places, neither of which costs a request.**
+**Only the episode page can tell, so the episode page is what gets read** —
+`library/unreleased.ts`, one function. The placeholder's `<li>` in the series
+list is byte-for-byte the same shape as a real one: same `epl-num`, same
+`epl-title`, same `status Sub`.
 
 | | question | where |
 | --- | --- | --- |
-| `getEpisodes` itself | which of these listed posts are episodes? | inside the source's own list parsing, off a list already fetched |
+| `unreleasedEpisodes` | of the episodes about to be announced, which are only countdowns? | `refreshSeries` / `addSeries`, opening those pages |
 | `episodeAvailability(html, url)` | is there anything on *this* page? | `identify.ts`, off HTML already in hand |
 
-The second does not stop anything being announced — that post is gone from the
-list already. It runs when somebody opens the page anyway, from a bookmark or the
-site's own navigation: it keeps the visit from counting as watched and sends
-`pendingReason` to the player, which shows it where the video would be. A site
-with the habit usually wants both, and luciferdonghua declares both.
+Both read the same `episodeAvailability`, which a source has only if it declared
+its `pending` markers — that is the whole opt-in, and a source without it costs
+no requests. The second runs when somebody opens the page anyway, from a bookmark
+or the site's own navigation: it keeps the visit from counting as watched and
+sends `pendingReason` to the player, which shows it where the video would be.
 
-**The tell is in the date, and writing it off was a mistake worth recording.**
-The placeholder's `<li>` is byte-for-byte the same shape as a real one — same
-`epl-num` ("13 [4K]"), same `epl-title`, same `status Sub`. Only the date differs:
-it is backdated far enough to sort below episode 1 of its own series. That was
-first dismissed as a symptom rather than evidence, because an out-of-order date
-is also what a corrected typo or a late re-upload looks like. Sound against a
-loose test; not against every test. Watched twice on the same series the habit is
-sharper on both ends at once:
+**What keeps the page check cheap is what it is asked about, not a budget.**
 
-```
-2026-08-27   E13 dated July 1   E01-04 dated July 30    last, and the newest number
-2026-08-31   E14 dated July 1   E13    dated August 30  last, and the newest number
-```
+- **Only the candidates.** `newReleases` has already decided what would be
+  announced; usually nothing, occasionally one episode. Nothing else is opened.
+- **Highest first, stopping at the first one that is out.** A placeholder is
+  posted *ahead* of the release, so it is always at the top, and everything below
+  an episode that is out is out too. A first look at a series, where the whole
+  list counts as new, therefore costs one or two requests, not one per episode.
+- **No memo and no sweep.** A countdown is re-read once per check while it stands
+  — that is the cost, and it is one request. An episode stored *before* this
+  check existed is not a candidate and is never re-read; it is already in the
+  list, and the day it airs it simply stops being a countdown.
 
-So the rule is a conjunction, and the conjunction is its whole safety: **highest-
-numbered in the list** *and* **strictly the oldest-dated**. A re-upload takes
-today's date, not the list's oldest; a corrected typo lands on an episode that is
-not the newest. Ties, missing dates and partly-dated lists decline to answer, as
-does every other uncertainty — the two mistakes are not symmetrical. Announcing a
-countdown is a notification the viewer dismisses; dropping a real episode is one
-they never learn they missed. **Every uncertain path keeps the episode.**
+**Every uncertain path keeps the episode.** A page that fails to load ends the
+walk with it still listed. Announcing a countdown is a notification the viewer
+dismisses; dropping a real episode is one they never learn they missed.
 
-The same asymmetry governs the page check, which has three rules of its own:
+The page check has three rules of its own:
 
 - **An embed wins outright, checked before any marker.** A site is free to run a
   countdown to the *next* episode above a player that works. The marker is only
@@ -724,7 +722,7 @@ found the switch. Whether a site posts ahead is a fact about the site, so the
 source declares it and everything else obeys. **When a source says a post is not
 an episode, that is not a preference.**
 
-**What this replaced, and why none of it is here any more.** Three designs
+**What this replaced, and why none of it is here any more.** Four designs
 preceded it, each deleted by the next:
 
 1. **An `Episode.pending` flag.** Every reader of `anime.episodes` had to
@@ -736,17 +734,21 @@ preceded it, each deleted by the next:
    video went up *nothing about the list changed*, so the diff could not see it
    and a second path had to exist to catch the transition. Drop the placeholder
    and going live is an ordinary appearance in the diff.
-3. **`verifiedEpisodes`, a late pass that opened episode pages.** One request per
-   candidate, on every check, for as long as the countdown stood — plus
-   `verificationCandidates` to pick them, a sweep to reach placeholders already
-   stored, an `Episode.available` memo to stop the sweep repeating, and a cap so
-   an empty stored list did not open four hundred pages. All of it existed to
-   make an expensive late check affordable. Reading the list at parse time
-   dissolves the problem: there is nothing to budget, nothing to memoise, and a
-   placeholder already in the library simply stops being returned on the next
-   refresh. If a future site hides the tell only on the episode page, this is the
-   shape to rebuild — it is in the history, deleted deliberately and not by
-   accident.
+3. **`verifiedEpisodes`, a late pass that opened episode pages** for a wide set of
+   candidates on every check — plus `verificationCandidates` to pick them, a sweep
+   to reach placeholders already stored, an `Episode.available` memo to stop the
+   sweep repeating, and a cap so an empty stored list did not open four hundred
+   pages. The idea was right and the scope was wrong: all of that machinery
+   existed to afford checking episodes that could never be placeholders.
+4. **`backdatedPlaceholders`, a rule on the list's dates.** luciferdonghua dated a
+   placeholder to the 1st of a month gone by, older than the newest real post, and
+   list parsing dropped the newest episode when it had that shape. Free, and right
+   for most episodes — then Jade Dynasty S4 E12 (October 2026) went out as a
+   countdown the rule did not catch. A date habit is the site's to change without
+   notice; the countdown on the page is the thing that actually means "not yet".
+   It also meant the Lab and the probe never listed the placeholder; now they do,
+   since they call `getEpisodes` directly, and that is fine — neither announces
+   anything.
 
 **And the watch position moved before anything was known to be playable.** That
 is a second bug with the same root: `markWatchedOnOpen` fired when the page was

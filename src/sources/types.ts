@@ -233,19 +233,15 @@ export interface AnimeSource {
      *
      * Optional, and deliberately separate from `isEpisodePage`, which these
      * pages pass: the post is a real episode page, complete with a server list.
-     * Every server on it resolves to nothing, which the update loop cannot see —
-     * it never opens an episode page at all, it reads the series list, where a
-     * placeholder is indistinguishable from a release.
+     * Every server on it resolves to nothing, and the series list shows it
+     * exactly like a release.
      *
-     * Asked when the viewer opens an episode page, off HTML already in hand, so
-     * it costs nothing. It decides whether the visit counts as watching and
-     * gives the player something to say instead of an empty frame.
-     *
-     * **This is not how the update loop avoids announcing such a post** — that
-     * would be a request per candidate for every series in the library. A source
-     * whose *list* betrays the placeholder drops it while parsing the list, so
-     * nothing downstream ever sees it; see `AnimeStream.parseEpisodes`. A site
-     * with the habit usually wants both.
+     * Asked in two places. When the viewer opens an episode page, off HTML
+     * already in hand: it decides whether the visit counts as watching and gives
+     * the player something to say instead of an empty frame. And by the library,
+     * about the episodes a refresh is about to announce, whose pages it opens
+     * for the purpose — see `library/unreleased.ts`. Implementing it is how a
+     * source says it has the habit, so a source without it costs no requests.
      *
      * Only implement it where the site has a marker that means this and nothing
      * else; a source that cannot tell must not guess.

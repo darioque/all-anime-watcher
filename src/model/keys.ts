@@ -53,10 +53,10 @@ export function resumePositionFor(saved: EpisodeProgress | undefined): number | 
 /*
  * There is deliberately no `watchable(episode)` predicate here, and there was
  * one. A post the site has created but not aired — a countdown, a premium
- * window, a backdated placeholder — is not in the episode list at all: the
- * source drops it while parsing the list, so it never enters the extension in
- * the first place. Everything below can therefore treat every entry as a real
- * episode.
+ * window, a placeholder page — is not in the episode list at all: the source
+ * drops it while parsing the list, or the library drops it after reading its
+ * page (`library/unreleased.ts`), so it is never stored. Everything below can
+ * therefore treat every entry as a real episode.
  *
  * The version that kept such posts with a `pending` flag needed every reader of
  * `anime.episodes` to remember to skip them, and the cost of that showed up
